@@ -9,6 +9,11 @@ const CAPABILITIES = Object.freeze({
   "users.manage": Object.freeze(["Owner", "Admin"]),
   "users.reset_password": Object.freeze(["Owner"]),
   "nav.admin": Object.freeze(["Owner", "Admin"]),
+  "masters.view": Object.freeze(["Owner", "Admin"]),
+  "masters.edit": Object.freeze(["Owner", "Admin"]),
+  "targets.manage": Object.freeze(["Owner", "Admin"]),
+  "workspace.manage": Object.freeze(["Owner", "Admin"]),
+  "employees.manage": Object.freeze(["Owner", "Admin"]),
 });
 
 function hasCapability(role, capability) {

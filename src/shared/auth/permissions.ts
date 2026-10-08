@@ -9,6 +9,11 @@ export const CAPABILITIES = {
   "users.manage": ["Owner", "Admin"],
   "users.reset_password": ["Owner"],
   "nav.admin": ["Owner", "Admin"],
+  "masters.view": ["Owner", "Admin"],
+  "masters.edit": ["Owner", "Admin"],
+  "targets.manage": ["Owner", "Admin"],
+  "workspace.manage": ["Owner", "Admin"],
+  "employees.manage": ["Owner", "Admin"],
 } as const;
 
 export type Capability = keyof typeof CAPABILITIES;
