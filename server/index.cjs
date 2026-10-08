@@ -10,13 +10,14 @@ const { openDb } = require("./db.cjs");
 const S = require("./security.cjs");
 const { requireCapability, canManageRole } = require("./permissions.cjs");
 const { ADMIN_SCREENS, adminScreen } = require("./admin.cjs");
+const { writeAudit } = require("./audit.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
 const STATIC = path.resolve(process.env.CRM_STATIC || path.join(__dirname, "..", "dist"));
 const PG_URL = process.env.CRM_PG_URL || "";
 const PROXY_CONFIG = { behindProxy: process.env.CRM_BEHIND_PROXY === "1", publicIsHttps: String(process.env.CRM_PUBLIC_URL || "").startsWith("https:"), trustedProxies: new Set(String(process.env.CRM_TRUSTED_PROXIES || "").split(",").map((v) => v.trim()).filter(Boolean)) };
-const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role });
+const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, must_change_password: Boolean(u.must_change_password) });
 const LEAD_SORTS = {
   name: "name", stage: "stage", lead_status: "lead_status", permission: "permission",
   pso_date: "pso_date", next_follow_up_at: "next_follow_up_at", last_call_at: "last_call_at", updated_at: "updated_at",
@@ -120,6 +121,12 @@ async function leadDetail(req, res, db, id) {
   return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows });
 }
 
+async function transaction(db, work) {
+  if (typeof db.transaction === "function") return db.transaction(work);
+  await db.query("BEGIN");
+  try { const result = await work(db); await db.query("COMMIT"); return result; } catch (error) { await db.query("ROLLBACK").catch(() => {}); throw error; }
+}
+
 function json(res, status, body, headers = {}) { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers }); res.end(JSON.stringify(body)); }
 function readJson(req, limit = 16384) { return new Promise((resolve, reject) => { let size = 0; const chunks = []; req.on("data", (chunk) => { size += chunk.length; if (size > limit) reject(Object.assign(new Error("Request too large."), { status: 413 })); else chunks.push(chunk); }); req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); } catch { reject(Object.assign(new Error("Invalid JSON."), { status: 400 })); } }); req.on("error", reject); }); }
 const USER_ROLES = ["Sales", "Viewer", "Admin", "Owner"];
@@ -146,25 +153,26 @@ async function usersCreate(req, res, db, actor) {
   if (await db.userByEmail(email)) return userWriteError(res, 409, "User already exists.");
   const id = `user-${crypto.randomUUID()}`; const salt = crypto.randomBytes(16).toString("hex"); const hash = S.passwordHash(password, salt).toString("hex");
   try {
-    await db.query("BEGIN");
-    await db.query("INSERT INTO users (id, name, email, role, active, offboarded) VALUES ($1, $2, $3, $4, true, false)", [id, name, email, role]);
-    await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3)", [id, hash, salt]);
-    await db.query("COMMIT");
+    await transaction(db, async (tx) => {
+      await tx.query("INSERT INTO users (id, name, email, role, active, offboarded, must_change_password) VALUES ($1, $2, $3, $4, true, false, true)", [id, name, email, role]);
+      await tx.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3)", [id, hash, salt]);
+      await writeAudit(tx, { actorUserId: actor.id, action: "member.created", entityType: "user", entityId: id, newValue: role, ip: req.socket.remoteAddress });
+    });
     await clearUserWriteThrottle(db, actor);
     return json(res, 201, { user: publicMember({ id, name, email, role, active: true }) });
-  } catch {
-    await db.query("ROLLBACK").catch(() => {});
+  } catch (error) {
+    if (error && error.code === "23505") return userWriteError(res, 409, "User already exists.");
     return userWriteError(res, 500, "Unable to manage users.");
   }
 }
-async function usersDeactivate(req, res, db, actor, id) {
+async function usersDeactivate(req, res, db, actor, id, offboard = false) {
   if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
   const target = await db.userById(id);
   if (!target) return userWriteError(res, 404, "User not found.");
   if (target.id === actor.id || target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user cannot be deactivated.");
   try {
-    await db.query("BEGIN"); await db.query("DELETE FROM credentials WHERE user_id = $1", [id]); await db.query("DELETE FROM sessions WHERE user_id = $1", [id]); await db.query("UPDATE users SET active = false WHERE id = $1", [id]); await db.query("COMMIT"); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember({ ...target, active: false }) });
-  } catch { await db.query("ROLLBACK").catch(() => {}); return userWriteError(res, 500, "Unable to manage users."); }
+    await transaction(db, async (tx) => { await tx.query("DELETE FROM credentials WHERE user_id = $1", [id]); await tx.query("DELETE FROM sessions WHERE user_id = $1", [id]); await tx.query("UPDATE users SET active = false, offboarded = $2 WHERE id = $1", [id, offboard]); await writeAudit(tx, { actorUserId: actor.id, action: offboard ? "member.offboarded" : "member.deactivated", entityType: "user", entityId: id, oldValue: "active", newValue: offboard ? "offboarded" : "inactive", ip: req.socket.remoteAddress }); }); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember({ ...target, active: false, offboarded: offboard }) });
+  } catch { return userWriteError(res, 500, "Unable to manage users."); }
 }
 async function usersResetPassword(req, res, db, actor, id) {
   let body;
@@ -174,7 +182,16 @@ async function usersResetPassword(req, res, db, actor, id) {
   const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
   if (target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user cannot be edited.");
   const salt = crypto.randomBytes(16).toString("hex"); const hash = S.passwordHash(password, salt).toString("hex");
-  try { await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()", [id, hash, salt]); await db.query("DELETE FROM sessions WHERE user_id = $1", [id]); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember(target) }); } catch { return userWriteError(res, 500, "Unable to manage users."); }
+  try { await transaction(db, async (tx) => { await tx.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()", [id, hash, salt]); await tx.query("UPDATE users SET must_change_password = true WHERE id = $1", [id]); await tx.query("DELETE FROM sessions WHERE user_id = $1", [id]); await writeAudit(tx, { actorUserId: actor.id, action: "member.password_reset", entityType: "user", entityId: id, field: "password", newValue: "reset", ip: req.socket.remoteAddress }); }); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember(target) }); } catch { return userWriteError(res, 500, "Unable to manage users."); }
+}
+
+async function changePassword(req, res, db, user) {
+  let body;
+  try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid password data."); }
+  const password = String(body.new_password || "");
+  if (password.length < 12 || password !== String(body.confirm_password || "")) return userWriteError(res, 400, "Invalid password data.");
+  const salt = crypto.randomBytes(16).toString("hex"); const hash = S.passwordHash(password, salt).toString("hex");
+  try { await transaction(db, async (tx) => { await tx.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()", [user.id, hash, salt]); await tx.query("UPDATE users SET must_change_password = false WHERE id = $1", [user.id]); await writeAudit(tx, { actorUserId: user.id, action: "password.changed", entityType: "user", entityId: user.id, field: "password", newValue: "changed", ip: req.socket.remoteAddress }); }); return json(res, 200, { user: publicUser({ ...user, must_change_password: false }) }); } catch { return userWriteError(res, 500, "Unable to change password."); }
 }
 function staticFile(req, res) {
   const requested = decodeURIComponent(new URL(req.url || "/", "http://localhost").pathname);
@@ -192,10 +209,11 @@ async function login(req, res, db) {
   if (S.forwardedAddressMissing(req, PROXY_CONFIG)) return json(res, 500, { error: "This server is behind a proxy that is not forwarding the client address, so sign-in is refused until it does." });
   const hit = await S.isThrottled(db, req, email, PROXY_CONFIG); if (hit) { const mins = Math.max(1, Math.ceil((hit.until - Date.now()) / 60000)); return json(res, 429, { error: `${S.BUCKET_WORDS[hit.kind]} is locked for ${mins} more minute${mins === 1 ? "" : "s"} after too many wrong passwords.` }); }
   const user = await db.userByEmail(email); const ok = await db.checkPassword(user?.id, String(body.password || ""));
-  if (!ok) { try { await S.recordFailure(db, req, email, PROXY_CONFIG); } catch {} return json(res, 401, { error: "That email and password do not match." }); }
+  if (!ok) { try { await S.recordFailure(db, req, email, PROXY_CONFIG); } catch {} try { await writeAudit(db, { action: "auth.login_failed", entityType: "auth", entityId: email, newValue: "rejected", ip: req.socket.remoteAddress }); } catch {} return json(res, 401, { error: "That email and password do not match." }); }
   if (!user.active || user.offboarded) return json(res, 403, { error: "This account is switched off." });
   await db.throttleClear(S.accountBuckets(email));
   const token = await db.createSession(user.id, req.socket.remoteAddress || "");
+  try { await writeAudit(db, { actorUserId: user.id, action: "auth.login_succeeded", entityType: "auth", entityId: user.id, newValue: "session_created", ip: req.socket.remoteAddress }); } catch {}
   return json(res, 200, { ok: true, user: publicUser(user) }, { "Set-Cookie": S.sessionCookie(req, token, S.SESSION_SECONDS, PROXY_CONFIG) });
 }
 
@@ -209,6 +227,7 @@ async function route(req, res, db) {
   const token = S.sessionToken(req); const id = await db.sessionUser(token); const user = id ? await db.userById(id) : null;
   if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: publicUser(user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
+  if (url.pathname === "/api/change-password" && req.method === "POST") return changePassword(req, res, db, user);
   const adminMatch = url.pathname.match(/^\/api\/admin\/([^/]+)$/);
   if (adminMatch && req.method === "GET") {
     if (!requireCapability("nav.admin", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
@@ -223,12 +242,12 @@ async function route(req, res, db) {
     if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
     return safeUserOperation(res, () => usersCreate(req, res, db, user));
   }
-  const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/(deactivate|reset-password)$/);
+  const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/(deactivate|offboard|reset-password)$/);
   if (userMatch && req.method === "POST") {
     if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
     if (userMatch[2] === "reset-password" && !requireCapability("users.reset_password", user)) return userWriteError(res, 403, "You do not have permission to reset passwords.");
     const targetId = decodeURIComponent(userMatch[1]);
-    return safeUserOperation(res, () => userMatch[2] === "deactivate" ? usersDeactivate(req, res, db, user, targetId) : usersResetPassword(req, res, db, user, targetId));
+    return safeUserOperation(res, () => userMatch[2] === "reset-password" ? usersResetPassword(req, res, db, user, targetId) : usersDeactivate(req, res, db, user, targetId, userMatch[2] === "offboard"));
   }
   if (url.pathname === "/api/leads" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
@@ -243,7 +262,7 @@ async function route(req, res, db) {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     return leadDetail(req, res, db, decodeURIComponent(leadMatch[1]));
   }
-  if (url.pathname === "/api/logout" && req.method === "POST") { await db.dropSession(token); return json(res, 200, { ok: true }, { "Set-Cookie": S.sessionCookie(req, "", 0, PROXY_CONFIG) }); }
+  if (url.pathname === "/api/logout" && req.method === "POST") { await db.dropSession(token); try { await writeAudit(db, { actorUserId: user.id, action: "auth.logout", entityType: "auth", entityId: user.id, newValue: "session_deleted", ip: req.socket.remoteAddress }); } catch {} return json(res, 200, { ok: true }, { "Set-Cookie": S.sessionCookie(req, "", 0, PROXY_CONFIG) }); }
   return json(res, 404, { error: "Not found." });
 }
 
@@ -253,9 +272,9 @@ async function start() {
   await db.pruneSessions();
   await db.throttlePrune();
   setInterval(() => { db.pruneSessions().catch(() => {}); db.throttlePrune().catch(() => {}); }, 5 * 60000).unref();
-  const server = http.createServer((req, res) => route(req, res, db).catch((error) => json(res, error.status || 500, { error: error.message })));
+  const server = http.createServer((req, res) => route(req, res, db).catch(() => json(res, 500, { error: "Request failed." })));
   server.listen(PORT, HOST, () => console.log(`Altus CRM server listening on http://${HOST}:${PORT}`));
 }
 
-if (require.main === module) start().catch((error) => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) start().catch(() => { console.error("Server failed to start."); process.exitCode = 1; });
 module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS };

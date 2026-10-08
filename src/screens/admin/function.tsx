@@ -5,8 +5,6 @@ export type AdminScreenKey = "dashboard" | "call-history" | "analytics" | "assig
 type AdminValue = string | number | boolean | null;
 type AdminRow = Record<string, AdminValue>;
 type AdminResponse = { screen: AdminScreenKey; metrics?: AdminRow; rows?: AdminRow[]; rules?: AdminRow[]; note?: string };
-type LeadsFallback = { items: Array<Record<string, unknown>>; total: number };
-function adminValue(value: unknown): AdminValue { if (value === null || value === undefined) return null; if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value; return String(value); }
 
 export const ADMIN_SCREEN_COPY: Record<AdminScreenKey, { title: string; description: string }> = {
   dashboard: { title: "Today's Floor", description: "A live view of targets, calling activity, follow-ups, and the next work to do." },
@@ -36,24 +34,8 @@ export function useAdminScreen(screen: AdminScreenKey) {
     try {
       setData(await api<AdminResponse>(`/api/admin/${screen}`));
     } catch {
-      if (screen === "panel") {
-        try { const members = await api<{ users: AdminRow[] }>("/api/users"); setData({ screen, rows: members.users, note: "Showing current workspace members." }); return; } catch { setData({ screen, rows: [], note: "No member data is available." }); return; }
-      }
-      if (["templates", "import-export", "integrations", "audit", "process-flow"].includes(screen)) {
-        const notes: Record<string, string> = {
-          templates: "No imported template records are available yet.",
-          "import-export": "No import or export history is available yet.",
-          integrations: "No integration catalog records are available yet.",
-          audit: "No audit records are available yet.",
-          "process-flow": "The process flow is available after the legacy process configuration is imported.",
-        };
-        setData({ screen, rows: [], note: notes[screen] }); return;
-      }
-      try {
-        const fallback = await api<LeadsFallback>("/api/leads?page=1&page_size=100&sort=updated_at&direction=desc");
-        const rows = fallback.items.map((lead) => ({ id: adminValue(lead.id), name: adminValue(lead.name), company: adminValue(lead.company), stage: adminValue(lead.stage), permission: adminValue(lead.permission), owner: adminValue(lead.owner_user_id), status: adminValue(lead.lead_status), updated: adminValue(lead.updated_at) }));
-        setData({ screen, metrics: { total_leads: fallback.total }, rows, note: "Showing the imported lead dataset while this admin module is being connected." });
-      } catch { setData(null); setError(true); }
+      setData(null);
+      setError(true);
     } finally { setLoading(false); }
   }, [screen]);
   useEffect(() => { void load(); }, [load]);

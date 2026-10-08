@@ -215,7 +215,7 @@ CREATE INDEX IF NOT EXISTS leads_last_call_idx ON leads(last_call_at);
 CREATE INDEX IF NOT EXISTS leads_import_run_idx ON leads(import_run_id);
 `;
 
-const ROLE_MAP = { "Sales Person": "Sales", Admin: "Admin" };
+const ROLE_MAP = { "Sales Person": "Sales", User: "Sales", Admin: "Admin", "Super Admin": "Owner", Owner: "Owner" };
 const CORE_KEYS = new Set([
   "id", "name", "firstName", "lastName", "email", "cellNo", "altCellNo", "company", "designation",
   "city", "state", "pincode", "area", "location", "leadNo", "externalId", "sourceSystem", "leadSource",
@@ -501,6 +501,6 @@ async function main() {
   } finally { await source.end(); await target.end(); }
 }
 
-if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) main().catch(() => { console.error("Import failed."); process.exitCode = 1; });
 
 module.exports = { SCHEMA_SQL, ADMIN_DATA_SECTIONS, ADMIN_DATA_SCHEMA_SQL, ROLE_MAP, checksum, dateValue, numberValue };

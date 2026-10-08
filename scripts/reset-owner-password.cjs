@@ -76,6 +76,7 @@ async function main() {
     const salt = crypto.randomBytes(16).toString("hex");
     const hash = passwordHash(password, salt).toString("hex");
     await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()", [user.id, hash, salt]);
+    await db.query("UPDATE users SET must_change_password = true WHERE id = $1", [user.id]);
     await db.query("DELETE FROM sessions WHERE user_id = $1", [user.id]);
     finish("updated", 0);
   } catch {

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api/client";
 
-export type User = { id: string; name: string; email: string; role: string };
+export type User = { id: string; name: string; email: string; role: string; must_change_password?: boolean };
 type AuthContextValue = { user: User | null; loading: boolean; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void> };
 const AuthContext = createContext<AuthContextValue | null>(null);
 

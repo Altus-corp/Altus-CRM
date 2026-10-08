@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const readline = require("readline");
 const { openDb } = require("../server/db.cjs");
 const { passwordHash } = require("../server/security.cjs");
+const { writeAudit } = require("../server/audit.cjs");
 
 const ALLOWED_ROLES = new Set(["Sales", "Viewer", "Admin"]);
 let finished = false;
@@ -82,15 +83,9 @@ async function createUser(db) {
   const userId = `user-${crypto.randomUUID()}`;
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = passwordHash(password, salt).toString("hex");
-  await db.query("BEGIN");
   try {
-    await db.query("INSERT INTO users (id, name, email, role, active, offboarded) VALUES ($1, $2, $3, $4, true, false)", [userId, name, email, role]);
-    await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3)", [userId, hash, salt]);
-    await db.query("COMMIT");
-  } catch (error) {
-    await db.query("ROLLBACK").catch(() => {});
-    throw error;
-  }
+    await db.transaction(async (tx) => { await tx.query("INSERT INTO users (id, name, email, role, active, offboarded, must_change_password) VALUES ($1, $2, $3, $4, true, false, true)", [userId, name, email, role]); await tx.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3)", [userId, hash, salt]); await writeAudit(tx, { action: "member.created", entityType: "user", entityId: userId, newValue: role }); });
+  } catch (error) { throw error; }
   finish("created", 0);
 }
 
@@ -101,16 +96,9 @@ async function deleteUser(db) {
   const user = await db.userByEmail(email);
   if (!user) { finish("no such user", 5); return; }
   if (user.role === "Owner") { finish("unexpected error", 1); return; }
-  await db.query("BEGIN");
   try {
-    await db.query("DELETE FROM credentials WHERE user_id = $1", [user.id]);
-    await db.query("DELETE FROM sessions WHERE user_id = $1", [user.id]);
-    await db.query("UPDATE users SET active = false, offboarded = true WHERE id = $1", [user.id]);
-    await db.query("COMMIT");
-  } catch (error) {
-    await db.query("ROLLBACK").catch(() => {});
-    throw error;
-  }
+    await db.transaction(async (tx) => { await tx.query("DELETE FROM credentials WHERE user_id = $1", [user.id]); await tx.query("DELETE FROM sessions WHERE user_id = $1", [user.id]); await tx.query("UPDATE users SET active = false, offboarded = true WHERE id = $1", [user.id]); await writeAudit(tx, { action: "member.offboarded", entityType: "user", entityId: user.id, oldValue: "active", newValue: "offboarded" }); });
+  } catch (error) { throw error; }
   finish("deleted", 0);
 }
 
