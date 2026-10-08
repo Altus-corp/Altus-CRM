@@ -8,6 +8,8 @@ const path = require("path");
 const fs = require("fs");
 const { openDb } = require("./db.cjs");
 const S = require("./security.cjs");
+const { requireCapability, canManageRole } = require("./permissions.cjs");
+const { ADMIN_SCREENS, adminScreen } = require("./admin.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -54,11 +56,21 @@ function leadView(view) {
   return LEAD_VIEWS[view] || null;
 }
 
+const LEAD_COUNT_VIEWS = Object.freeze({ all: "TRUE", ...LEAD_VIEWS });
+
+async function leadsCounts(res, db) {
+  const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE ${predicate})::int AS "${key}"`);
+  const result = await db.query(`SELECT ${expressions.join(", ")} FROM leads l`, []);
+  const row = result.rows[0] || {};
+  const counts = Object.fromEntries(Object.keys(LEAD_COUNT_VIEWS).map((key) => [key, Number.isFinite(Number(row[key])) ? Number(row[key]) : 0]));
+  return json(res, 200, counts);
+}
+
 async function leadsList(req, res, db, url) {
   const params = [];
   const where = [];
   const bind = (value) => { params.push(value); return `$${params.length}`; };
-  const q = String(url.searchParams.get("q") || "").trim();
+  const q = String(url.searchParams.get("search") || url.searchParams.get("q") || "").trim();
   if (q) { const p = bind(`%${q}%`); where.push(`(l.name ILIKE ${p} OR l.email ILIKE ${p} OR l.company ILIKE ${p} OR l.phone ILIKE ${p} OR l.lead_no ILIKE ${p} OR l.external_id ILIKE ${p})`); }
   for (const [query, column] of [["stage", "l.stage"], ["permission", "l.permission"], ["owner", "l.owner_user_id"], ["lead_status", "l.lead_status"]]) {
     const value = String(url.searchParams.get(query) || "").trim(); if (value) where.push(`${column} = ${bind(value)}`);
@@ -92,7 +104,7 @@ async function leadsList(req, res, db, url) {
   const filterSql = where.length ? "WHERE " + where.join(" AND ") : "";
   const count = await db.query(`SELECT count(*)::int AS total FROM leads l ${filterSql}`, params);
   const listParams = params.slice(); listParams.push(pageSize, offset);
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.is_pre_ps_done FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   return json(res, 200, { items: rows.rows, page, page_size: pageSize, total: count.rows[0].total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
@@ -110,6 +122,60 @@ async function leadDetail(req, res, db, id) {
 
 function json(res, status, body, headers = {}) { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers }); res.end(JSON.stringify(body)); }
 function readJson(req, limit = 16384) { return new Promise((resolve, reject) => { let size = 0; const chunks = []; req.on("data", (chunk) => { size += chunk.length; if (size > limit) reject(Object.assign(new Error("Request too large."), { status: 413 })); else chunks.push(chunk); }); req.on("end", () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); } catch { reject(Object.assign(new Error("Invalid JSON."), { status: 400 })); } }); req.on("error", reject); }); }
+const USER_ROLES = ["Sales", "Viewer", "Admin", "Owner"];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const publicMember = (user) => ({ id: user.id, name: user.name, email: user.email, role: user.role, active: user.active });
+function userWriteError(res, status, error) { return json(res, status, { error }); }
+async function safeUserOperation(res, operation) { try { return await operation(); } catch { return userWriteError(res, 500, "Unable to manage users."); } }
+async function userWriteAllowed(db, req, user) {
+  const hit = await S.isThrottled(db, req, user.email, PROXY_CONFIG);
+  if (hit) return false;
+  return true;
+}
+async function clearUserWriteThrottle(db, user) { await db.throttleClear(S.accountBuckets(user.email)); }
+async function usersList(res, db) {
+  try { const rows = await db.query("SELECT id, name, email, role, active FROM users ORDER BY name ASC, id ASC"); return json(res, 200, { users: rows.rows.map(publicMember) }); } catch { return userWriteError(res, 500, "Unable to manage users."); }
+}
+async function usersCreate(req, res, db, actor) {
+  let body;
+  try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid user data."); }
+  const name = String(body.name || "").trim(); const email = String(body.email || "").trim().toLowerCase(); const role = String(body.role || "").trim(); const password = String(body.temporary_password || "");
+  if (!name || !EMAIL_RE.test(email) || !USER_ROLES.includes(role) || password.length < 12) return userWriteError(res, 400, "Invalid user data.");
+  if (!canManageRole(actor.role, role)) return userWriteError(res, 403, "You do not have permission to manage this role.");
+  if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
+  if (await db.userByEmail(email)) return userWriteError(res, 409, "User already exists.");
+  const id = `user-${crypto.randomUUID()}`; const salt = crypto.randomBytes(16).toString("hex"); const hash = S.passwordHash(password, salt).toString("hex");
+  try {
+    await db.query("BEGIN");
+    await db.query("INSERT INTO users (id, name, email, role, active, offboarded) VALUES ($1, $2, $3, $4, true, false)", [id, name, email, role]);
+    await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3)", [id, hash, salt]);
+    await db.query("COMMIT");
+    await clearUserWriteThrottle(db, actor);
+    return json(res, 201, { user: publicMember({ id, name, email, role, active: true }) });
+  } catch {
+    await db.query("ROLLBACK").catch(() => {});
+    return userWriteError(res, 500, "Unable to manage users.");
+  }
+}
+async function usersDeactivate(req, res, db, actor, id) {
+  if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
+  const target = await db.userById(id);
+  if (!target) return userWriteError(res, 404, "User not found.");
+  if (target.id === actor.id || target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user cannot be deactivated.");
+  try {
+    await db.query("BEGIN"); await db.query("DELETE FROM credentials WHERE user_id = $1", [id]); await db.query("DELETE FROM sessions WHERE user_id = $1", [id]); await db.query("UPDATE users SET active = false WHERE id = $1", [id]); await db.query("COMMIT"); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember({ ...target, active: false }) });
+  } catch { await db.query("ROLLBACK").catch(() => {}); return userWriteError(res, 500, "Unable to manage users."); }
+}
+async function usersResetPassword(req, res, db, actor, id) {
+  let body;
+  try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid user data."); }
+  const password = String(body.temporary_password || ""); if (password.length < 12) return userWriteError(res, 400, "Invalid user data.");
+  if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
+  const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
+  if (target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user cannot be edited.");
+  const salt = crypto.randomBytes(16).toString("hex"); const hash = S.passwordHash(password, salt).toString("hex");
+  try { await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()", [id, hash, salt]); await db.query("DELETE FROM sessions WHERE user_id = $1", [id]); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember(target) }); } catch { return userWriteError(res, 500, "Unable to manage users."); }
+}
 function staticFile(req, res) {
   const requested = decodeURIComponent(new URL(req.url || "/", "http://localhost").pathname);
   const relative = requested === "/" ? "/index.html" : requested;
@@ -143,9 +209,40 @@ async function route(req, res, db) {
   const token = S.sessionToken(req); const id = await db.sessionUser(token); const user = id ? await db.userById(id) : null;
   if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: publicUser(user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
-  if (url.pathname === "/api/leads" && req.method === "GET") return leadsList(req, res, db, url);
+  const adminMatch = url.pathname.match(/^\/api\/admin\/([^/]+)$/);
+  if (adminMatch && req.method === "GET") {
+    if (!requireCapability("nav.admin", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
+    if (!ADMIN_SCREENS.has(adminMatch[1])) return json(res, 404, { error: "Not found." });
+    return adminScreen(res, db, adminMatch[1]);
+  }
+  if (url.pathname === "/api/users" && req.method === "GET") {
+    if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
+    return safeUserOperation(res, () => usersList(res, db));
+  }
+  if (url.pathname === "/api/users" && req.method === "POST") {
+    if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
+    return safeUserOperation(res, () => usersCreate(req, res, db, user));
+  }
+  const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/(deactivate|reset-password)$/);
+  if (userMatch && req.method === "POST") {
+    if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
+    if (userMatch[2] === "reset-password" && !requireCapability("users.reset_password", user)) return userWriteError(res, 403, "You do not have permission to reset passwords.");
+    const targetId = decodeURIComponent(userMatch[1]);
+    return safeUserOperation(res, () => userMatch[2] === "deactivate" ? usersDeactivate(req, res, db, user, targetId) : usersResetPassword(req, res, db, user, targetId));
+  }
+  if (url.pathname === "/api/leads" && req.method === "GET") {
+    if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
+    return leadsList(req, res, db, url);
+  }
+  if (url.pathname === "/api/leads/counts" && req.method === "GET") {
+    if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
+    try { return await leadsCounts(res, db); } catch { return json(res, 500, { error: "Unable to load lead counts." }); }
+  }
   const leadMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
-  if (leadMatch && req.method === "GET") return leadDetail(req, res, db, decodeURIComponent(leadMatch[1]));
+  if (leadMatch && req.method === "GET") {
+    if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
+    return leadDetail(req, res, db, decodeURIComponent(leadMatch[1]));
+  }
   if (url.pathname === "/api/logout" && req.method === "POST") { await db.dropSession(token); return json(res, 200, { ok: true }, { "Set-Cookie": S.sessionCookie(req, "", 0, PROXY_CONFIG) }); }
   return json(res, 404, { error: "Not found." });
 }
@@ -161,4 +258,4 @@ async function start() {
 }
 
 if (require.main === module) start().catch((error) => { console.error(error.message); process.exitCode = 1; });
-module.exports = { login, route, publicUser, leadsList, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS };
+module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS };

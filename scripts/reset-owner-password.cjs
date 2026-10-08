@@ -46,26 +46,43 @@ function guardedUrl() {
   return value;
 }
 
+let finished = false;
+function finish(message, code) {
+  if (finished) return;
+  finished = true;
+  console.log(message);
+  process.exitCode = code;
+}
+
 async function main() {
   const connectionString = guardedUrl();
-  if (!connectionString) { process.exitCode = 1; return; }
+  if (!connectionString) { finish("guard failed", 3); return; }
   const email = (await readLine("Owner email: ")).toLowerCase();
   const password = await readHidden("New password: ");
   const confirmation = await readHidden("Repeat password: ");
-  if (!email || password === null || password !== confirmation || password.length < 20) { process.exitCode = 1; return; }
+  if (password !== null && password.length < 20) { finish("password too short (minimum 20)", 2); return; }
+  if (password === null || password !== confirmation) { finish("passwords do not match", 2); return; }
 
-  const db = await openDb(connectionString);
+  let db;
+  try {
+    db = await openDb(connectionString);
+  } catch {
+    finish("connection failed", 4);
+    return;
+  }
   try {
     const user = await db.userByEmail(email);
-    if (!user) { console.log("no such user"); return; }
+    if (!user) { finish("no such user", 5); return; }
     const salt = crypto.randomBytes(16).toString("hex");
     const hash = passwordHash(password, salt).toString("hex");
     await db.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET hash = EXCLUDED.hash, salt = EXCLUDED.salt, updated_at = now()", [user.id, hash, salt]);
     await db.query("DELETE FROM sessions WHERE user_id = $1", [user.id]);
-    console.log("updated");
+    finish("updated", 0);
+  } catch {
+    finish("unexpected error", 1);
   } finally {
-    await db.close();
+    await db.close().catch(() => {});
   }
 }
 
-main().catch(() => { process.exitCode = 1; });
+main().catch(() => finish("unexpected error", 1));

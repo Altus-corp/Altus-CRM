@@ -12,6 +12,70 @@ const CHILDREN = {
   lead_messages: "messages",
 };
 
+// Planning-only admin import sections. These definitions are intentionally not
+// executed by this script until the source dump has been reviewed and approved.
+const ADMIN_DATA_SECTIONS = Object.freeze([
+  "templates", "assignment_rules", "targets", "masters", "settings", "audit_log", "integrations", "call_analytics_inputs",
+]);
+
+const ADMIN_DATA_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS admin_templates (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, channel TEXT,
+  subject TEXT, body TEXT, active BOOLEAN NOT NULL DEFAULT true, version INTEGER NOT NULL DEFAULT 1,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS admin_templates_channel_active ON admin_templates (channel, active);
+
+CREATE TABLE IF NOT EXISTS assignment_rules (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
+  active BOOLEAN NOT NULL DEFAULT true, conditions JSONB NOT NULL DEFAULT '{}'::jsonb, actions JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS assignment_rules_active_priority ON assignment_rules (active, priority);
+
+CREATE TABLE IF NOT EXISTS user_targets (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, user_id TEXT REFERENCES users(id), target_date DATE NOT NULL,
+  calls_target INTEGER, registrations_target INTEGER, carry_forward INTEGER NOT NULL DEFAULT 0,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_targets_user_date ON user_targets (user_id, target_date);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, occurred_at TIMESTAMPTZ NOT NULL, actor_user_id TEXT REFERENCES users(id),
+  entity_type TEXT, entity_id TEXT, action TEXT NOT NULL, field TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_log_occurred_at ON audit_log (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS audit_log_actor ON audit_log (actor_user_id, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS master_values (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, master_type TEXT NOT NULL, code TEXT, label TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0, active BOOLEAN NOT NULL DEFAULT true, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS master_values_type_active ON master_values (master_type, active, sort_order);
+
+CREATE TABLE IF NOT EXISTS workspace_settings (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, setting_key TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'workspace',
+  value_json JSONB NOT NULL DEFAULT '{}'::jsonb, source_checksum TEXT NOT NULL,
+  import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (scope, setting_key)
+);
+
+CREATE TABLE IF NOT EXISTS integration_catalog (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, name TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT false,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS call_analytics_inputs (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, lead_id TEXT REFERENCES leads(id), user_id TEXT REFERENCES users(id),
+  occurred_at TIMESTAMPTZ, status TEXT, duration_seconds INTEGER, resolution TEXT,
+  source_checksum TEXT NOT NULL, import_run_id TEXT NOT NULL REFERENCES import_runs(id), imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS call_analytics_inputs_date ON call_analytics_inputs (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS call_analytics_inputs_user ON call_analytics_inputs (user_id, occurred_at DESC);
+`;
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS import_runs (
   id TEXT PRIMARY KEY,
@@ -439,4 +503,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
 
-module.exports = { SCHEMA_SQL, ROLE_MAP, checksum, dateValue, numberValue };
+module.exports = { SCHEMA_SQL, ADMIN_DATA_SECTIONS, ADMIN_DATA_SCHEMA_SQL, ROLE_MAP, checksum, dateValue, numberValue };

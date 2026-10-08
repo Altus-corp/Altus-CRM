@@ -1,2 +1,3 @@
 import { useMarketingScreen } from "./function";
-export function MarketingPage() { return <div className="page"><h1>{useMarketingScreen()}</h1></div>; }
+import { WorkspaceDataPage } from "../workspace-data/page";
+export function MarketingPage() { return <WorkspaceDataPage title={useMarketingScreen()} view="new_leads" note="Marketing leads from the imported workspace." />; }

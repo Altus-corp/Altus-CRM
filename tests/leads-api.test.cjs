@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { leadsList, leadDetail, leadView, route } = require("../server/index.cjs");
+const { leadsList, leadsCounts, leadDetail, leadView, route } = require("../server/index.cjs");
 
 function response() {
   return {
@@ -28,6 +28,49 @@ test("GET leads is auth protected", async () => {
   const res = response();
   await route(getRequest("/api/leads"), res, db);
   assert.equal(res.status, 401);
+});
+
+test("GET lead counts returns 401, 403, and numeric-only 200 responses", async () => {
+  const unauthenticated = response();
+  await route(getRequest("/api/leads/counts"), unauthenticated, { sessionUser: async () => null, userById: async () => null });
+  assert.equal(unauthenticated.status, 401);
+
+  const forbidden = response();
+  await route(getRequest("/api/leads/counts"), forbidden, { sessionUser: async () => "u1", userById: async () => ({ id: "u1", role: "Unknown" }) });
+  assert.equal(forbidden.status, 403);
+
+  const allowed = response();
+  const db = { sessionUser: async () => "u1", userById: async () => ({ id: "u1", role: "Viewer" }), query: async (sql, params) => { assert.match(sql, /COUNT\(\*\) FILTER/); assert.deepEqual(params, []); return { rows: [{ all: 8, database: 2, permission_granted: 3 }] }; } };
+  await route(getRequest("/api/leads/counts"), allowed, db);
+  assert.equal(allowed.status, 200);
+  const body = JSON.parse(allowed.body);
+  assert.equal(body.all, 8);
+  assert.equal(body.database, 2);
+  assert.equal(body.permission_granted, 3);
+  assert.deepEqual(Object.values(body).every((value) => Number.isInteger(value) && value >= 0), true);
+});
+
+test("GET leads requires leads.view and permits a Viewer fixture", async () => {
+  const forbidden = response();
+  await route(getRequest("/api/leads"), forbidden, { sessionUser: async () => "u1", userById: async () => ({ id: "u1", role: "Unknown" }) });
+  assert.equal(forbidden.status, 403);
+  assert.deepEqual(JSON.parse(forbidden.body), { error: "You do not have permission to access this resource." });
+
+  const allowed = response();
+  const db = { sessionUser: async () => "u1", userById: async () => ({ id: "u1", role: "Viewer" }), query: async (sql) => sql.startsWith("SELECT count") ? { rows: [{ total: 0 }] } : { rows: [] } };
+  await route(getRequest("/api/leads"), allowed, db);
+  assert.equal(allowed.status, 200);
+});
+
+test("GET lead detail requires leads.view and permits a Viewer fixture", async () => {
+  const forbidden = response();
+  await route(getRequest("/api/leads/fixture-lead"), forbidden, { sessionUser: async () => "u1", userById: async () => ({ id: "u1", role: "Unknown" }) });
+  assert.equal(forbidden.status, 403);
+
+  const allowed = response();
+  const db = { sessionUser: async () => "u1", userById: async () => ({ id: "u1", role: "Viewer" }), query: async (sql) => sql.startsWith("SELECT * FROM leads") ? { rows: [{ id: "fixture-lead" }] } : { rows: [] } };
+  await route(getRequest("/api/leads/fixture-lead"), allowed, db);
+  assert.equal(allowed.status, 200);
 });
 
 test("lead list uses parameterized filters and caps page size at 100", async () => {

@@ -1,2 +1,3 @@
 import { useAccountsContactsScreen } from "./function";
-export function AccountsContactsPage() { return <div className="page"><h1>{useAccountsContactsScreen()}</h1></div>; }
+import { WorkspaceDataPage } from "../workspace-data/page";
+export function AccountsContactsPage() { return <WorkspaceDataPage title={useAccountsContactsScreen()} note="Accounts and contacts from the imported lead dataset." />; }

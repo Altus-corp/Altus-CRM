@@ -1,2 +1,3 @@
 import { useQuotesInvoicingScreen } from "./function";
-export function QuotesInvoicingPage() { return <div className="page"><h1>{useQuotesInvoicingScreen()}</h1></div>; }
+import { WorkspaceDataPage } from "../workspace-data/page";
+export function QuotesInvoicingPage() { return <WorkspaceDataPage title={useQuotesInvoicingScreen()} view="sale_registration" note="Registration and sales records from the imported workspace." />; }

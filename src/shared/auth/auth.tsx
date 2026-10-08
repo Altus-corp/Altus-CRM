@@ -12,7 +12,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextValue = {
     user, loading,
     login: async (email, password) => { const r = await api<{ user: User }>("/api/login", { method: "POST", body: JSON.stringify({ email, password }) }); setUser(r.user); },
-    logout: async () => { await api("/api/logout", { method: "POST" }); setUser(null); },
+    logout: async () => { try { await api("/api/logout", { method: "POST" }); } finally { setUser(null); } },
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
