@@ -8,6 +8,7 @@ ALTER TABLE master_values ADD COLUMN IF NOT EXISTS is_final BOOLEAN NOT NULL DEF
 ALTER TABLE user_targets ADD COLUMN IF NOT EXISTS week_start DATE;
 ALTER TABLE user_targets ADD COLUMN IF NOT EXISTS quarter_start DATE;
 ALTER TABLE user_targets ADD COLUMN IF NOT EXISTS absent BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE user_targets ADD COLUMN IF NOT EXISTS day_override INTEGER;
 ALTER TABLE assignment_rules ADD COLUMN IF NOT EXISTS conditions JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE assignment_rules ADD COLUMN IF NOT EXISTS actions JSONB NOT NULL DEFAULT '{}'::jsonb;
 
@@ -37,7 +38,7 @@ CREATE TABLE IF NOT EXISTS user_targets (
   id TEXT PRIMARY KEY, source_id TEXT UNIQUE, user_id TEXT REFERENCES users(id),
   target_date DATE, weekday INTEGER, week_start DATE, quarter_start DATE,
   non_keynote_target INTEGER NOT NULL DEFAULT 0, keynote_target INTEGER NOT NULL DEFAULT 0,
-  total_target INTEGER NOT NULL DEFAULT 0, week_override INTEGER, quarter_override INTEGER,
+  total_target INTEGER NOT NULL DEFAULT 0, day_override INTEGER, week_override INTEGER, quarter_override INTEGER,
   absent BOOLEAN NOT NULL DEFAULT false, source_checksum TEXT,
   import_run_id TEXT REFERENCES import_runs(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
