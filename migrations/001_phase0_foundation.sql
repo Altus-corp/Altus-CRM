@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS lead_calls (id TEXT PRIMARY KEY, source_id TEXT UNIQU
 CREATE TABLE IF NOT EXISTS lead_followups (id TEXT PRIMARY KEY, source_id TEXT UNIQUE, lead_id TEXT REFERENCES leads(id) ON DELETE CASCADE, assigned_to TEXT REFERENCES users(id), due_at TIMESTAMPTZ, status TEXT, note TEXT, completed_at TIMESTAMPTZ, custom_values JSONB NOT NULL DEFAULT '{}'::jsonb, source_checksum TEXT, import_run_id TEXT);
 CREATE TABLE IF NOT EXISTS lead_history (id TEXT PRIMARY KEY, source_id TEXT UNIQUE, lead_id TEXT REFERENCES leads(id) ON DELETE CASCADE, occurred_at TIMESTAMPTZ, actor_id TEXT, action TEXT, entity TEXT, entity_id TEXT, field TEXT, from_value TEXT, to_value TEXT, note TEXT, custom_values JSONB NOT NULL DEFAULT '{}'::jsonb, source_checksum TEXT, import_run_id TEXT);
 CREATE TABLE IF NOT EXISTS lead_messages (id TEXT PRIMARY KEY, source_id TEXT UNIQUE, lead_id TEXT REFERENCES leads(id) ON DELETE CASCADE, sent_at TIMESTAMPTZ, channel TEXT, status TEXT, sender TEXT, body TEXT, custom_values JSONB NOT NULL DEFAULT '{}'::jsonb, source_checksum TEXT, import_run_id TEXT);
+CREATE TABLE IF NOT EXISTS unlinked_messages (id TEXT PRIMARY KEY, source_id TEXT UNIQUE, source_checksum TEXT, import_run_id TEXT, raw JSONB NOT NULL, imported_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage);
 CREATE INDEX IF NOT EXISTS leads_owner_idx ON leads(owner_user_id);
 CREATE INDEX IF NOT EXISTS lead_calls_lead_idx ON lead_calls(lead_id,happened_at DESC);

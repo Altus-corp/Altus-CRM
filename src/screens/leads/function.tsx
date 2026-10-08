@@ -35,7 +35,7 @@ const VIEW_OPTIONS = LEAD_VIEW_GROUPS.flatMap((group) => group.views);
 function formatDate(value: string | null | undefined) { return value ? new Date(value).toLocaleDateString() : "—"; }
 
 export function useLeadsScreen() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedView = searchParams.get("view") || "";
   const initialView = LEAD_VIEWS.some(([key]) => key === requestedView) ? requestedView : "";
   const [view, setView] = useState(initialView); const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS); const [page, setPage] = useState(1);
@@ -43,6 +43,7 @@ export function useLeadsScreen() {
   const [viewCounts, setViewCounts] = useState<Record<string, number | null>>(() => Object.fromEntries(LEAD_VIEWS.map(([key]) => [key, null])));
   const [viewMenuOpen, setViewMenuOpen] = useState(false); const [activeViewIndex, setActiveViewIndex] = useState(0);
   const [loading, setLoading] = useState(true); const [detailLoading, setDetailLoading] = useState(false); const [error, setError] = useState("");
+  const [newLeadForm, setNewLeadForm] = useState({ name: "", email: "", phone: "", company: "", lead_type: "DL", permission: "Pending", products: "" });
   const viewMenuRef = useRef<HTMLDivElement>(null); const viewButtonRef = useRef<HTMLButtonElement>(null); const viewOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const queryParams = useMemo(() => { const params = new URLSearchParams({ sort: "updated_at", direction: "desc" }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return params; }, [filters]);
   const query = useMemo(() => { const params = new URLSearchParams(queryParams); params.set("page", String(page)); params.set("page_size", "50"); if (view) params.set("view", view); return params.toString(); }, [page, queryParams, view]);
@@ -56,6 +57,8 @@ export function useLeadsScreen() {
   useEffect(() => { const id = searchParams.get("open"); if (id) void openDetail(id); }, [openDetail, searchParams]);
   function updateFilter(key: keyof LeadFilters, value: string) { setPage(1); setFilters((current) => ({ ...current, [key]: value })); }
   function clearFilters() { setPage(1); setView(""); setFilters({ ...EMPTY_FILTERS }); }
+  function closeNewLead() { const next = new URLSearchParams(searchParams); next.delete("new"); setSearchParams(next); }
+  async function createNewLead(event: React.FormEvent) { event.preventDefault(); setError(""); try { await api("/api/leads", { method: "POST", body: JSON.stringify({ ...newLeadForm, products: newLeadForm.products.split(",").map((product_code) => ({ product_code: product_code.trim() })).filter((product) => product.product_code) }) }); setNewLeadForm({ name: "", email: "", phone: "", company: "", lead_type: "DL", permission: "Pending", products: "" }); closeNewLead(); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
   function openViewMenu() { setActiveViewIndex(Math.max(0, VIEW_OPTIONS.findIndex(([key]) => key === view))); setViewMenuOpen(true); }
   function closeViewMenu(restoreFocus = false) { setViewMenuOpen(false); if (restoreFocus) requestAnimationFrame(() => viewButtonRef.current?.focus()); }
   function chooseView(next: string) { setPage(1); setView(next); closeViewMenu(true); }
@@ -64,7 +67,7 @@ export function useLeadsScreen() {
   const totalPages = Math.max(1, Math.ceil((data?.total || 0) / (data?.page_size || 50)));
   const currentViewLabel = viewByKey.get(view as LeadViewKey)?.[1] || "All Leads";
   const filtersActive = !!view || Object.values(filters).some(Boolean);
-  return { data, detail, detailLoading, error, filters, filtersActive, loading, page, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, formatDate, load, openDetail, closeDetail: () => setDetail(null), chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, clearFilters, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)) };
+  return { data, detail, detailLoading, error, filters, filtersActive, loading, page, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, formatDate, load, openDetail, closeDetail: () => setDetail(null), closeNewLead, createNewLead, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, clearFilters, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)) };
 }
 
 export function fieldValue(lead: Lead, key: string) {

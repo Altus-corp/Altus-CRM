@@ -123,5 +123,5 @@ test("lead detail returns the lead and all four read-only child collections", as
   const body = JSON.parse(res.body);
   assert.equal(res.status, 200);
   assert.equal(body.lead.id, "fixture-lead");
-  assert.deepEqual(Object.keys(body).sort(), ["calls", "followups", "history", "lead", "messages"]);
+  assert.deepEqual(Object.keys(body).sort(), ["calls", "followups", "history", "lead", "messages", "products"]);
 });

@@ -4,8 +4,8 @@ const { CAPABILITIES, hasCapability } = require("../server/permissions.cjs");
 
 test("capability map covers every role and capability", () => {
   const expected = {
-    Owner: ["leads.view", "leads.edit", "leads.assign", "leads.export", "settings.view", "users.manage", "users.reset_password", "nav.admin", "masters.view", "masters.edit", "targets.manage", "workspace.manage", "employees.manage"],
-    Admin: ["leads.view", "leads.edit", "leads.assign", "leads.export", "settings.view", "users.manage", "nav.admin", "masters.view", "masters.edit", "targets.manage", "workspace.manage", "employees.manage"],
+    Owner: ["leads.view", "leads.edit", "leads.permission", "leads.assign", "leads.export", "settings.view", "users.manage", "users.reset_password", "nav.admin", "masters.view", "masters.edit", "targets.manage", "workspace.manage", "employees.manage"],
+    Admin: ["leads.view", "leads.edit", "leads.permission", "leads.assign", "leads.export", "settings.view", "users.manage", "nav.admin", "masters.view", "masters.edit", "targets.manage", "workspace.manage", "employees.manage"],
     Sales: ["leads.view", "leads.edit"],
     Viewer: ["leads.view"],
   };

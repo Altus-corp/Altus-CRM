@@ -10,7 +10,8 @@ const admin = { id: "admin-1", name: "Admin", email: "admin@example.invalid", ro
 const sales = { id: "sales-1", name: "Sales", email: "sales@example.invalid", role: "Sales", active: true, offboarded: false };
 
 test("master create/update/disable persists flags and is role protected", async () => {
-  const forbidden = response(); await route(request("POST", "/api/masters", { master_type: "resolution", label: "No answer", is_no_answer: true }), forbidden, dbFor(sales)); assert.equal(forbidden.status, 403);
+  for (const actor of [sales, { ...sales, role: "Viewer" }]) { const forbidden = response(); await route(request("POST", "/api/masters", { master_type: "resolution", label: "No answer", is_no_answer: true }), forbidden, dbFor(actor)); assert.equal(forbidden.status, 403); }
+  for (const actor of [admin, owner]) { const db = dbFor(actor); const created = response(); await route(request("POST", "/api/masters", { master_type: "resolution", label: "No answer", is_no_answer: true, is_connected: false }), created, db); assert.equal(created.status, 201); assert.ok(db.sql.some((sql) => sql.includes("is_no_answer"))); }
   const db = dbFor(admin); const created = response(); await route(request("POST", "/api/masters", { master_type: "resolution", label: "No answer", is_no_answer: true, is_connected: false }), created, db); assert.equal(created.status, 201); assert.ok(db.sql.some((sql) => sql.includes("is_no_answer")));
   const updated = response(); await route(request("POST", "/api/masters/master-1", { master_type: "resolution", label: "Disabled", active: false, is_final: true }), updated, db); assert.equal(updated.status, 200); assert.ok(db.sql.filter((sql) => sql.includes("audit_log")).length >= 2);
 });

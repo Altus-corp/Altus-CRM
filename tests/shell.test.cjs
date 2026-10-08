@@ -21,7 +21,7 @@ test("shell keeps role-gated new lead, theme, logout, and collapsed navbar hooks
   const source = shell();
   assert.match(source, /usePermission\("leads\.edit"\)/);
   assert.match(source, /\{canCreateLead &&/);
-  assert.match(source, /Coming soon/);
+  assert.match(source, /navigate\("\/leads\?new=1"\)/);
   assert.match(source, /toggleTheme/);
   assert.match(source, /signOut\(logout, navigate\)/);
   assert.match(source, /<Navbar collapsed=\{collapsed\}/);

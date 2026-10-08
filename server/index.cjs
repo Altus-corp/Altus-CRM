@@ -58,6 +58,12 @@ function leadView(view) {
 }
 
 const LEAD_COUNT_VIEWS = Object.freeze({ all: "TRUE", ...LEAD_VIEWS });
+const LEAD_TYPES = Object.freeze({ DL: "P3", L: "P3", QDL: "P3", QL: "P2", R: "P1" });
+const LEAD_STAGES = new Set(["database", "lead", "qualified", "reference", "assigned", "calling", "registered", "prepso", "attended", "notattended", "psreg", "preps", "billed"]);
+const PRODUCT_FUNNELS = Object.freeze({ Keynote: "keynote" });
+function leadTypeValue(value) { const type = String(value || "").trim().toUpperCase(); return Object.prototype.hasOwnProperty.call(LEAD_TYPES, type) ? type : null; }
+function leadPriority(type) { return LEAD_TYPES[type]; }
+function leadProductRows(leadId, products) { return products.map((product) => { const code = String(product?.product_code || product?.code || "").trim(); if (!code) throw Object.assign(new Error("Invalid product"), { status: 400 }); return { id: `lead-product-${crypto.randomUUID()}`, lead_id: leadId, product_code: code, stage: String(product.stage || "lead"), call_stage: String(product.call_stage || "lead"), funnel: PRODUCT_FUNNELS[code] || "standard" }; }); }
 
 async function leadsCounts(res, db) {
   const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE ${predicate})::int AS "${key}"`);
@@ -112,19 +118,47 @@ async function leadsList(req, res, db, url) {
 async function leadDetail(req, res, db, id) {
   const lead = (await db.query("SELECT * FROM leads WHERE id = $1", [id])).rows[0];
   if (!lead) return json(res, 404, { error: "Lead not found." });
-  const [calls, followups, history, messages] = await Promise.all([
+  const [calls, followups, history, messages, products] = await Promise.all([
     db.query("SELECT * FROM lead_calls WHERE lead_id = $1 ORDER BY happened_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_followups WHERE lead_id = $1 ORDER BY due_at ASC NULLS LAST, id ASC", [id]),
     db.query("SELECT * FROM lead_history WHERE lead_id = $1 ORDER BY occurred_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_messages WHERE lead_id = $1 ORDER BY sent_at DESC NULLS LAST, id DESC", [id]),
+    db.query("SELECT * FROM lead_products WHERE lead_id = $1 ORDER BY product_code ASC, id ASC", [id]),
   ]);
-  return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows });
+  return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, products: products.rows });
 }
 
 async function transaction(db, work) {
   if (typeof db.transaction === "function") return db.transaction(work);
   await db.query("BEGIN");
   try { const result = await work(db); await db.query("COMMIT"); return result; } catch (error) { await db.query("ROLLBACK").catch(() => {}); throw error; }
+}
+
+function invalidLead(res) { return json(res, 400, { error: "Invalid lead data." }); }
+function duplicateLeadError(res) { return json(res, 409, { error: "Possible duplicate lead." }); }
+async function findLeadDuplicates(db, phone, email, excludeId = null) {
+  const rows = await db.query("SELECT id FROM leads WHERE (($1 IS NOT NULL AND phone = $1) OR ($2 IS NOT NULL AND lower(email) = lower($2))) AND ($3 IS NULL OR id <> $3) ORDER BY id ASC", [phone || null, email || null, excludeId]);
+  return rows.rows;
+}
+function leadFields(body) {
+  const type = leadTypeValue(body.lead_type); if (!type) return null;
+  const name = String(body.name || "").trim(); if (!name) return null;
+  const permission = String(body.permission || "Pending"); if (!["Yes", "No", "Pending"].includes(permission)) return null;
+  const stage = String(body.stage || "lead"); if (!LEAD_STAGES.has(stage)) return null;
+  return { name, email: String(body.email || "").trim() || null, phone: String(body.phone || "").trim() || null, company: String(body.company || "").trim() || null, lead_type: type, priority: leadPriority(type), stage, permission, lead_status: String(body.lead_status || "").trim() || null, owner_user_id: body.owner_user_id ? String(body.owner_user_id) : null, pso_date: body.pso_date || null, custom_values: body.custom_values && typeof body.custom_values === "object" ? body.custom_values : {}, legacy_finance: body.legacy_finance && typeof body.legacy_finance === "object" ? body.legacy_finance : {} };
+}
+async function createLead(req, res, db, actor) {
+  const body = await readJson(req); if (body.permission && body.permission !== "Pending" && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields(body); if (!fields) return invalidLead(res);
+  const duplicates = await findLeadDuplicates(db, fields.phone, fields.email); if (duplicates.length && body.duplicate_action !== "merge") return duplicateLeadError(res);
+  const products = leadProductRows("pending", Array.isArray(body.products) ? body.products : []); const targetId = duplicates[0]?.id || `lead-${crypto.randomUUID()}`;
+  try { await transaction(db, async (tx) => { if (duplicates.length) { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,lead_type=$6,priority=$7,stage=$8,permission=$9,lead_status=$10,owner_user_id=$11,pso_date=$12,custom_values=$13,legacy_finance=$14,updated_at=now() WHERE id=$1", [targetId, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.merged", entityType: "lead", entityId: targetId, newValue: "duplicate_merge", ip: req.socket.remoteAddress }); } else { await tx.query("INSERT INTO leads (id,name,email,phone,company,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,custom_values,legacy_finance,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())", [targetId, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.created", entityType: "lead", entityId: targetId, newValue: fields.lead_type, ip: req.socket.remoteAddress }); } for (const product of products) { await tx.query("INSERT INTO lead_products (id,lead_id,product_code,stage,call_stage,funnel) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,call_stage=EXCLUDED.call_stage,funnel=EXCLUDED.funnel,updated_at=now()", [product.id, targetId, product.product_code, product.stage, product.call_stage, product.funnel]); } }); return json(res, duplicates.length ? 200 : 201, { id: targetId, merged: Boolean(duplicates.length) }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
+}
+async function updateLead(req, res, db, actor, id) {
+  const body = await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); if (body.permission !== undefined && body.permission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields({ ...current, ...body }); if (!fields) return invalidLead(res); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,lead_type=$6,priority=$7,stage=$8,permission=$9,lead_status=$10,owner_user_id=$11,pso_date=$12,custom_values=$13,legacy_finance=$14,updated_at=now() WHERE id=$1", [id, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
+}
+async function changeLeadStage(req, res, db, actor, id) { const body = await readJson(req); const stage = String(body.stage || ""); if (!LEAD_STAGES.has(stage)) return invalidLead(res); try { await transaction(db, async (tx) => { const current = (await tx.query("SELECT stage FROM leads WHERE id=$1", [id])).rows[0]; if (!current) throw Object.assign(new Error("missing"), { status: 404 }); await tx.query("UPDATE leads SET stage=$2,updated_at=now() WHERE id=$1", [id, stage]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.stage_changed", entityType: "lead", entityId: id, field: "stage", oldValue: current.stage, newValue: stage, ip: req.socket.remoteAddress }); }); return json(res, 200, { id, stage }); } catch (error) { return json(res, error.status === 404 ? 404 : 500, { error: error.status === 404 ? "Lead not found." : "Unable to change lead stage." }); } }
+async function changeLeadPermission(req, res, db, actor, id) { const body = await readJson(req); const permission = String(body.permission || ""); if (!["Yes", "No", "Pending"].includes(permission)) return invalidLead(res); try { await transaction(db, async (tx) => { const current = (await tx.query("SELECT permission FROM leads WHERE id=$1", [id])).rows[0]; if (!current) throw Object.assign(new Error("missing"), { status: 404 }); await tx.query("UPDATE leads SET permission=$2,updated_at=now() WHERE id=$1", [id, permission]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.permission_changed", entityType: "lead", entityId: id, field: "permission", oldValue: current.permission, newValue: permission, ip: req.socket.remoteAddress }); }); return json(res, 200, { id, permission }); } catch (error) { return json(res, error.status === 404 ? 404 : 500, { error: error.status === 404 ? "Lead not found." : "Unable to change permission." }); } }
+async function updateLeadProducts(req, res, db, actor, id) { const body = await readJson(req); if (!Array.isArray(body.products)) return invalidLead(res); const products = leadProductRows(id, body.products); try { await transaction(db, async (tx) => { for (const product of products) await tx.query("INSERT INTO lead_products (id,lead_id,product_code,stage,call_stage,funnel) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,call_stage=EXCLUDED.call_stage,funnel=EXCLUDED.funnel,updated_at=now()", [product.id, id, product.product_code, product.stage, product.call_stage, product.funnel]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.products_updated", entityType: "lead", entityId: id, newValue: "products", ip: req.socket.remoteAddress }); }); return json(res, 200, { id, product_count: products.length }); } catch { return json(res, 500, { error: "Unable to save lead products." }); }
 }
 
 function json(res, status, body, headers = {}) { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers }); res.end(JSON.stringify(body)); }
@@ -205,7 +239,7 @@ async function mastersList(req, res, db) {
 async function masterWrite(req, res, db, actor, id = null) {
   const body = await readJson(req); const masterType = String(body.master_type || "").trim(); const label = String(body.label || "").trim();
   if (!masterType || !label) return userWriteError(res, 400, "Invalid master value.");
-  if (masterType === "resolution" && actor.role !== "Admin") return userWriteError(res, 403, "Only Admin may add resolutions.");
+  if (masterType === "resolution" && !["Admin", "Owner"].includes(actor.role)) return userWriteError(res, 403, "Only Admin or Owner may add resolutions.");
   const values = [String(body.source_id || id || `master-${crypto.randomUUID()}`), masterType, String(body.code || "").trim() || null, label, String(body.colour || "").trim() || null, Number.isInteger(body.sort_order) ? body.sort_order : 0, body.active !== false, body.value && typeof body.value === "object" ? body.value : {}, ...MASTER_FLAG_FIELDS.map((field) => body[field] === true)];
   const targetId = id || `master-${crypto.randomUUID()}`;
   await transaction(db, async (tx) => { await tx.query(`INSERT INTO master_values (id,source_id,master_type,code,label,colour,sort_order,active,value,${MASTER_FLAG_FIELDS.join(",")},updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,${MASTER_FLAG_FIELDS.map((_, i) => `$${10 + i}`).join(",")},now()) ON CONFLICT (id) DO UPDATE SET master_type=EXCLUDED.master_type,code=EXCLUDED.code,label=EXCLUDED.label,colour=EXCLUDED.colour,sort_order=EXCLUDED.sort_order,active=EXCLUDED.active,value=EXCLUDED.value,${MASTER_FLAG_FIELDS.map((field) => `${field}=EXCLUDED.${field}`).join(",")},updated_at=now()`, [targetId, ...values]); await writeAudit(tx, { actorUserId: actor.id, action: id ? "master.updated" : "master.created", entityType: "master_value", entityId: targetId, newValue: masterType, ip: req.socket.remoteAddress }); });
@@ -293,6 +327,11 @@ async function route(req, res, db) {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     try { return await leadsCounts(res, db); } catch { return json(res, 500, { error: "Unable to load lead counts." }); }
   }
+  if (url.pathname === "/api/leads" && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return createLead(req, res, db, user); }
+  const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);
+  if (leadWriteMatch && req.method === "POST") { const id = decodeURIComponent(leadWriteMatch[1]); if (leadWriteMatch[2] === "permission") { if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." }); return changeLeadPermission(req, res, db, user, id); } if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id); }
+  const leadUpdateMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
+  if (leadUpdateMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return updateLead(req, res, db, user, decodeURIComponent(leadUpdateMatch[1])); }
   const leadMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
   if (leadMatch && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });

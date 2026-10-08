@@ -3,6 +3,7 @@ import { useAuth } from "./auth";
 export const CAPABILITIES = {
   "leads.view": ["Owner", "Admin", "Sales", "Viewer"],
   "leads.edit": ["Owner", "Admin", "Sales"],
+  "leads.permission": ["Owner", "Admin"],
   "leads.assign": ["Owner", "Admin"],
   "leads.export": ["Owner", "Admin"],
   "settings.view": ["Owner", "Admin"],
