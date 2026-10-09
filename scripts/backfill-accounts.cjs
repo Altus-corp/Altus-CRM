@@ -1,17 +1,10 @@
 "use strict";
 
+const { guardedDatabaseUrl, reportFailure, databaseTarget } = require("../server/load-env.cjs");
 require("../server/load-env.cjs")();
 
 const crypto = require("crypto");
 const { Client } = require("pg");
-
-function guardedUrl() {
-  const value = process.env.CRM_PG_URL;
-  if (!value) return null;
-  let url;
-  try { url = new URL(value); } catch { return null; }
-  return ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "5435" && url.pathname.replace(/^\//, "") === "crm_dev" ? value : null;
-}
 
 function mode() {
   const args = new Set(process.argv.slice(2));
@@ -60,10 +53,10 @@ async function apply(client) {
 }
 
 async function main() {
-  const connectionString = guardedUrl();
-  if (!connectionString) { console.log("guard failed"); process.exitCode = 3; return; }
+  const guarded = guardedDatabaseUrl();
+  if (!guarded.ok) { reportFailure("backfill", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
   const selectedMode = mode();
-  const client = new Client({ connectionString });
+  const client = new Client({ connectionString: guarded.value });
   try {
     await client.connect();
     if (selectedMode === "dry-run") {
@@ -74,8 +67,8 @@ async function main() {
     await client.query("BEGIN");
     try { console.log(JSON.stringify({ mode: selectedMode, ...(await apply(client)) })); await client.query("COMMIT"); }
     catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
-  } catch { console.log("backfill failed"); process.exitCode = 1; }
+  } catch (error) { reportFailure("backfill", error, "Check PostgreSQL availability and credentials.", guarded.target); process.exitCode = 1; }
   finally { await client.end().catch(() => {}); }
 }
 
-main().catch(() => { console.log("backfill failed"); process.exitCode = 1; });
+main().catch((error) => { reportFailure("backfill", error, "Check the backfill arguments and PostgreSQL permissions.", databaseTarget()); process.exitCode = 1; });

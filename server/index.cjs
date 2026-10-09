@@ -12,6 +12,7 @@ const { requireCapability, canManageRole } = require("./permissions.cjs");
 const { ADMIN_SCREENS, adminScreen } = require("./admin.cjs");
 const { writeAudit } = require("./audit.cjs");
 const A = require("./accounts.cjs");
+const { guardedDatabaseUrl, reportFailure } = require("./load-env.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -357,14 +358,15 @@ async function route(req, res, db) {
 }
 
 async function start() {
-  if (!PG_URL) throw new Error("CRM_PG_URL is required; the server will not read postgres.url or any old data folder.");
-  const db = await openDb(PG_URL);
+  const guarded = guardedDatabaseUrl(PG_URL);
+  if (!guarded.ok) { reportFailure("server", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
+  const db = await openDb(guarded.value);
   await db.pruneSessions();
   await db.throttlePrune();
   setInterval(() => { db.pruneSessions().catch(() => {}); db.throttlePrune().catch(() => {}); }, 5 * 60000).unref();
   const server = http.createServer((req, res) => route(req, res, db).catch(() => json(res, 500, { error: "Request failed." })));
-  server.listen(PORT, HOST, () => console.log(`Altus CRM server listening on http://${HOST}:${PORT}`));
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(PORT, HOST, () => { console.log(`Altus CRM server listening on http://${HOST}:${PORT}`); resolve(); }); });
 }
 
-if (require.main === module) start().catch(() => { console.error("Server failed to start."); process.exitCode = 1; });
+if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
 module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS };
