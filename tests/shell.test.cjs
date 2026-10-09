@@ -26,6 +26,9 @@ test("shell keeps role-gated new lead, theme, logout, and admin sidebar", () => 
   assert.match(source, /signOut\(logout, navigate\)/);
   assert.match(source, /className=\{showAdminNav \? "shell admin-shell"/);
   assert.match(source, /className="sidebar admin-sidebar"/);
-  assert.match(source, /!showAdminNav && <div className="top-navigation"/);
+  assert.match(source, /<Navbar collapsed=\{false\} showAdmin=\{false\}/);
+  assert.match(source, /<GlobalSearch compact \/>/);
+  assert.doesNotMatch(source, /className="crumb"/);
+  assert.doesNotMatch(source, /className="top-navigation"/);
   assert.doesNotMatch(source, /Collapse navigation/);
 });

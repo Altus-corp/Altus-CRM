@@ -27,7 +27,7 @@
 .account-detail ul { margin: 0; padding-left: 20px; color: var(--ink-1); }
 .account-detail li + li { margin-top: 6px; }
 .account-detail li button { padding: 0; border: 0; background: transparent; color: var(--red); cursor: pointer; font: inherit; font-weight: 700; }
-.accounts-modal { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--auth-glow); }
+.accounts-modal { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--backdrop); backdrop-filter: blur(2px); }
 .accounts-form { width: min(520px, 100%); display: grid; gap: 16px; padding: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); }
 .accounts-form form { display: grid; gap: 12px; }
 .accounts-form label { display: grid; gap: 6px; color: var(--ink-2); font-size: 11px; font-weight: 800; text-transform: uppercase; }

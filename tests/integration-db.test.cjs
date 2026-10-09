@@ -20,6 +20,11 @@ test("database login integration suite", async (t) => {
   const email = String(process.env.CRM_OWNER_EMAIL).toLowerCase();
   const password = process.env.CRM_OWNER_PASSWORD;
   if (!password) { await db.close(); return t.skip("Set CRM_OWNER_PASSWORD only for the integration test process."); }
+  const S = require("../server/security.cjs");
+  await db.throttleClear(S.accountBuckets(email));
+  await db.throttleClear(S.networkBuckets(request({ email, password })));
+  await db.throttleClear(S.accountBuckets("throttle-test@example.invalid"));
+  await db.throttleClear(S.networkBuckets(request({ email: "throttle-test@example.invalid", password: "wrong" })));
   const ok = response(); await login(request({ email, password }), ok, db);
   assert.equal(ok.status, 200); assert.match(ok.headers["Set-Cookie"], /HttpOnly/);
   const bad = response(); await login(request({ email, password: password + "-wrong" }), bad, db);

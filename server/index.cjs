@@ -12,6 +12,7 @@ const { requireCapability, canManageRole } = require("./permissions.cjs");
 const { ADMIN_SCREENS, adminScreen } = require("./admin.cjs");
 const { writeAudit } = require("./audit.cjs");
 const A = require("./accounts.cjs");
+const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
 const { guardedDatabaseUrl, reportFailure } = require("./load-env.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
@@ -33,6 +34,7 @@ const LEAD_VIEWS = Object.freeze({
   permission_granted: "l.permission = 'Yes'",
   permission_pending: "l.stage IN ('database','lead','qualified','reference') AND l.permission IS DISTINCT FROM 'Yes'",
   calling_queue: "l.permission = 'Yes' AND l.stage IN ('assigned','calling')",
+  daily_call_chart: "l.permission = 'Yes' AND l.stage IN ('assigned','calling')",
   registered: "l.stage = 'registered'",
   pre_pso: "l.stage IN ('registered','prepso') AND NOT (l.pso_date <= CURRENT_DATE AND COALESCE(l.custom_values->>'attendanceStatus','') = '')",
   during_pso: "l.stage IN ('registered','prepso') AND l.pso_date <= CURRENT_DATE AND COALESCE(l.custom_values->>'attendanceStatus','') = ''",
@@ -66,6 +68,43 @@ const PRODUCT_FUNNELS = Object.freeze({ Keynote: "keynote" });
 function leadTypeValue(value) { const type = String(value || "").trim().toUpperCase(); return Object.prototype.hasOwnProperty.call(LEAD_TYPES, type) ? type : null; }
 function leadPriority(type) { return LEAD_TYPES[type]; }
 function leadProductRows(leadId, products) { return products.map((product) => { const code = String(product?.product_code || product?.code || "").trim(); if (!code) throw Object.assign(new Error("Invalid product"), { status: 400 }); return { id: `lead-product-${crypto.randomUUID()}`, lead_id: leadId, product_code: code, stage: String(product.stage || "lead"), call_stage: String(product.call_stage || "lead"), funnel: PRODUCT_FUNNELS[code] || "standard" }; }); }
+
+function quickFilterRow(row) {
+  return { id: row.id, name: row.name, view: row.view_key || "", filters: row.filters || {}, conditions: row.conditions || [], join: row.join_operator || "AND", created_at: row.created_at, updated_at: row.updated_at };
+}
+
+async function quickFiltersList(res, db, actor) {
+  const result = await db.query("SELECT id,name,view_key,filters,conditions,join_operator,created_at,updated_at FROM lead_quick_filters WHERE owner_user_id=$1 ORDER BY name ASC, id ASC", [actor.id]);
+  return json(res, 200, { items: result.rows.map(quickFilterRow) });
+}
+
+async function quickFilterCreate(req, res, db, actor) {
+  const body = await readJson(req); const checked = validateQuickFilter(body);
+  if (checked.error) return json(res, 400, { error: checked.error });
+  const value = checked.value; const id = `lead-quick-filter-${crypto.randomUUID()}`;
+  try {
+    const result = await db.query("INSERT INTO lead_quick_filters (id,owner_user_id,name,view_key,filters,conditions,join_operator) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7) RETURNING id,name,view_key,filters,conditions,join_operator,created_at,updated_at", [id, actor.id, value.name, value.view, JSON.stringify(value.filters), JSON.stringify(value.conditions), value.join]);
+    return json(res, 201, { item: quickFilterRow(result.rows[0]) });
+  } catch (error) { if (error?.code === "23505") return json(res, 409, { error: "A quick filter with that name already exists." }); throw error; }
+}
+
+async function quickFilterUpdate(req, res, db, actor, id) {
+  const current = (await db.query("SELECT id,name,view_key,filters,conditions,join_operator FROM lead_quick_filters WHERE id=$1 AND owner_user_id=$2", [id, actor.id])).rows[0];
+  if (!current) return json(res, 404, { error: "Quick filter not found." });
+  const body = await readJson(req); const checked = validateQuickFilter({ ...quickFilterRow(current), ...body }, current);
+  if (checked.error) return json(res, 400, { error: checked.error });
+  const value = checked.value;
+  try {
+    const result = await db.query("UPDATE lead_quick_filters SET name=$3,view_key=$4,filters=$5::jsonb,conditions=$6::jsonb,join_operator=$7,updated_at=now() WHERE id=$1 AND owner_user_id=$2 RETURNING id,name,view_key,filters,conditions,join_operator,created_at,updated_at", [id, actor.id, value.name, value.view, JSON.stringify(value.filters), JSON.stringify(value.conditions), value.join]);
+    return json(res, 200, { item: quickFilterRow(result.rows[0]) });
+  } catch (error) { if (error?.code === "23505") return json(res, 409, { error: "A quick filter with that name already exists." }); throw error; }
+}
+
+async function quickFilterDelete(res, db, actor, id) {
+  const result = await db.query("DELETE FROM lead_quick_filters WHERE id=$1 AND owner_user_id=$2 RETURNING id", [id, actor.id]);
+  if (!result.rows[0]) return json(res, 404, { error: "Quick filter not found." });
+  return json(res, 200, { id });
+}
 
 async function leadsCounts(res, db) {
   const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE ${predicate})::int AS "${key}"`);
@@ -101,6 +140,14 @@ async function leadsList(req, res, db, url) {
   if (view === "key_note") return json(res, 400, { error: "Key Note is unavailable until a product master exists." });
   if (view && !Object.prototype.hasOwnProperty.call(LEAD_VIEWS, view)) return invalidLeadsQuery(res);
   const viewSql = leadView(view); if (viewSql) where.push(viewSql);
+  const advancedRaw = url.searchParams.get("advanced");
+  if (advancedRaw) {
+    let advanced;
+    try { advanced = JSON.parse(advancedRaw); } catch { return invalidLeadsQuery(res); }
+    const advancedWhere = buildQuickFilterWhere(advanced, bind);
+    if (advancedWhere.error) return invalidLeadsQuery(res);
+    where.push(advancedWhere.sql);
+  }
   const sortParam = url.searchParams.get("sort");
   if (sortParam && !Object.prototype.hasOwnProperty.call(LEAD_SORTS, sortParam)) return invalidLeadsQuery(res);
   const sort = sortParam || "updated_at";
@@ -335,6 +382,11 @@ async function route(req, res, db) {
   if (contactMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("contacts.edit", user)) return userWriteError(res, 403, "You do not have permission to edit contacts."); return safeUserOperation(res, () => A.updateContact(req, res, db, user, decodeURIComponent(contactMatch[1]))); }
   if (contactMatch && req.method === "DELETE") { if (!requireCapability("contacts.delete", user)) return userWriteError(res, 403, "You do not have permission to archive contacts."); return safeUserOperation(res, () => A.archiveContact(req, res, db, user, decodeURIComponent(contactMatch[1]))); }
   const convertAccountMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/convert-account$/); if (convertAccountMatch && req.method === "POST") { if (!requireCapability("accounts.create", user) || !requireCapability("contacts.create", user)) return userWriteError(res, 403, "You do not have permission to convert leads."); return safeUserOperation(res, () => A.convertLead(req, res, db, user, decodeURIComponent(convertAccountMatch[1]))); }
+  if (url.pathname === "/api/lead-quick-filters" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." }); return quickFiltersList(res, db, user); }
+  if (url.pathname === "/api/lead-quick-filters" && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterCreate(req, res, db, user); }
+  const quickFilterMatch = url.pathname.match(/^\/api\/lead-quick-filters\/([^/]+)$/);
+  if (quickFilterMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterUpdate(req, res, db, user, decodeURIComponent(quickFilterMatch[1])); }
+  if (quickFilterMatch && req.method === "DELETE") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterDelete(res, db, user, decodeURIComponent(quickFilterMatch[1])); }
   if (url.pathname === "/api/leads" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     return leadsList(req, res, db, url);
@@ -369,4 +421,4 @@ async function start() {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS };
+module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS };
