@@ -17,12 +17,15 @@ test("shell includes debounced keyboard search states and lead navigation", () =
   assert.match(source, /Search unavailable/);
 });
 
-test("shell keeps role-gated new lead, theme, logout, and collapsed navbar hooks", () => {
+test("shell keeps role-gated new lead, theme, logout, and admin sidebar", () => {
   const source = shell();
   assert.match(source, /usePermission\("leads\.edit"\)/);
   assert.match(source, /\{canCreateLead &&/);
   assert.match(source, /navigate\("\/leads\?new=1"\)/);
   assert.match(source, /toggleTheme/);
   assert.match(source, /signOut\(logout, navigate\)/);
-  assert.match(source, /<Navbar collapsed=\{collapsed\}/);
+  assert.match(source, /className=\{showAdminNav \? "shell admin-shell"/);
+  assert.match(source, /className="sidebar admin-sidebar"/);
+  assert.match(source, /!showAdminNav && <div className="top-navigation"/);
+  assert.doesNotMatch(source, /Collapse navigation/);
 });

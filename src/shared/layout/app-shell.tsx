@@ -53,10 +53,6 @@ function GlobalSearch() {
   return <div className="global-search" ref={wrapperRef}><span className="global-search-icon" aria-hidden="true">⌕</span><input ref={inputRef} value={query} aria-label="Search leads" placeholder="Search any record - name, company, phone, remark..." onChange={(event) => setQuery(event.target.value)} onFocus={() => { if (query.trim().length >= 2) setOpen(true); }} onKeyDown={onKeyDown} />{open && <div className="search-popover" role="listbox" aria-label="Lead search results">{state === "loading" && <div className="search-state">Searching…</div>}{state === "empty" && <div className="search-state">No matching leads.</div>}{state === "error" && <div className="search-state">Search unavailable.</div>}{state === "idle" && results.map((result, index) => <button key={result.id} type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? "search-result active" : "search-result"} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(result)}><span className="search-result-name">{result.name}</span><span className="search-result-meta">{result.company || "No company"} · {result.stage || "Unstaged"}</span></button>)}</div>}</div>;
 }
 
-function readCollapsed() { try { return window.localStorage.getItem("altus.crm.sidebar-collapsed") === "1"; } catch { return false; } }
-function writeCollapsed(value: boolean) { try { window.localStorage.setItem("altus.crm.sidebar-collapsed", value ? "1" : "0"); } catch {} }
-function userInitials(name: string | undefined) { return String(name || "A").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "A"; }
-
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -65,13 +61,27 @@ export function AppShell() {
   const showAdminNav = usePermission("nav.admin");
   const { counts, loading: countsLoading } = useLeadNavCounts();
   const { collapsedGroups, toggleNavGroup } = useNavGroupState();
-  const [collapsed, setCollapsed] = useState(readCollapsed);
   const [theme, setCurrentTheme] = useState(getTheme);
   const currentHref = `${location.pathname}${location.search}`;
   const current = navLabelForHref(currentHref) || (location.pathname.startsWith("/account") ? "Account" : "Settings");
-  function toggleCollapsed() { setCollapsed((value) => { const next = !value; writeCollapsed(next); return next; }); }
   function toggleTheme() { const next = theme === "light" ? "dark" : "light"; setTheme(next); setCurrentTheme(next); }
-  return <div className={collapsed ? "shell sidebar-is-collapsed" : "shell"}><aside className="sidebar"><div className="sidebar-head"><div className="workspace"><strong>Altus CRM</strong><span>Sales workspace</span></div><button className="collapse-button" type="button" onClick={toggleCollapsed} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>{collapsed ? "›" : "‹"}</button></div><Navbar collapsed={collapsed} showAdmin={showAdminNav} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} /><div className="sidebar-user"><div className="avatar" aria-hidden="true">{userInitials(user?.name)}</div><div className="sidebar-user-copy"><strong>{user?.name || "Account"}</strong><span>{displayRole(user?.role)}</span></div><button className="logout-icon" type="button" title="Sign out" aria-label="Sign out" onClick={() => void signOut(logout, navigate)}>↪</button></div></aside><main className="main"><header className="topbar"><Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><span className="logo-mark">A</span><span>Altus <b>CRM</b></span></Link><div className="crumb"><span>Altus /</span><b>{current}</b></div><GlobalSearch /><div className="top-actions">{canCreateLead && <button className="top-action-button" type="button" onClick={() => navigate("/leads?new=1")}>＋ New lead</button>}<button className="top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} title={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>{theme === "light" ? "☾" : "☀"}</button><AccountMenu theme={theme} onToggleTheme={toggleTheme} /></div></header><section className="content"><Outlet /></section></main></div>;
+  const navbar = <Navbar collapsed={false} showAdmin={showAdminNav} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
+  return <div className={showAdminNav ? "shell admin-shell" : "shell"}>
+    {showAdminNav && <aside className="sidebar admin-sidebar">
+      <div className="sidebar-head"><Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><span className="logo-mark">A</span><span>Altus <b>CRM</b></span></Link></div>
+      {navbar}
+    </aside>}
+    <main className="main">
+      <header className="topbar">
+        {!showAdminNav && <Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><span className="logo-mark">A</span><span>Altus <b>CRM</b></span></Link>}
+        <div className="crumb"><span>Altus /</span><b>{current}</b></div>
+        <GlobalSearch />
+        <div className="top-actions">{canCreateLead && <button className="top-action-button" type="button" onClick={() => navigate("/leads?new=1")}>＋ New lead</button>}<button className="top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} title={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>{theme === "light" ? "☾" : "☀"}</button><AccountMenu theme={theme} onToggleTheme={toggleTheme} /></div>
+      </header>
+      {!showAdminNav && <div className="top-navigation"><Navbar collapsed={false} showAdmin={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} /></div>}
+      <section className="content"><Outlet /></section>
+    </main>
+  </div>;
 }
 
 export { NAV_ITEMS };

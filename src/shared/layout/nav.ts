@@ -72,7 +72,6 @@ function navLink(
     ? React.createElement("span", { className: "nav-count" }, counts[item.countKey] ?? "…")
     : null;
   const children = [
-    React.createElement("span", { className: "nav-number", "aria-hidden": collapsed ? "true" : undefined }, item.navNo || item.label.charAt(0)),
     React.createElement("span", { className: "nav-label" }, collapsed ? item.label.charAt(0) : item.label),
     !collapsed && badge,
   ].filter(Boolean);

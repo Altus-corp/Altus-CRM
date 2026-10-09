@@ -1,4 +1,4 @@
-.placeholder-page { max-width: 900px; padding: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-1); }
+.placeholder-page { max-width: 900px; padding: 32px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-1); }
 .placeholder-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .placeholder-page h1 { margin: 0; font-family: var(--display); font-size: 30px; letter-spacing: -.04em; }
 .day-chip { flex: none; padding: 3px 9px; border-radius: 999px; background: var(--bg-2); color: var(--ink-2); font-size: 12px; font-weight: 600; }

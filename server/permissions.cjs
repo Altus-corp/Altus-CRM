@@ -15,6 +15,16 @@ const CAPABILITIES = Object.freeze({
   "targets.manage": Object.freeze(["Owner", "Admin"]),
   "workspace.manage": Object.freeze(["Owner", "Admin"]),
   "employees.manage": Object.freeze(["Owner", "Admin"]),
+  "accounts.view": Object.freeze(["Owner", "Admin", "Sales", "Viewer"]),
+  "accounts.create": Object.freeze(["Owner", "Admin", "Sales"]),
+  "accounts.edit": Object.freeze(["Owner", "Admin", "Sales"]),
+  "accounts.delete": Object.freeze(["Owner", "Admin"]),
+  "accounts.export": Object.freeze(["Owner", "Admin"]),
+  "contacts.view": Object.freeze(["Owner", "Admin", "Sales", "Viewer"]),
+  "contacts.create": Object.freeze(["Owner", "Admin", "Sales"]),
+  "contacts.edit": Object.freeze(["Owner", "Admin", "Sales"]),
+  "contacts.delete": Object.freeze(["Owner", "Admin"]),
+  "contacts.export": Object.freeze(["Owner", "Admin"]),
 });
 
 function hasCapability(role, capability) {

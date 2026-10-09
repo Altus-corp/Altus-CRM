@@ -37,6 +37,7 @@ function formatDate(value: string | null | undefined) { return value ? new Date(
 
 export function useLeadsScreen() {
   const canChangePermission = usePermission("leads.permission");
+  const canConvertAccount = usePermission("accounts.create") && usePermission("contacts.create");
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedView = searchParams.get("view") || "";
   const initialView = LEAD_VIEWS.some(([key]) => key === requestedView) ? requestedView : "";
@@ -65,6 +66,7 @@ export function useLeadsScreen() {
   async function saveLeadEdit(event: React.FormEvent) { event.preventDefault(); if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}`, { method: "PATCH", body: JSON.stringify(editForm) }); setEditing(false); await openDetail(detail.lead.id); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
   async function updateStage(stage: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/stage`, { method: "POST", body: JSON.stringify({ stage }) }); await openDetail(detail.lead.id); await load(); } catch { setError("Unable to change lead stage."); } }
   async function updatePermission(permission: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/permission`, { method: "POST", body: JSON.stringify({ permission }) }); await openDetail(detail.lead.id); await load(); } catch { setError("Unable to change permission."); } }
+  async function convertLead() { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/convert-account`, { method: "POST", body: JSON.stringify({}) }); setError("Lead converted to an account and contact."); await openDetail(detail.lead.id); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to convert lead."); } }
   function openViewMenu() { setActiveViewIndex(Math.max(0, VIEW_OPTIONS.findIndex(([key]) => key === view))); setViewMenuOpen(true); }
   function closeViewMenu(restoreFocus = false) { setViewMenuOpen(false); if (restoreFocus) requestAnimationFrame(() => viewButtonRef.current?.focus()); }
   function chooseView(next: string) { setPage(1); setView(next); closeViewMenu(true); }
@@ -73,7 +75,7 @@ export function useLeadsScreen() {
   const totalPages = Math.max(1, Math.ceil((data?.total || 0) / (data?.page_size || 50)));
   const currentViewLabel = viewByKey.get(view as LeadViewKey)?.[1] || "All Leads";
   const filtersActive = !!view || Object.values(filters).some(Boolean);
-  return { data, detail, detailLoading, error, filters, filtersActive, loading, page, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, editing, editForm, setEditing, setEditForm, canChangePermission, formatDate, load, openDetail, closeDetail: () => setDetail(null), closeNewLead, createNewLead, saveLeadEdit, updateStage, updatePermission, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, clearFilters, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)) };
+  return { data, detail, detailLoading, error, filters, filtersActive, loading, page, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, editing, editForm, setEditing, setEditForm, canChangePermission, canConvertAccount, formatDate, load, openDetail, closeDetail: () => setDetail(null), closeNewLead, createNewLead, saveLeadEdit, updateStage, updatePermission, convertLead, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, clearFilters, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)) };
 }
 
 export function fieldValue(lead: Lead, key: string) {

@@ -9,3 +9,13 @@ test("importer does not own application table definitions", () => {
   }
   assert.match(fs.readFileSync("migrations/001_phase0_foundation.sql", "utf8"), /CREATE TABLE IF NOT EXISTS leads/);
 });
+
+test("accounts migration keeps the simplified link model", () => {
+  const source = fs.readFileSync("migrations/004_accounts_contacts.sql", "utf8");
+  assert.match(source, /CREATE TABLE IF NOT EXISTS accounts/);
+  assert.match(source, /CREATE TABLE IF NOT EXISTS contacts/);
+  assert.match(source, /account_id TEXT REFERENCES accounts/);
+  assert.match(source, /CREATE TABLE IF NOT EXISTS contact_leads/);
+  assert.doesNotMatch(source, /account_leads|account_contacts/);
+  assert.match(source, /status TEXT NOT NULL DEFAULT 'active'/);
+});

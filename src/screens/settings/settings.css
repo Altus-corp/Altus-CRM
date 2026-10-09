@@ -1,5 +1,8 @@
 .settings-page { min-width: 0; }
+.settings-page > h1 { letter-spacing: -.04em; }
+.settings-page > p:not(.members-error) { margin-top: 8px; }
 .members-section { margin-top: 30px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-1); }
+.members-section { border-radius: var(--radius-lg); box-shadow: none; }
 .members-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .members-head h2 { margin: 0; color: var(--ink); font-family: var(--display); font-size: 20px; }
 .members-head p, .members-error { margin: 6px 0 0; color: var(--ink-2); }
@@ -8,6 +11,7 @@
 .members-head > button, .member-form-actions button[type="submit"] { border-color: var(--red); background: var(--red); color: var(--bg); }
 .members-table { width: 100%; margin-top: 20px; border-collapse: collapse; font-size: 12px; }
 .members-table th, .members-table td { padding: 11px 8px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); text-align: left; }
+.members-table tbody tr:hover { background: var(--red-050); }
 .members-table th { color: var(--ink-2); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 .members-table td:last-child { display: flex; flex-wrap: wrap; gap: 6px; }
 .member-form { display: grid; gap: 14px; max-width: 520px; margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-1); }

@@ -1,12 +1,18 @@
 .workspace-data-page { min-width: 0; max-width: 1440px; }
+.workspace-data-page > h1 { letter-spacing: -.04em; }
 .workspace-data-page h1 { margin: 0; color: var(--ink); font-family: var(--display); font-size: 30px; }
 .workspace-data-note { margin: 8px 0 20px; color: var(--ink-2); }
-.workspace-data-card { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-1); }
-.workspace-data-total { margin-bottom: 14px; color: var(--ink); font-size: 20px; font-weight: 800; }
+.workspace-data-card { overflow: hidden; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-1); }
+.workspace-data-total { margin: 0; padding: 18px; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 20px; font-weight: 800; }
 .workspace-data-table-wrap { overflow-x: auto; }
 .workspace-data-table { width: 100%; min-width: 700px; border-collapse: collapse; font-size: 12px; }
-.workspace-data-table th, .workspace-data-table td { padding: 11px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); text-align: left; }
-.workspace-data-table th { color: var(--ink-2); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.workspace-data-table th, .workspace-data-table td { padding: 15px 18px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); text-align: left; }
+.workspace-data-table th { color: var(--ink-2); background: var(--bg-1); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.workspace-data-table tbody tr { transition: background .15s ease; }
+.workspace-data-table tbody tr:hover { background: var(--red-050); }
+.workspace-data-table td:first-child { color: var(--ink); font-weight: 700; }
+.workspace-data-table td:last-child { color: var(--ink-2); }
 .workspace-data-state { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 150px; padding: 20px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--ink-2); }
 .workspace-data-state.error { color: var(--auth-error-ink); border-color: var(--auth-error-line); }
 .workspace-data-state button { min-height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink-1); cursor: pointer; }
+@media (max-width: 640px) { .workspace-data-page h1 { font-size: 27px; } .workspace-data-card { border-radius: var(--radius); } .workspace-data-table th, .workspace-data-table td { padding-inline: 14px; } }

@@ -1,1 +1,32 @@
-export function useAccountsContactsScreen() { return "Accounts & Contacts"; }
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api } from "../../shared/api/client";
+import { usePermission } from "../../shared/auth/permissions";
+
+export type Account = { id: string; name: string; email: string | null; phone: string | null; website: string | null; owner_user_id: string | null; status: string; contact_count: number; lead_count: number };
+export type Contact = { id: string; account_id: string | null; account_name: string | null; name: string; first_name: string | null; last_name: string | null; email: string | null; phone: string | null; alternate_phone: string | null; designation: string | null; status: string; lead_count: number };
+type AccountDetail = { account: Account & Record<string, unknown>; contacts: Contact[]; leads: Array<Record<string, unknown>> };
+type ContactDetail = { contact: Contact & Record<string, unknown>; leads: Array<Record<string, unknown>> };
+type List<T> = { items: T[]; total: number; page: number; page_size: number };
+
+const emptyAccount = { name: "", email: "", phone: "", website: "", owner_user_id: "" };
+const emptyContact = { name: "", first_name: "", last_name: "", email: "", phone: "", alternate_phone: "", designation: "", account_id: "" };
+
+export function useAccountsContactsScreen() {
+  const canCreateAccount = usePermission("accounts.create"); const canEditAccount = usePermission("accounts.edit"); const canArchiveAccount = usePermission("accounts.delete"); const canExportAccount = usePermission("accounts.export");
+  const canCreateContact = usePermission("contacts.create"); const canEditContact = usePermission("contacts.edit"); const canArchiveContact = usePermission("contacts.delete"); const canExportContact = usePermission("contacts.export");
+  const [tab, setTab] = useState<"accounts" | "contacts">("accounts"); const [search, setSearch] = useState(""); const [accounts, setAccounts] = useState<List<Account> | null>(null); const [contacts, setContacts] = useState<List<Contact> | null>(null);
+  const [accountDetail, setAccountDetail] = useState<AccountDetail | null>(null); const [contactDetail, setContactDetail] = useState<ContactDetail | null>(null); const [accountForm, setAccountForm] = useState(emptyAccount); const [contactForm, setContactForm] = useState(emptyContact);
+  const [editing, setEditing] = useState<"account" | "contact" | null>(null); const [formOpen, setFormOpen] = useState(false); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
+  const query = useMemo(() => search ? `?search=${encodeURIComponent(search)}` : "", [search]);
+  const load = useCallback(async () => { setLoading(true); setError(""); try { const [accountResponse, contactResponse] = await Promise.all([api<List<Account>>(`/api/accounts${query}`), api<List<Contact>>(`/api/contacts${query}`)]); setAccounts(accountResponse); setContacts(contactResponse); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to load accounts and contacts."); } finally { setLoading(false); } }, [query]);
+  useEffect(() => { void load(); }, [load]);
+  async function openAccount(id: string) { if (!id) { setAccountDetail(null); return; } setError(""); try { setAccountDetail(await api<AccountDetail>(`/api/accounts/${encodeURIComponent(id)}`)); setContactDetail(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to load account."); } }
+  async function openContact(id: string) { if (!id) { setContactDetail(null); return; } setError(""); try { setContactDetail(await api<ContactDetail>(`/api/contacts/${encodeURIComponent(id)}`)); setAccountDetail(null); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to load contact."); } }
+  function startAccount(account?: Account) { setEditing(account ? "account" : null); setAccountForm(account ? { name: account.name, email: account.email || "", phone: account.phone || "", website: account.website || "", owner_user_id: account.owner_user_id || "" } : { ...emptyAccount }); setFormOpen(true); }
+  function startContact(contact?: Contact) { setEditing(contact ? "contact" : null); setContactForm(contact ? { name: contact.name, first_name: contact.first_name || "", last_name: contact.last_name || "", email: contact.email || "", phone: contact.phone || "", alternate_phone: contact.alternate_phone || "", designation: contact.designation || "", account_id: contact.account_id || "" } : { ...emptyContact }); setFormOpen(true); }
+  async function saveAccount(event: React.FormEvent) { event.preventDefault(); try { await api(editing === "account" && accountDetail ? `/api/accounts/${accountDetail.account.id}` : "/api/accounts", { method: editing === "account" ? "PATCH" : "POST", body: JSON.stringify(accountForm) }); setFormOpen(false); setEditing(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save account."); } }
+  async function saveContact(event: React.FormEvent) { event.preventDefault(); try { await api(editing === "contact" && contactDetail ? `/api/contacts/${contactDetail.contact.id}` : "/api/contacts", { method: editing === "contact" ? "PATCH" : "POST", body: JSON.stringify(contactForm) }); setFormOpen(false); setEditing(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save contact."); } }
+  async function archiveAccount(id: string) { if (!window.confirm("Archive this account?")) return; try { await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }); setAccountDetail(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to archive account."); } }
+  async function archiveContact(id: string) { if (!window.confirm("Archive this contact?")) return; try { await api(`/api/contacts/${encodeURIComponent(id)}`, { method: "DELETE" }); setContactDetail(null); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to archive contact."); } }
+  return { tab, setTab, search, setSearch, accounts, contacts, accountDetail, contactDetail, loading, error, formOpen, setFormOpen, accountForm, setAccountForm, contactForm, setContactForm, editing, startAccount, startContact, saveAccount, saveContact, openAccount, openContact, archiveAccount, archiveContact, load, canCreateAccount, canEditAccount, canArchiveAccount, canExportAccount, canCreateContact, canEditContact, canArchiveContact, canExportContact };
+}

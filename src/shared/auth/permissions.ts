@@ -15,6 +15,16 @@ export const CAPABILITIES = {
   "targets.manage": ["Owner", "Admin"],
   "workspace.manage": ["Owner", "Admin"],
   "employees.manage": ["Owner", "Admin"],
+  "accounts.view": ["Owner", "Admin", "Sales", "Viewer"],
+  "accounts.create": ["Owner", "Admin", "Sales"],
+  "accounts.edit": ["Owner", "Admin", "Sales"],
+  "accounts.delete": ["Owner", "Admin"],
+  "accounts.export": ["Owner", "Admin"],
+  "contacts.view": ["Owner", "Admin", "Sales", "Viewer"],
+  "contacts.create": ["Owner", "Admin", "Sales"],
+  "contacts.edit": ["Owner", "Admin", "Sales"],
+  "contacts.delete": ["Owner", "Admin"],
+  "contacts.export": ["Owner", "Admin"],
 } as const;
 
 export type Capability = keyof typeof CAPABILITIES;
