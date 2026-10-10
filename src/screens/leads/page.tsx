@@ -10,6 +10,11 @@ function displayField(value: unknown) {
   return String(value);
 }
 
+function fieldOrFallback(value: unknown, fallback: string) {
+  const displayed = displayField(value);
+  return displayed === "—" || !displayed ? fallback : displayed;
+}
+
 function activityValue(value: unknown, _key?: string) { return value == null || value === "" ? "—" : String(value); }
 function activityDate(value: unknown) { return value ? new Date(String(value)).toLocaleString() : "—"; }
 function duration(value: unknown) { const seconds = Number(value); if (!Number.isFinite(seconds)) return "not recorded"; return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`; }
@@ -262,6 +267,25 @@ function DesktopIcon({ color = "currentColor" }: { color?: string }) {
   );
 }
 
+function EditPencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function VerticalDotsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <circle cx="12" cy="5" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="12" cy="19" r="1.8" />
+    </svg>
+  );
+}
+
 const ADMIN_ACTIVITY_TYPES = [
   { id: "call", label: "Phone call", icon: CallIcon, placeholder: "Interested in a product walkthrough next week. Asked to share the proposal before the demo." },
   { id: "meeting", label: "Meeting / Demo", icon: CalendarIcon, placeholder: "Met with client team. Discussed requirements, timeline, and next steps." },
@@ -371,6 +395,30 @@ export function LeadsPage() {
   const [activityType, setActivityType] = useState("Phone call");
   const [activityTypeSearch, setActivityTypeSearch] = useState("");
   const [activityTypeDropdownOpen, setActivityTypeDropdownOpen] = useState(false);
+  const activityTypePickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!activityTypeDropdownOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!activityTypePickerRef.current?.contains(event.target as Node)) {
+        setActivityTypeDropdownOpen(false);
+        setActivityTypeSearch("");
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActivityTypeDropdownOpen(false);
+        setActivityTypeSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [activityTypeDropdownOpen]);
+
   const [activityDetailsText, setActivityDetailsText] = useState(
     "Interested in a product walkthrough next week. Asked to share the proposal before the demo."
   );
@@ -383,7 +431,8 @@ export function LeadsPage() {
   const [sendNotification, setSendNotification] = useState(true);
   const [notifyMe, setNotifyMe] = useState(true);
   const [notifyBefore, setNotifyBefore] = useState("15 minutes before");
-  const [notifyVia, setNotifyVia] = useState<"desktop" | "email">("desktop");
+  const [notifyViaApp, setNotifyViaApp] = useState(true);
+  const [notifyViaEmail, setNotifyViaEmail] = useState(false);
 
   // Dedicated Follow-up tab state
   const [showFollowUpForm, setShowFollowUpForm] = useState(false);
@@ -416,6 +465,8 @@ export function LeadsPage() {
     },
   ]);
   const [followUpSavedFeedback, setFollowUpSavedFeedback] = useState(false);
+  const [detailsMoreOpen, setDetailsMoreOpen] = useState(false);
+  const [additionalFieldsOpen, setAdditionalFieldsOpen] = useState(false);
 
   const detailTabRefs = useRef<Partial<Record<LeadDetailTab, HTMLButtonElement | null>>>({});
   useEffect(() => {
@@ -434,6 +485,20 @@ export function LeadsPage() {
   const fields = VIEW_FIELDS[screen.view] || VIEW_FIELDS.new_leads;
   const selectedLead = screen.detail?.lead;
   const leadName = String(selectedLead?.name || "Nikhil Shah");
+  const leadFullName = leadName.trim();
+  const nameParts = leadFullName.split(/\s+/);
+  const derivedFirstName = nameParts[0] || "";
+  const derivedLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+  const leadFirstName = String(
+    (selectedLead as any)?.first_name ||
+      (selectedLead ? fieldValue(selectedLead, "first_name") : null) ||
+      derivedFirstName
+  );
+  const leadLastName = String(
+    (selectedLead as any)?.last_name ||
+      (selectedLead ? fieldValue(selectedLead, "last_name") : null) ||
+      derivedLastName
+  );
   const leadStatus = String(selectedLead?.lead_status || selectedLead?.stage || "New Lead");
   const leadSource = String(selectedLead?.lead_source || "Website enquiry");
   const ownerName = String(selectedLead?.owner_name || selectedLead?.owner_user_id || "Aarav Mehta");
@@ -455,7 +520,7 @@ export function LeadsPage() {
       </div><div className="lead-filter-secondary"><label><span>Owner</span><input className="lead-control" value={screen.filters.owner} onChange={(event) => screen.updateFilter("owner", event.target.value)} placeholder="Owner" /></label><label><span>Lead status</span><input className="lead-control" value={screen.filters.lead_status} onChange={(event) => screen.updateFilter("lead_status", event.target.value)} placeholder="Any status" /></label><label><span>PSO from</span><input className="lead-control" type="date" value={screen.filters.pso_date_from} onChange={(event) => screen.updateFilter("pso_date_from", event.target.value)} /></label><label><span>PSO to</span><input className="lead-control" type="date" value={screen.filters.pso_date_to} onChange={(event) => screen.updateFilter("pso_date_to", event.target.value)} /></label><label><span>Follow-up</span><select className="lead-control" value={screen.filters.next_follow_up} onChange={(event) => screen.updateFilter("next_follow_up", event.target.value)}><option value="">Any</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="upcoming">Upcoming</option></select></label>{screen.filtersActive && <button className="leads-button clear-filters" type="button" onClick={screen.clearFilters}>Clear filters</button>}</div>
     </section>
     {screen.error && <div className="lead-state error" role="alert"><span>{screen.error}</span><button className="leads-button secondary" onClick={() => void screen.load()}>Retry</button></div>}{screen.loading && <div className="lead-state">Loading leads…</div>}{!screen.loading && !screen.error && screen.data?.items.length === 0 && <div className="lead-state"><strong>No leads in this view.</strong><span>Try another view or clear a filter.</span></div>}
-    {!screen.loading && !screen.error && !!screen.data?.items.length && <><div className="lead-table-wrap"><table className="lead-table"><thead><tr>{fields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{screen.data.items.map((lead) => <tr key={lead.id} tabIndex={0} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : field.key === "permission" || field.key === "stage" ? <span className="lead-pill">{displayField(fieldValue(lead, field.key))}</span> : displayField(fieldValue(lead, field.key))}</td>)}</tr>)}</tbody></table></div><footer className="lead-pagination"><span>{screen.data.total} leads</span><div><button className="leads-button secondary" disabled={screen.page <= 1} onClick={screen.previousPage}>Previous</button><span>Page {screen.page} of {screen.totalPages}</span><button className="leads-button secondary" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>Next</button></div></footer></>}
+    {!screen.loading && !screen.error && !!screen.data?.items.length && <><div className="lead-table-wrap"><table className="lead-table"><thead><tr>{fields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{screen.data.items.map((lead) => <tr key={lead.id} tabIndex={0} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : field.key === "permission" || field.key === "stage" ? <span className="lead-pill">{displayField(fieldValue(lead, field.key))}</span> : displayField(fieldValue(lead, field.key))}</td>)}</tr>)}</tbody></table></div><footer className="lead-pagination"><span>{screen.data.total} leads</span><div className="lead-pagination-controls"><label className="lead-page-size"><span>Rows</span><select className="lead-control" aria-label="Rows per page" value={screen.pageSize} onChange={(event) => screen.changePageSize(event.target.value)}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label><button className="leads-button secondary" disabled={screen.page <= 1} onClick={screen.previousPage}>Previous</button><span>Page {screen.page} of {screen.totalPages}</span><button className="leads-button secondary" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>Next</button></div></footer></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
@@ -1100,51 +1165,337 @@ export function LeadsPage() {
           {/* Details tab */}
           {detailTab === "details" && (
             <section
-              className="lead-detail-tab-panel"
+              className="lead-detail-tab-panel lead-details-tab-panel"
               id="lead-detail-panel-details"
               role="tabpanel"
               aria-label="Lead details"
             >
-              <div className="lead-detail-actions-bar">
-                <button
-                  className="leads-button"
-                  type="button"
-                  onClick={() => screen.setEditing(true)}
-                >
-                  Edit lead info
-                </button>
-                {screen.canConvertAccount && (
+              {/* Header Row: Title, Edit details & More menu */}
+              <div className="lead-details-header-row">
+                <h3 className="lead-details-title">Lead details</h3>
+                <div className="lead-details-header-actions">
                   <button
-                    className="leads-button secondary"
+                    className="lead-details-edit-btn"
                     type="button"
-                    onClick={() => void screen.convertLead()}
+                    onClick={() => screen.setEditing(true)}
                   >
-                    Convert to account
+                    <EditPencilIcon />
+                    <span>Edit details</span>
                   </button>
+                  <div className="lead-details-more-wrap">
+                    <button
+                      className="lead-details-more-btn"
+                      type="button"
+                      aria-label="More details options"
+                      onClick={() => setDetailsMoreOpen((v) => !v)}
+                    >
+                      <VerticalDotsIcon />
+                    </button>
+                    {detailsMoreOpen && (
+                      <div className="lead-activity-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setDetailsMoreOpen(false);
+                            screen.setEditing(true);
+                          }}
+                        >
+                          Edit lead info
+                        </button>
+                        {screen.canConvertAccount && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setDetailsMoreOpen(false);
+                              void screen.convertLead();
+                            }}
+                          >
+                            Convert to account
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Hero Summary Banner */}
+              <div className="lead-details-hero-card">
+                <div className="lead-details-hero-identity">
+                  <div className="lead-details-hero-avatar" aria-hidden="true">
+                    <span>
+                      {leadName
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .slice(0, 2)
+                        .join("")
+                        .toUpperCase() || "NS"}
+                    </span>
+                  </div>
+                  <div className="lead-details-hero-name-wrap">
+                    <strong className="lead-details-hero-name">{leadName}</strong>
+                    <span className="lead-details-hero-stage-pill">
+                      {fieldOrFallback(selectedLead?.stage || selectedLead?.lead_status, "Fresh lead")}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="lead-details-hero-divider" aria-hidden="true" />
+
+                <div className="lead-details-hero-stat">
+                  <span className="lead-details-hero-label">Owner</span>
+                  <strong className="lead-details-hero-val">{ownerName}</strong>
+                </div>
+
+                <div className="lead-details-hero-divider" aria-hidden="true" />
+
+                <div className="lead-details-hero-stat">
+                  <span className="lead-details-hero-label">Lead score</span>
+                  <strong className="lead-details-hero-val">42</strong>
+                </div>
+
+                <div className="lead-details-hero-divider" aria-hidden="true" />
+
+                <div className="lead-details-hero-stat">
+                  <span className="lead-details-hero-label">Source</span>
+                  <strong className="lead-details-hero-val">{leadSource}</strong>
+                </div>
+              </div>
+
+              {/* 1. Contact information */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Contact information</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">First name</span>
+                    <span className="lead-details-value">{displayField(leadFirstName)}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Last name</span>
+                    <span className="lead-details-value">{displayField(leadLastName)}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Mobile</span>
+                    <span className="lead-details-value">
+                      {selectedLead?.phone || "+91 86594 16729"}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Email</span>
+                    <span className="lead-details-value">
+                      {selectedLead?.email || "nikhil.shah@email.com"}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Preferred contact</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.preferred_contact ||
+                          fieldValue(selectedLead!, "preferred_contact"),
+                        "WhatsApp"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Professional information */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Professional information</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Company</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "company"),
+                        "Fresh Nutrition"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Designation</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "designation"),
+                        "Employee"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Location</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "city"),
+                        "Mumbai, Maharashtra"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Industry</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.industry ||
+                          fieldValue(selectedLead!, "industry"),
+                        "Health & wellness"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Lead qualification */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Lead qualification</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead stage</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "stage"),
+                        "New"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead temperature</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.temperature ||
+                          fieldValue(selectedLead!, "temperature"),
+                        "Warm"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Interest</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.interest ||
+                          fieldValue(selectedLead!, "interest"),
+                        "Productivity Shastra Orientation"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Expected decision date</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "psoDate"),
+                        "31 Oct 2026"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Attribution & ownership */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Attribution & ownership</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead source</span>
+                    <span className="lead-details-value">{leadSource}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Campaign</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.campaign ||
+                          fieldValue(selectedLead!, "campaign"),
+                        "Productivity Shastra - October"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Assigned to</span>
+                    <span className="lead-details-value">{ownerName}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Created on</span>
+                    <span className="lead-details-value">
+                      {selectedLead?.created_at
+                        ? new Date(String(selectedLead.created_at)).toLocaleString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "10 Oct 2026, 9:58 AM"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Additional fields (6) collapsible */}
+              <div className="lead-details-accordion">
+                <button
+                  type="button"
+                  className="lead-details-accordion-btn"
+                  onClick={() => setAdditionalFieldsOpen((v) => !v)}
+                  aria-expanded={additionalFieldsOpen}
+                >
+                  <span
+                    className={
+                      additionalFieldsOpen
+                        ? "lead-details-accordion-chevron open"
+                        : "lead-details-accordion-chevron"
+                    }
+                    aria-hidden="true"
+                  >
+                    <ChevronDownIcon />
+                  </span>
+                  <span>Additional fields (6)</span>
+                </button>
+                {additionalFieldsOpen && (
+                  <div className="lead-details-accordion-content">
+                    <div className="lead-details-grid">
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Permission To Call</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "permission"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">PSO Date</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "psoDate"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Pre-PS Done</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "isPrePsDone"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Last called on</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "lastCalledOn"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Next follow-up</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "nextFollowUpAt"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Products</span>
+                        <span className="lead-details-value">
+                          {displayField(
+                            (screen.detail?.products && screen.detail.products.length > 0)
+                              ? screen.detail.products.map((p: any) => p.code || p.name).join(", ")
+                              : fieldValue(selectedLead!, "products")
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-              <dl className="lead-facts">
-                {[
-                  "company",
-                  "stage",
-                  "permission",
-                  "owner",
-                  "psoDate",
-                  "isPrePsDone",
-                  "email",
-                  "phone",
-                  "designation",
-                  "city",
-                  "leadSource",
-                  "lastCalledOn",
-                  "nextFollowUpAt",
-                ].map((key) => (
-                  <div className="lead-fact-row" key={key}>
-                    <dt>{key.replaceAll("_", " ")}</dt>
-                    <dd>{displayField(fieldValue(screen.detail!.lead, key))}</dd>
-                  </div>
-                ))}
-              </dl>
             </section>
           )}
 
@@ -1946,7 +2297,7 @@ export function LeadsPage() {
               <label className="lead-add-activity-label" htmlFor="lead-activity-type-picker">
                 Activity type <span className="req">*</span>
               </label>
-              <div className="lead-add-activity-dropdown-container">
+              <div className="lead-add-activity-dropdown-container" ref={activityTypePickerRef}>
                 <button
                   type="button"
                   id="lead-activity-type-picker"
@@ -2189,25 +2540,33 @@ export function LeadsPage() {
                           <div className="lead-add-activity-choice-cards">
                             <button
                               type="button"
-                              className={`lead-add-activity-choice-card ${notifyVia === "desktop" ? "selected" : ""}`}
-                              onClick={() => setNotifyVia("desktop")}
+                              className={`lead-add-activity-choice-card ${notifyViaApp ? "selected" : ""}`}
+                              onClick={() => setNotifyViaApp((v) => !v)}
+                              aria-checked={notifyViaApp}
+                              role="checkbox"
                             >
                               <div className="choice-head">
-                                <span className={`choice-radio ${notifyVia === "desktop" ? "active" : ""}`} />
-                                <DesktopIcon color={notifyVia === "desktop" ? "var(--red)" : "var(--ink-2)"} />
-                                <strong>Desktop</strong>
+                                <span className={`choice-checkbox ${notifyViaApp ? "checked" : ""}`}>
+                                  {notifyViaApp ? "✓" : ""}
+                                </span>
+                                <DesktopIcon color={notifyViaApp ? "var(--red)" : "var(--ink-2)"} />
+                                <strong>App</strong>
                               </div>
-                              <span className="choice-helper">Chrome desktop pop-up</span>
+                              <span className="choice-helper">In-app pop-up</span>
                             </button>
 
                             <button
                               type="button"
-                              className={`lead-add-activity-choice-card ${notifyVia === "email" ? "selected" : ""}`}
-                              onClick={() => setNotifyVia("email")}
+                              className={`lead-add-activity-choice-card ${notifyViaEmail ? "selected" : ""}`}
+                              onClick={() => setNotifyViaEmail((v) => !v)}
+                              aria-checked={notifyViaEmail}
+                              role="checkbox"
                             >
                               <div className="choice-head">
-                                <span className={`choice-radio ${notifyVia === "email" ? "active" : ""}`} />
-                                <EmailIcon color={notifyVia === "email" ? "var(--red)" : "var(--ink-2)"} />
+                                <span className={`choice-checkbox ${notifyViaEmail ? "checked" : ""}`}>
+                                  {notifyViaEmail ? "✓" : ""}
+                                </span>
+                                <EmailIcon color={notifyViaEmail ? "var(--red)" : "var(--ink-2)"} />
                                 <strong>Email</strong>
                               </div>
                               <span className="choice-helper">Send by email</span>

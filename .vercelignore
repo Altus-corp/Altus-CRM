@@ -1,0 +1,12 @@
+.git
+.vercel
+node_modules
+dist
+Altus-CRM.zip
+docs.zip
+backups
+import
+visual-check
+*.dump
+*.log
+login.txt
