@@ -422,3 +422,22 @@
   .filters-collapsed .saved-filters-trigger { flex-basis: 140px; width: 140px; }
   .filters-collapsed .active-filter-chip { max-width: 140px; }
 }
+.lead-activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lead-activity-menu-wrap { position: relative; }
+.lead-activity-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: grid; min-width: 150px; gap: 2px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow-md); }
+.lead-activity-menu button { padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.lead-activity-menu button:hover { background: var(--bg-2); }
+.lead-activity-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.lead-activity-summary button, .lead-activity-summary > span { display: grid; gap: 4px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); color: var(--ink-2); text-align: left; }
+.lead-activity-summary button { cursor: pointer; }
+.lead-activity-summary button:hover { border-color: var(--red); background: var(--panel); }
+.lead-activity-summary strong { color: var(--ink); font-size: 22px; }
+.lead-activity-form { display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); }
+.lead-activity-form input, .lead-activity-form textarea { width: 100%; min-height: 36px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; }
+.lead-activity-form textarea { min-height: 76px; resize: vertical; }
+.lead-activity-form > div { display: flex; gap: 8px; }
+.lead-activity-list-view { display: grid; gap: 10px; }
+.lead-activity-list { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.lead-activity-list li { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); }
+.lead-activity-list li span, .lead-activity-list li small { color: var(--ink-2); }
+.lead-activity-list li p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

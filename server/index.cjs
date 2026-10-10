@@ -177,6 +177,104 @@ async function leadDetail(req, res, db, id) {
   return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, products: products.rows });
 }
 
+function activityPage(url) {
+  const page = integerParam(url.searchParams.get("page"), 1, 1000000);
+  const pageSize = integerParam(url.searchParams.get("page_size"), 50, 50);
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
+function activityText(value, max = 4000) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text && text.length <= max ? text : null;
+}
+
+function activityDate(value) {
+  if (value == null || value === "") return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+async function activityList(res, db, id, kind, url) {
+  const { page, pageSize, offset } = activityPage(url);
+  const definitions = {
+    history: {
+      count: "SELECT count(*)::int AS total FROM lead_history WHERE lead_id=$1",
+      rows: "SELECT h.id,h.occurred_at,h.action,h.entity,h.field,h.from_value,h.to_value,h.note,h.actor_id,u.name AS actor_name FROM lead_history h LEFT JOIN users u ON u.id=h.actor_id WHERE h.lead_id=$1 ORDER BY h.occurred_at DESC NULLS LAST,h.id DESC LIMIT $2 OFFSET $3",
+    },
+    calls: {
+      count: "SELECT count(*)::int AS total FROM lead_calls WHERE lead_id=$1",
+      rows: "SELECT c.id,c.happened_at,c.duration_seconds,c.note,c.resolution,c.user_id,u.name AS caller_name FROM lead_calls c LEFT JOIN users u ON u.id=c.user_id WHERE c.lead_id=$1 ORDER BY c.happened_at DESC NULLS LAST,c.id DESC LIMIT $2 OFFSET $3",
+    },
+    followups: {
+      count: "SELECT count(*)::int AS total FROM lead_followups WHERE lead_id=$1",
+      rows: "SELECT f.id,f.created_at,f.created_by,creator.name AS creator_name,f.due_at,f.status,f.note,f.completed_at,COALESCE(json_agg(json_build_object('id',e.id,'old_due_at',e.old_due_at,'new_due_at',e.new_due_at,'changed_at',e.changed_at,'changed_by',e.changed_by,'changed_by_name',changer.name) ORDER BY e.changed_at DESC) FILTER (WHERE e.id IS NOT NULL),'[]') AS reschedules FROM lead_followups f LEFT JOIN users creator ON creator.id=f.created_by LEFT JOIN lead_followup_events e ON e.followup_id=f.id LEFT JOIN users changer ON changer.id=e.changed_by WHERE f.lead_id=$1 GROUP BY f.id,creator.name ORDER BY f.created_at DESC NULLS LAST,f.id DESC LIMIT $2 OFFSET $3",
+    },
+    messages: {
+      count: "SELECT count(*)::int AS total FROM lead_messages WHERE lead_id=$1",
+      rows: "SELECT m.id,m.sent_at,m.channel,m.status,m.sender,m.body FROM lead_messages m WHERE m.lead_id=$1 ORDER BY m.sent_at DESC NULLS LAST,m.id DESC LIMIT $2 OFFSET $3",
+    },
+    notes: {
+      count: "SELECT (SELECT count(*) FROM lead_notes WHERE lead_id=$1)+(SELECT count(*) FROM lead_calls WHERE lead_id=$1 AND note IS NOT NULL AND btrim(note)<>'') AS total",
+      rows: "SELECT * FROM (SELECT n.id,n.body,n.note_type,n.call_id,n.created_by,n.created_at,u.name AS author_name FROM lead_notes n LEFT JOIN users u ON u.id=n.created_by WHERE n.lead_id=$1 UNION ALL SELECT c.id,c.note AS body,'call' AS note_type,c.id AS call_id,c.user_id AS created_by,COALESCE(c.happened_at,c.created_at) AS created_at,u.name AS author_name FROM lead_calls c LEFT JOIN users u ON u.id=c.user_id WHERE c.lead_id=$1 AND c.note IS NOT NULL AND btrim(c.note)<>'') notes ORDER BY created_at DESC NULLS LAST,id DESC LIMIT $2 OFFSET $3",
+    },
+  };
+  const definition = definitions[kind];
+  if (!definition) return json(res, 404, { error: "Activity section not found." });
+  const [count, rows] = await Promise.all([db.query(definition.count, [id]), db.query(definition.rows, [id, pageSize, offset])]);
+  return json(res, 200, { items: rows.rows, page, page_size: pageSize, total: count.rows[0]?.total || 0 });
+}
+
+async function activityLeadExists(db, id) { return Boolean(await db.one?.("SELECT id FROM leads WHERE id=$1", [id]) || (await db.query("SELECT id FROM leads WHERE id=$1", [id])).rows[0]); }
+
+async function addLeadNote(req, res, db, actor, id) {
+  const body = await readJson(req); const note = activityText(body.body);
+  if (!note) return json(res, 400, { error: "Note body is required." });
+  if (!(await activityLeadExists(db, id))) return json(res, 404, { error: "Lead not found." });
+  const noteId = `lead-note-${crypto.randomUUID()}`;
+  await db.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by) VALUES($1,$2,$3,'manual',$4)", [noteId, id, note, actor.id]);
+  await writeAudit(db, { actorUserId: actor.id, action: "lead.note_created", entityType: "lead", entityId: id, newValue: "manual_note", ip: req.socket.remoteAddress });
+  return json(res, 201, { id: noteId });
+}
+
+async function addLeadCall(req, res, db, actor, id) {
+  const body = await readJson(req); const happenedAt = activityDate(body.happened_at || body.happenedAt) || new Date().toISOString();
+  const duration = body.duration_seconds == null || body.duration_seconds === "" ? null : Number(body.duration_seconds);
+  const note = body.note == null ? null : activityText(body.note);
+  const resolution = body.resolution == null ? null : activityText(body.resolution, 200);
+  if (!happenedAt || (duration != null && (!Number.isInteger(duration) || duration < 0 || duration > 86400)) || (body.note != null && note == null) || (body.resolution != null && resolution == null)) return json(res, 400, { error: "Invalid call data." });
+  if (!(await activityLeadExists(db, id))) return json(res, 404, { error: "Lead not found." });
+  const callId = `lead-call-${crypto.randomUUID()}`;
+  await db.query("INSERT INTO lead_calls(id,lead_id,user_id,happened_at,note,resolution,duration_seconds,created_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,now(),$3)", [callId, id, actor.id, happenedAt, note, resolution, duration]);
+  await writeAudit(db, { actorUserId: actor.id, action: "lead.call_created", entityType: "lead", entityId: id, newValue: "call", ip: req.socket.remoteAddress });
+  return json(res, 201, { id: callId });
+}
+
+async function addLeadFollowup(req, res, db, actor, id) {
+  const body = await readJson(req); const dueAt = activityDate(body.due_at || body.dueAt); const note = body.note == null ? null : activityText(body.note);
+  if (!dueAt || (body.note != null && note == null)) return json(res, 400, { error: "Invalid follow-up data." });
+  if (!(await activityLeadExists(db, id))) return json(res, 404, { error: "Lead not found." });
+  const followupId = `lead-followup-${crypto.randomUUID()}`;
+  await db.query("INSERT INTO lead_followups(id,lead_id,assigned_to,due_at,status,note,created_at,created_by) VALUES($1,$2,$3,$4,'open',$5,now(),$3)", [followupId, id, actor.id, dueAt, note]);
+  await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_created", entityType: "lead", entityId: id, newValue: "followup", ip: req.socket.remoteAddress });
+  return json(res, 201, { id: followupId });
+}
+
+async function rescheduleLeadFollowup(req, res, db, actor, id, followupId) {
+  const body = await readJson(req); const dueAt = activityDate(body.due_at || body.dueAt);
+  if (!dueAt) return json(res, 400, { error: "A valid due date is required." });
+  const current = (await db.query("SELECT id,due_at FROM lead_followups WHERE id=$1 AND lead_id=$2", [followupId, id])).rows[0];
+  if (!current) return json(res, 404, { error: "Follow-up not found." });
+  await transaction(db, async (tx) => { await tx.query("UPDATE lead_followups SET due_at=$1,status='rescheduled' WHERE id=$2", [dueAt, followupId]); await tx.query("INSERT INTO lead_followup_events(id,followup_id,old_due_at,new_due_at,changed_by) VALUES($1,$2,$3,$4,$5)", [`followup-event-${crypto.randomUUID()}`, followupId, current.due_at, dueAt, actor.id]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.followup_rescheduled", entityType: "lead", entityId: id, newValue: "followup_rescheduled", ip: req.socket.remoteAddress }); });
+  return json(res, 200, { id: followupId });
+}
+
+async function completeLeadFollowup(req, res, db, actor, id, followupId) {
+  const result = await db.query("UPDATE lead_followups SET status='done',completed_at=now() WHERE id=$1 AND lead_id=$2 RETURNING id", [followupId, id]);
+  if (!result.rows[0]) return json(res, 404, { error: "Follow-up not found." });
+  await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_completed", entityType: "lead", entityId: id, newValue: "followup_completed", ip: req.socket.remoteAddress });
+  return json(res, 200, { id: followupId });
+}
+
 async function transaction(db, work) {
   if (typeof db.transaction === "function") return db.transaction(work);
   await db.query("BEGIN");
@@ -408,6 +506,16 @@ async function route(req, res, db) {
   const quickFilterMatch = url.pathname.match(/^\/api\/lead-quick-filters\/([^/]+)$/);
   if (quickFilterMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterUpdate(req, res, db, user, decodeURIComponent(quickFilterMatch[1])); }
   if (quickFilterMatch && req.method === "DELETE") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterDelete(res, db, user, decodeURIComponent(quickFilterMatch[1])); }
+  const activityMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/activity\/(history|calls|followups|messages|notes)$/);
+  if (activityMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." }); return activityList(res, db, decodeURIComponent(activityMatch[1]), activityMatch[2], url); }
+  const noteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/notes$/);
+  if (noteMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadNote(req, res, db, user, decodeURIComponent(noteMatch[1])); }
+  const callMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/calls$/);
+  if (callMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadCall(req, res, db, user, decodeURIComponent(callMatch[1])); }
+  const followupCreateMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups$/);
+  if (followupCreateMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadFollowup(req, res, db, user, decodeURIComponent(followupCreateMatch[1])); }
+  const followupActionMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups\/([^/]+)\/(reschedule|complete)$/);
+  if (followupActionMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const leadId = decodeURIComponent(followupActionMatch[1]); const followupId = decodeURIComponent(followupActionMatch[2]); return followupActionMatch[3] === "reschedule" ? rescheduleLeadFollowup(req, res, db, user, leadId, followupId) : completeLeadFollowup(req, res, db, user, leadId, followupId); }
   if (url.pathname === "/api/leads" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     return leadsList(req, res, db, url);
@@ -442,4 +550,4 @@ async function start() {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS };
+module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS };
