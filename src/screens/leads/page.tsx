@@ -243,6 +243,46 @@ function HandoffIcon({ color = "var(--red)" }: { color?: string }) {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function DesktopIcon({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect width="20" height="14" x="2" y="3" rx="2" />
+      <line x1="8" x2="16" y1="21" y2="21" />
+      <line x1="12" x2="12" y1="17" y2="21" />
+    </svg>
+  );
+}
+
+const ADMIN_ACTIVITY_TYPES = [
+  { id: "call", label: "Phone call", icon: CallIcon, placeholder: "Interested in a product walkthrough next week. Asked to share the proposal before the demo." },
+  { id: "meeting", label: "Meeting / Demo", icon: CalendarIcon, placeholder: "Met with client team. Discussed requirements, timeline, and next steps." },
+  { id: "email", label: "Email follow-up", icon: EmailIcon, placeholder: "Sent follow-up email with product deck and case studies." },
+  { id: "whatsapp", label: "WhatsApp message", icon: WhatsAppIcon, placeholder: "Sent WhatsApp message with Productivity Shastra overview." },
+  { id: "site_visit", label: "Site visit", icon: BuildingIcon, placeholder: "Conducted on-site inspection and met operational managers." },
+  { id: "proposal", label: "Proposal review", icon: NoteIcon, placeholder: "Shared revised commercial proposal with pricing breakdown." },
+  { id: "walkthrough", label: "Product walkthrough", icon: GlobeIcon, placeholder: "Walked client through core platform modules and answered questions." },
+  { id: "note", label: "Internal note", icon: HandoffIcon, placeholder: "Internal coordination note for sales and delivery team." },
+];
+
+const NOTIFY_BEFORE_OPTIONS = [
+  "5 minutes before",
+  "10 minutes before",
+  "15 minutes before",
+  "20 minutes before",
+  "30 minutes before",
+  "1 hour before",
+  "1 day before",
+];
+
 
 type LeadDetailTab = "activity" | "details" | "notes" | "follow-up";
 
@@ -302,6 +342,7 @@ export function LeadsPage() {
   const [reminderNotify, setReminderNotify] = useState("Aarav Mehta");
   const [showInHistory, setShowInHistory] = useState(true);
   const [noteAttachments, setNoteAttachments] = useState<string[]>(["Productivity-Shastra-overview.pdf"]);
+  const [showNoteForm, setShowNoteForm] = useState(false);
   const [savedNotesList, setSavedNotesList] = useState<
     Array<{
       id: string;
@@ -312,8 +353,69 @@ export function LeadsPage() {
       createdAt: string;
       attachments: string[];
     }>
-  >([]);
+  >([
+    {
+      id: "note-init-1",
+      type: "general",
+      text: "Nikhil wants a 30-minute product walkthrough next week.\nKey interest: team productivity reporting and follow-up tracking.\nShare proposal before the demo.",
+      tags: ["Warm lead", "Demo requested"],
+      pinned: true,
+      createdAt: "Today, 10:25 AM",
+      attachments: ["Productivity-Shastra-overview.pdf"],
+    },
+  ]);
   const [noteSavedFeedback, setNoteSavedFeedback] = useState(false);
+
+  // Redesigned Add Activity drawer state
+  const [showAddActivityDrawer, setShowAddActivityDrawer] = useState(false);
+  const [activityType, setActivityType] = useState("Phone call");
+  const [activityTypeSearch, setActivityTypeSearch] = useState("");
+  const [activityTypeDropdownOpen, setActivityTypeDropdownOpen] = useState(false);
+  const [activityDetailsText, setActivityDetailsText] = useState(
+    "Interested in a product walkthrough next week. Asked to share the proposal before the demo."
+  );
+  const [activityAttachments, setActivityAttachments] = useState<string[]>([]);
+  const [addFollowUpTask, setAddFollowUpTask] = useState(true);
+  const [followUpTitle, setFollowUpTitle] = useState("Send proposal and confirm demo time");
+  const [followUpDueDate, setFollowUpDueDate] = useState("2026-10-13");
+  const [followUpDueTime, setFollowUpDueTime] = useState("11:00");
+  const [followUpAssignee, setFollowUpAssignee] = useState("Aarav Mehta");
+  const [sendNotification, setSendNotification] = useState(true);
+  const [notifyMe, setNotifyMe] = useState(true);
+  const [notifyBefore, setNotifyBefore] = useState("15 minutes before");
+  const [notifyVia, setNotifyVia] = useState<"desktop" | "email">("desktop");
+
+  // Dedicated Follow-up tab state
+  const [showFollowUpForm, setShowFollowUpForm] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState("2026-10-10");
+  const [followUpTime, setFollowUpTime] = useState("11:00");
+  const [followUpNote, setFollowUpNote] = useState("Discuss demo feedback, proposal, and next steps.");
+  const [followUpNotifyApp, setFollowUpNotifyApp] = useState(true);
+  const [followUpNotifyEmail, setFollowUpNotifyEmail] = useState(false);
+  const [savedFollowUpsList, setSavedFollowUpsList] = useState<
+    Array<{
+      id: string;
+      dueDate: string;
+      dueTime: string;
+      status: string;
+      note: string;
+      notifyApp: boolean;
+      notifyEmail: boolean;
+      createdAt: string;
+    }>
+  >([
+    {
+      id: "fu-init-1",
+      dueDate: "13 Oct 2026",
+      dueTime: "11:00 AM",
+      status: "Upcoming",
+      note: "Send proposal and confirm walkthrough demo time with Nikhil Shah.",
+      notifyApp: true,
+      notifyEmail: false,
+      createdAt: "Today, 10:35 AM",
+    },
+  ]);
+  const [followUpSavedFeedback, setFollowUpSavedFeedback] = useState(false);
 
   const detailTabRefs = useRef<Partial<Record<LeadDetailTab, HTMLButtonElement | null>>>({});
   useEffect(() => {
@@ -393,6 +495,9 @@ export function LeadsPage() {
                 <button
                   type="button"
                   className="lead-quick-action-btn"
+                  disabled={!screen.canLogCall}
+                  title={screen.canLogCall ? "Log a call" : screen.callDisabledReason}
+                  aria-label={screen.canLogCall ? "Log call" : `Log call disabled: ${screen.callDisabledReason}`}
                   onClick={() => {
                     setDetailTab("activity");
                     setActivityComposer("call");
@@ -436,6 +541,7 @@ export function LeadsPage() {
                   className="lead-quick-action-btn"
                   onClick={() => {
                     setDetailTab("notes");
+                    setShowNoteForm(true);
                   }}
                 >
                   <NoteIcon />
@@ -445,8 +551,8 @@ export function LeadsPage() {
                   type="button"
                   className="lead-quick-action-btn"
                   onClick={() => {
-                    setDetailTab("activity");
-                    setActivityComposer("followup");
+                    setDetailTab("follow-up");
+                    setShowFollowUpForm(true);
                   }}
                 >
                   <CalendarIcon />
@@ -494,44 +600,10 @@ export function LeadsPage() {
                     <button
                       className="lead-add-activity-btn"
                       type="button"
-                      onClick={() => setActivityMenuOpen((val) => !val)}
+                      onClick={() => setShowAddActivityDrawer(true)}
                     >
                       <span className="plus-sign">＋</span> Add Activity
                     </button>
-                    {activityMenuOpen && (
-                      <div className="lead-activity-menu" role="menu">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setActivityComposer("call");
-                            setActivityMenuOpen(false);
-                          }}
-                        >
-                          Log call
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setDetailTab("notes");
-                            setActivityMenuOpen(false);
-                          }}
-                        >
-                          Add note
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setActivityComposer("followup");
-                            setActivityMenuOpen(false);
-                          }}
-                        >
-                          Set follow-up
-                        </button>
-                      </div>
-                    )}
                   </div>
                   <div className="lead-activity-filter-wrap">
                     <button
@@ -1084,6 +1156,23 @@ export function LeadsPage() {
               role="tabpanel"
               aria-label="Lead notes"
             >
+              {/* Notes Tab Action Bar: Title, Count & Add note button */}
+              <div className="lead-notes-tab-header">
+                <div className="lead-notes-tab-heading">
+                  <h3 className="lead-notes-tab-title">Notes</h3>
+                  <span className="lead-notes-count-badge">{savedNotesList.length}</span>
+                </div>
+                {!showNoteForm && (
+                  <button
+                    type="button"
+                    className="lead-add-note-trigger-btn"
+                    onClick={() => setShowNoteForm(true)}
+                  >
+                    <span className="plus-sign">＋</span> Add note
+                  </button>
+                )}
+              </div>
+
               {noteSavedFeedback && (
                 <div className="lead-note-alert-success" role="status">
                   <span>✓ Note saved successfully</span>
@@ -1093,393 +1182,418 @@ export function LeadsPage() {
                 </div>
               )}
 
-              {/* Dedicated Add Note UI Card matching Reference */}
-              <div className="lead-note-composer-card">
-                {/* Header */}
-                <div className="lead-note-composer-head">
-                  <div>
-                    <span className="lead-note-composer-eyebrow">NEW NOTE</span>
-                    <h3 className="lead-note-composer-title">Add note</h3>
-                  </div>
-                </div>
-
-                {/* Lead Context Bar */}
-                <div className="lead-note-context-bar">
-                  <div className="lead-note-context-lead">
-                    <div className="lead-note-avatar-badge" aria-hidden="true">
-                      {leadName
-                        .split(" ")
-                        .map((n: string) => n[0])
-                        .slice(0, 2)
-                        .join("")
-                        .toUpperCase()}
+              {/* Dedicated Add Note UI Card (opens only when showNoteForm is true) */}
+              {showNoteForm && (
+                <div className="lead-note-composer-card">
+                  {/* Header */}
+                  <div className="lead-note-composer-head">
+                    <div>
+                      <span className="lead-note-composer-eyebrow">NEW NOTE</span>
+                      <h3 className="lead-note-composer-title">Add note</h3>
                     </div>
-                    <span className="lead-note-lead-name">{leadName}</span>
-                    <span className="lead-note-lead-stage">| {leadStatus || "Fresh lead"}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="lead-note-view-lead-btn"
-                    onClick={() => setDetailTab("details")}
-                  >
-                    View lead <span aria-hidden="true">↗</span>
-                  </button>
-                </div>
-
-                {/* Note Type Pills */}
-                <div className="lead-note-type-pills" role="radiogroup" aria-label="Note type">
-                  <button
-                    type="button"
-                    className={`lead-note-type-pill ${noteType === "general" ? "active" : ""}`}
-                    onClick={() => setNoteType("general")}
-                    role="radio"
-                    aria-checked={noteType === "general"}
-                  >
-                    <NoteIcon color={noteType === "general" ? "var(--red)" : "var(--ink-2)"} />
-                    <span>General note</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`lead-note-type-pill ${noteType === "call" ? "active" : ""}`}
-                    onClick={() => setNoteType("call")}
-                    role="radio"
-                    aria-checked={noteType === "call"}
-                  >
-                    <CallIcon color={noteType === "call" ? "var(--red)" : "var(--ink-2)"} />
-                    <span>Call note</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`lead-note-type-pill ${noteType === "meeting" ? "active" : ""}`}
-                    onClick={() => setNoteType("meeting")}
-                    role="radio"
-                    aria-checked={noteType === "meeting"}
-                  >
-                    <CalendarIcon color={noteType === "meeting" ? "var(--red)" : "var(--ink-2)"} />
-                    <span>Meeting note</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`lead-note-type-pill ${noteType === "handoff" ? "active" : ""}`}
-                    onClick={() => setNoteType("handoff")}
-                    role="radio"
-                    aria-checked={noteType === "handoff"}
-                  >
-                    <HandoffIcon color={noteType === "handoff" ? "var(--red)" : "var(--ink-2)"} />
-                    <span>Internal handoff</span>
-                  </button>
-                </div>
-
-                {/* Note Editor */}
-                <div className="lead-note-editor-wrapper">
-                  <label className="lead-note-input-label" htmlFor="lead-note-textarea">
-                    Note
-                  </label>
-                  <div className="lead-note-editor-box">
-                    {/* Toolbar */}
-                    <div className="lead-note-toolbar" role="toolbar" aria-label="Text formatting">
-                      <div className="lead-note-toolbar-group">
-                        <button type="button" className="lead-note-tool-btn" title="Bold" aria-label="Bold">
-                          <strong>B</strong>
-                        </button>
-                        <button type="button" className="lead-note-tool-btn" title="Italic" aria-label="Italic">
-                          <em>I</em>
-                        </button>
-                        <button type="button" className="lead-note-tool-btn" title="Underline" aria-label="Underline">
-                          <u>U</u>
-                        </button>
-                        <div className="lead-note-tool-divider" aria-hidden="true" />
-                        <button type="button" className="lead-note-tool-btn" title="Bullet list" aria-label="Bullet list">
-                          <BulletListIcon />
-                        </button>
-                        <button type="button" className="lead-note-tool-btn" title="Numbered list" aria-label="Numbered list">
-                          <NumberedListIcon />
-                        </button>
-                        <div className="lead-note-tool-divider" aria-hidden="true" />
-                        <button type="button" className="lead-note-tool-btn" title="Insert link" aria-label="Insert link">
-                          <LinkIcon />
-                        </button>
-                        <button type="button" className="lead-note-tool-btn" title="Mention team member" aria-label="Mention">
-                          <AtIcon />
-                        </button>
-                      </div>
-                      <div className="lead-note-toolbar-group right">
-                        <button type="button" className="lead-note-tool-btn" title="Undo" aria-label="Undo">
-                          <UndoIcon />
-                        </button>
-                        <button type="button" className="lead-note-tool-btn" title="Redo" aria-label="Redo">
-                          <RedoIcon />
-                        </button>
-                      </div>
-                    </div>
-
-                    <textarea
-                      id="lead-note-textarea"
-                      className="lead-note-textarea"
-                      rows={4}
-                      value={noteText}
-                      onChange={(e) => setNoteText(e.target.value)}
-                      placeholder="Type your note here..."
-                    />
-                  </div>
-                </div>
-
-                {/* 3-Column Metadata Row: Related activity, Tags, Visibility */}
-                <div className="lead-note-meta-grid">
-                  <div className="lead-note-meta-field">
-                    <label className="lead-note-input-label" htmlFor="lead-note-related-activity">
-                      Related activity
-                    </label>
-                    <div className="lead-note-select-wrap">
-                      <select
-                        id="lead-note-related-activity"
-                        className="lead-note-select"
-                        value={relatedActivity}
-                        onChange={(e) => setRelatedActivity(e.target.value)}
-                      >
-                        <option value="Call - 10 Oct 2026, 10:18 AM">Call - 10 Oct 2026, 10:18 AM</option>
-                        <option value="Email - 09 Oct 2026, 04:30 PM">Email - 09 Oct 2026, 04:30 PM</option>
-                        <option value="Meeting - 08 Oct 2026, 02:00 PM">Meeting - 08 Oct 2026, 02:00 PM</option>
-                        <option value="None">None</option>
-                      </select>
-                      <ChevronDownIcon />
-                    </div>
-                  </div>
-
-                  <div className="lead-note-meta-field">
-                    <label className="lead-note-input-label">Tags</label>
-                    <div className="lead-note-tags-input-container">
-                      <div className="lead-note-tag-chips">
-                        {noteTags.map((tag) => (
-                          <span className="lead-note-tag-chip" key={tag}>
-                            <span>{tag}</span>
-                            <button
-                              type="button"
-                              className="lead-note-tag-remove"
-                              onClick={() => setNoteTags(noteTags.filter((t) => t !== tag))}
-                              aria-label={`Remove tag ${tag}`}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        className="lead-note-tag-dropdown-btn"
-                        onClick={() => {
-                          const newTag = prompt("Enter tag name:");
-                          if (newTag && !noteTags.includes(newTag.trim())) {
-                            setNoteTags([...noteTags, newTag.trim()]);
-                          }
-                        }}
-                        aria-label="Add tag"
-                      >
-                        <ChevronDownIcon />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="lead-note-meta-field">
-                    <label className="lead-note-input-label" htmlFor="lead-note-visibility">
-                      Visibility
-                    </label>
-                    <div className="lead-note-select-wrap">
-                      <select
-                        id="lead-note-visibility"
-                        className="lead-note-select"
-                        value={noteVisibility}
-                        onChange={(e) => setNoteVisibility(e.target.value)}
-                      >
-                        <option value="Team">Team</option>
-                        <option value="Private">Private</option>
-                        <option value="Everyone">Everyone</option>
-                      </select>
-                      <ChevronDownIcon />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Switches & Reminders Container */}
-                <div className="lead-note-switches-container">
-                  {/* Switch 1: Pin to lead */}
-                  <div className="lead-note-switch-block">
-                    <label className="lead-note-switch-label">
-                      <span className="lead-toggle-switch">
-                        <input
-                          type="checkbox"
-                          checked={pinToLead}
-                          onChange={(e) => setPinToLead(e.target.checked)}
-                        />
-                        <span className="lead-toggle-slider" />
-                      </span>
-                      <div className="lead-note-switch-texts">
-                        <span className="lead-note-switch-title">Pin to lead</span>
-                        <span className="lead-note-switch-desc">Keep this note visible for the team</span>
-                      </div>
-                    </label>
-                  </div>
-
-                  {/* Switch 2: Set a reminder */}
-                  <div className="lead-note-switch-block">
-                    <label className="lead-note-switch-label">
-                      <span className="lead-toggle-switch">
-                        <input
-                          type="checkbox"
-                          checked={setReminder}
-                          onChange={(e) => setSetReminder(e.target.checked)}
-                        />
-                        <span className="lead-toggle-slider" />
-                      </span>
-                      <div className="lead-note-switch-texts">
-                        <span className="lead-note-switch-title">Set a reminder</span>
-                      </div>
-                    </label>
-
-                    {/* Subfields for Reminder */}
-                    {setReminder && (
-                      <div className="lead-note-reminder-subrow">
-                        <div className="lead-note-reminder-field">
-                          <span className="lead-note-sublabel">Reminder date</span>
-                          <div className="lead-note-input-with-icon">
-                            <CalendarIcon color="var(--ink-2)" />
-                            <input
-                              type="date"
-                              className="lead-note-clean-input"
-                              value={reminderDate}
-                              onChange={(e) => setReminderDate(e.target.value)}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="lead-note-reminder-field">
-                          <span className="lead-note-sublabel">Time</span>
-                          <div className="lead-note-input-with-icon">
-                            <ClockIcon />
-                            <input
-                              type="time"
-                              className="lead-note-clean-input"
-                              value={reminderTime}
-                              onChange={(e) => setReminderTime(e.target.value)}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="lead-note-reminder-field">
-                          <span className="lead-note-sublabel">Notify</span>
-                          <div className="lead-note-input-with-icon">
-                            <UserIcon />
-                            <select
-                              className="lead-note-clean-select"
-                              value={reminderNotify}
-                              onChange={(e) => setReminderNotify(e.target.value)}
-                            >
-                              <option value="Aarav Mehta">Aarav Mehta</option>
-                              <option value="Nikhil Shah">Nikhil Shah</option>
-                              <option value="Self">Assignee</option>
-                            </select>
-                            <ChevronDownIcon />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Attachments Section */}
-                <div className="lead-note-attachments-section">
-                  <label className="lead-note-input-label">Attachments</label>
-                  <div className="lead-note-attachments-row">
                     <button
                       type="button"
-                      className="lead-note-attach-btn"
-                      onClick={() => {
-                        const fileName = prompt("Attach file name (e.g. proposal.pdf):");
-                        if (fileName) setNoteAttachments([...noteAttachments, fileName.trim()]);
-                      }}
+                      className="lead-note-composer-close-btn"
+                      onClick={() => setShowNoteForm(false)}
+                      aria-label="Close note form"
                     >
-                      <PaperclipIcon />
-                      <span>Attach files</span>
+                      <CloseIcon />
                     </button>
+                  </div>
 
-                    {noteAttachments.map((file) => (
-                      <div className="lead-note-file-chip" key={file}>
-                        <span className="lead-note-pdf-icon" aria-hidden="true">
-                          PDF
-                        </span>
-                        <span className="lead-note-file-name">{file}</span>
+                  {/* Lead Context Bar */}
+                  <div className="lead-note-context-bar">
+                    <div className="lead-note-context-lead">
+                      <div className="lead-note-avatar-badge" aria-hidden="true">
+                        {leadName
+                          .split(" ")
+                          .map((n: string) => n[0])
+                          .slice(0, 2)
+                          .join("")
+                          .toUpperCase()}
+                      </div>
+                      <span className="lead-note-lead-name">{leadName}</span>
+                      <span className="lead-note-lead-stage">| {leadStatus || "Fresh lead"}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="lead-note-view-lead-btn"
+                      onClick={() => setDetailTab("details")}
+                    >
+                      View lead <span aria-hidden="true">↗</span>
+                    </button>
+                  </div>
+
+                  {/* Note Type Pills */}
+                  <div className="lead-note-type-pills" role="radiogroup" aria-label="Note type">
+                    <button
+                      type="button"
+                      className={`lead-note-type-pill ${noteType === "general" ? "active" : ""}`}
+                      onClick={() => setNoteType("general")}
+                      role="radio"
+                      aria-checked={noteType === "general"}
+                    >
+                      <NoteIcon color={noteType === "general" ? "var(--red)" : "var(--ink-2)"} />
+                      <span>General note</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`lead-note-type-pill ${noteType === "call" ? "active" : ""}`}
+                      onClick={() => setNoteType("call")}
+                      role="radio"
+                      aria-checked={noteType === "call"}
+                    >
+                      <CallIcon color={noteType === "call" ? "var(--red)" : "var(--ink-2)"} />
+                      <span>Call note</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`lead-note-type-pill ${noteType === "meeting" ? "active" : ""}`}
+                      onClick={() => setNoteType("meeting")}
+                      role="radio"
+                      aria-checked={noteType === "meeting"}
+                    >
+                      <CalendarIcon color={noteType === "meeting" ? "var(--red)" : "var(--ink-2)"} />
+                      <span>Meeting note</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`lead-note-type-pill ${noteType === "handoff" ? "active" : ""}`}
+                      onClick={() => setNoteType("handoff")}
+                      role="radio"
+                      aria-checked={noteType === "handoff"}
+                    >
+                      <HandoffIcon color={noteType === "handoff" ? "var(--red)" : "var(--ink-2)"} />
+                      <span>Internal handoff</span>
+                    </button>
+                  </div>
+
+                  {/* Note Editor */}
+                  <div className="lead-note-editor-wrapper">
+                    <label className="lead-note-input-label" htmlFor="lead-note-textarea">
+                      Note
+                    </label>
+                    <div className="lead-note-editor-box">
+                      {/* Toolbar */}
+                      <div className="lead-note-toolbar" role="toolbar" aria-label="Text formatting">
+                        <div className="lead-note-toolbar-group">
+                          <button type="button" className="lead-note-tool-btn" title="Bold" aria-label="Bold">
+                            <strong>B</strong>
+                          </button>
+                          <button type="button" className="lead-note-tool-btn" title="Italic" aria-label="Italic">
+                            <em>I</em>
+                          </button>
+                          <button type="button" className="lead-note-tool-btn" title="Underline" aria-label="Underline">
+                            <u>U</u>
+                          </button>
+                          <div className="lead-note-tool-divider" aria-hidden="true" />
+                          <button type="button" className="lead-note-tool-btn" title="Bullet list" aria-label="Bullet list">
+                            <BulletListIcon />
+                          </button>
+                          <button type="button" className="lead-note-tool-btn" title="Numbered list" aria-label="Numbered list">
+                            <NumberedListIcon />
+                          </button>
+                          <div className="lead-note-tool-divider" aria-hidden="true" />
+                          <button type="button" className="lead-note-tool-btn" title="Insert link" aria-label="Insert link">
+                            <LinkIcon />
+                          </button>
+                          <button type="button" className="lead-note-tool-btn" title="Mention team member" aria-label="Mention">
+                            <AtIcon />
+                          </button>
+                        </div>
+                        <div className="lead-note-toolbar-group right">
+                          <button type="button" className="lead-note-tool-btn" title="Undo" aria-label="Undo">
+                            <UndoIcon />
+                          </button>
+                          <button type="button" className="lead-note-tool-btn" title="Redo" aria-label="Redo">
+                            <RedoIcon />
+                          </button>
+                        </div>
+                      </div>
+
+                      <textarea
+                        id="lead-note-textarea"
+                        className="lead-note-textarea"
+                        rows={4}
+                        value={noteText}
+                        onChange={(e) => setNoteText(e.target.value)}
+                        placeholder="Type your note here..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3-Column Metadata Row: Related activity, Tags, Visibility */}
+                  <div className="lead-note-meta-grid">
+                    <div className="lead-note-meta-field">
+                      <label className="lead-note-input-label" htmlFor="lead-note-related-activity">
+                        Related activity
+                      </label>
+                      <div className="lead-note-select-wrap">
+                        <select
+                          id="lead-note-related-activity"
+                          className="lead-note-select"
+                          value={relatedActivity}
+                          onChange={(e) => setRelatedActivity(e.target.value)}
+                        >
+                          <option value="Call - 10 Oct 2026, 10:18 AM">Call - 10 Oct 2026, 10:18 AM</option>
+                          <option value="Email - 09 Oct 2026, 04:30 PM">Email - 09 Oct 2026, 04:30 PM</option>
+                          <option value="Meeting - 08 Oct 2026, 02:00 PM">Meeting - 08 Oct 2026, 02:00 PM</option>
+                          <option value="None">None</option>
+                        </select>
+                        <ChevronDownIcon />
+                      </div>
+                    </div>
+
+                    <div className="lead-note-meta-field">
+                      <label className="lead-note-input-label">Tags</label>
+                      <div className="lead-note-tags-input-container">
+                        <div className="lead-note-tag-chips">
+                          {noteTags.map((tag) => (
+                            <span className="lead-note-tag-chip" key={tag}>
+                              <span>{tag}</span>
+                              <button
+                                type="button"
+                                className="lead-note-tag-remove"
+                                onClick={() => setNoteTags(noteTags.filter((t) => t !== tag))}
+                                aria-label={`Remove tag ${tag}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
                         <button
                           type="button"
-                          className="lead-note-file-remove"
-                          onClick={() => setNoteAttachments(noteAttachments.filter((f) => f !== file))}
-                          aria-label={`Remove attachment ${file}`}
+                          className="lead-note-tag-dropdown-btn"
+                          onClick={() => {
+                            const newTag = prompt("Enter tag name:");
+                            if (newTag && !noteTags.includes(newTag.trim())) {
+                              setNoteTags([...noteTags, newTag.trim()]);
+                            }
+                          }}
+                          aria-label="Add tag"
                         >
-                          ×
+                          <ChevronDownIcon />
                         </button>
                       </div>
-                    ))}
+                    </div>
+
+                    <div className="lead-note-meta-field">
+                      <label className="lead-note-input-label" htmlFor="lead-note-visibility">
+                        Visibility
+                      </label>
+                      <div className="lead-note-select-wrap">
+                        <select
+                          id="lead-note-visibility"
+                          className="lead-note-select"
+                          value={noteVisibility}
+                          onChange={(e) => setNoteVisibility(e.target.value)}
+                        >
+                          <option value="Team">Team</option>
+                          <option value="Private">Private</option>
+                          <option value="Everyone">Everyone</option>
+                        </select>
+                        <ChevronDownIcon />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Switches & Reminders Container */}
+                  <div className="lead-note-switches-container">
+                    {/* Switch 1: Pin to lead */}
+                    <div className="lead-note-switch-block">
+                      <label className="lead-note-switch-label">
+                        <span className="lead-toggle-switch">
+                          <input
+                            type="checkbox"
+                            checked={pinToLead}
+                            onChange={(e) => setPinToLead(e.target.checked)}
+                          />
+                          <span className="lead-toggle-slider" />
+                        </span>
+                        <div className="lead-note-switch-texts">
+                          <span className="lead-note-switch-title">Pin to lead</span>
+                          <span className="lead-note-switch-desc">Keep this note visible for the team</span>
+                        </div>
+                      </label>
+                    </div>
+
+                    {/* Switch 2: Set a reminder */}
+                    <div className="lead-note-switch-block">
+                      <label className="lead-note-switch-label">
+                        <span className="lead-toggle-switch">
+                          <input
+                            type="checkbox"
+                            checked={setReminder}
+                            onChange={(e) => setSetReminder(e.target.checked)}
+                          />
+                          <span className="lead-toggle-slider" />
+                        </span>
+                        <div className="lead-note-switch-texts">
+                          <span className="lead-note-switch-title">Set a reminder</span>
+                        </div>
+                      </label>
+
+                      {/* Subfields for Reminder */}
+                      {setReminder && (
+                        <div className="lead-note-reminder-subrow">
+                          <div className="lead-note-reminder-field">
+                            <span className="lead-note-sublabel">Reminder date</span>
+                            <div className="lead-note-input-with-icon">
+                              <CalendarIcon color="var(--ink-2)" />
+                              <input
+                                type="date"
+                                className="lead-note-clean-input"
+                                value={reminderDate}
+                                onChange={(e) => setReminderDate(e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="lead-note-reminder-field">
+                            <span className="lead-note-sublabel">Time</span>
+                            <div className="lead-note-input-with-icon">
+                              <ClockIcon />
+                              <input
+                                type="time"
+                                className="lead-note-clean-input"
+                                value={reminderTime}
+                                onChange={(e) => setReminderTime(e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="lead-note-reminder-field">
+                            <span className="lead-note-sublabel">Notify</span>
+                            <div className="lead-note-input-with-icon">
+                              <UserIcon />
+                              <select
+                                className="lead-note-clean-select"
+                                value={reminderNotify}
+                                onChange={(e) => setReminderNotify(e.target.value)}
+                              >
+                                <option value="Aarav Mehta">Aarav Mehta</option>
+                                <option value="Nikhil Shah">Nikhil Shah</option>
+                                <option value="Self">Assignee</option>
+                              </select>
+                              <ChevronDownIcon />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Attachments Section */}
+                  <div className="lead-note-attachments-section">
+                    <label className="lead-note-input-label">Attachments</label>
+                    <div className="lead-note-attachments-row">
+                      <button
+                        type="button"
+                        className="lead-note-attach-btn"
+                        onClick={() => {
+                          const fileName = prompt("Attach file name (e.g. proposal.pdf):");
+                          if (fileName) setNoteAttachments([...noteAttachments, fileName.trim()]);
+                        }}
+                      >
+                        <PaperclipIcon />
+                        <span>Attach files</span>
+                      </button>
+
+                      {noteAttachments.map((file) => (
+                        <div className="lead-note-file-chip" key={file}>
+                          <span className="lead-note-pdf-icon" aria-hidden="true">
+                            PDF
+                          </span>
+                          <span className="lead-note-file-name">{file}</span>
+                          <button
+                            type="button"
+                            className="lead-note-file-remove"
+                            onClick={() => setNoteAttachments(noteAttachments.filter((f) => f !== file))}
+                            aria-label={`Remove attachment ${file}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Bottom Switch 3: Show in activity history */}
+                  <div className="lead-note-switch-block single-line">
+                    <label className="lead-note-switch-label">
+                      <span className="lead-toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={showInHistory}
+                          onChange={(e) => setShowInHistory(e.target.checked)}
+                        />
+                        <span className="lead-toggle-slider" />
+                      </span>
+                      <div className="lead-note-switch-texts">
+                        <span className="lead-note-switch-title">Show in activity history</span>
+                        <span className="lead-note-switch-desc">This note becomes the latest activity.</span>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Footer Action Buttons */}
+                  <div className="lead-note-footer-actions">
+                    <button
+                      type="button"
+                      className="lead-note-cancel-btn"
+                      onClick={() => {
+                        setShowNoteForm(false);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="lead-note-save-btn"
+                      onClick={() => {
+                        if (!noteText.trim()) return;
+                        const newNote = {
+                          id: `note-${Date.now()}`,
+                          type: noteType,
+                          text: noteText,
+                          tags: [...noteTags],
+                          pinned: pinToLead,
+                          createdAt: "Just now",
+                          attachments: [...noteAttachments],
+                        };
+                        setSavedNotesList((prev) => [newNote, ...prev]);
+                        screen.setActivityForm((form) => ({ ...form, body: noteText }));
+                        void screen.addActivity("note");
+                        setNoteSavedFeedback(true);
+                        setShowNoteForm(false);
+                        setNoteText("");
+                        setTimeout(() => setNoteSavedFeedback(false), 3000);
+                      }}
+                    >
+                      Save note
+                    </button>
                   </div>
                 </div>
+              )}
 
-                {/* Bottom Switch 3: Show in activity history */}
-                <div className="lead-note-switch-block single-line">
-                  <label className="lead-note-switch-label">
-                    <span className="lead-toggle-switch">
-                      <input
-                        type="checkbox"
-                        checked={showInHistory}
-                        onChange={(e) => setShowInHistory(e.target.checked)}
-                      />
-                      <span className="lead-toggle-slider" />
-                    </span>
-                    <div className="lead-note-switch-texts">
-                      <span className="lead-note-switch-title">Show in activity history</span>
-                      <span className="lead-note-switch-desc">This note becomes the latest activity.</span>
-                    </div>
-                  </label>
-                </div>
-
-                {/* Footer Action Buttons */}
-                <div className="lead-note-footer-actions">
-                  <button
-                    type="button"
-                    className="lead-note-cancel-btn"
-                    onClick={() => {
-                      setNoteText("");
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="lead-note-save-btn"
-                    onClick={() => {
-                      if (!noteText.trim()) return;
-                      const newNote = {
-                        id: `note-${Date.now()}`,
-                        type: noteType,
-                        text: noteText,
-                        tags: [...noteTags],
-                        pinned: pinToLead,
-                        createdAt: "Just now",
-                        attachments: [...noteAttachments],
-                      };
-                      setSavedNotesList((prev) => [newNote, ...prev]);
-                      screen.setActivityForm((form) => ({ ...form, body: noteText }));
-                      void screen.addActivity("note");
-                      setNoteSavedFeedback(true);
-                      setTimeout(() => setNoteSavedFeedback(false), 3000);
-                    }}
-                  >
-                    Save note
-                  </button>
-                </div>
-              </div>
-
-              {/* Saved Notes Feed in same UI */}
-              {savedNotesList.length > 0 && (
-                <div className="lead-note-saved-section">
-                  <h4 className="lead-note-saved-heading">Saved Notes ({savedNotesList.length})</h4>
+              {/* All Notes List Feed */}
+              <div className="lead-notes-feed-container">
+                {savedNotesList.length === 0 ? (
+                  <div className="lead-detail-empty">
+                    <p>No notes recorded yet for this lead.</p>
+                    {!showNoteForm && (
+                      <button
+                        className="leads-button"
+                        style={{ marginTop: 12 }}
+                        type="button"
+                        onClick={() => setShowNoteForm(true)}
+                      >
+                        ＋ Add the first note
+                      </button>
+                    )}
+                  </div>
+                ) : (
                   <div className="lead-note-saved-cards">
                     {savedNotesList.map((sn) => (
                       <div className="lead-note-saved-card" key={sn.id}>
@@ -1511,49 +1625,637 @@ export function LeadsPage() {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </section>
           )}
 
           {/* Follow-up tab */}
           {detailTab === "follow-up" && (
             <section
-              className="lead-detail-tab-panel"
+              className="lead-detail-tab-panel lead-followup-tab-panel"
               id="lead-detail-panel-follow-up"
               role="tabpanel"
               aria-label="Lead follow-up"
             >
-              {screen.detail.followups.length ? (
-                <ul className="lead-follow-up-list">
-                  {screen.detail.followups.map((followup, index) => (
-                    <li key={String(followup.id || index)}>
-                      <strong>{displayField(followup.due_at || followup.dueAt)}</strong>
-                      <span>{displayField(followup.status)}</span>
-                      {Boolean(followup.note || followup.notes) && (
-                        <p>{displayField(followup.note || followup.notes)}</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="lead-detail-empty">
-                  <p>No follow-ups are currently scheduled for this lead.</p>
+              {/* Follow-up Tab Action Bar: Title, Count & Add follow-up button */}
+              <div className="lead-followup-tab-header">
+                <div className="lead-followup-tab-heading">
+                  <h3 className="lead-followup-tab-title">Follow-ups</h3>
+                  <span className="lead-followup-count-badge">
+                    {savedFollowUpsList.length + screen.detail.followups.length}
+                  </span>
+                </div>
+                {!showFollowUpForm && (
                   <button
-                    className="leads-button"
-                    style={{ marginTop: 12 }}
                     type="button"
-                    onClick={() => {
-                      setDetailTab("activity");
-                      setActivityComposer("followup");
-                    }}
+                    className="lead-add-followup-trigger-btn"
+                    onClick={() => setShowFollowUpForm(true)}
                   >
-                    Schedule follow-up
+                    <span className="plus-sign">＋</span> Add follow-up
+                  </button>
+                )}
+              </div>
+
+              {followUpSavedFeedback && (
+                <div className="lead-note-alert-success" role="status">
+                  <span>✓ Follow-up scheduled successfully</span>
+                  <button type="button" onClick={() => setFollowUpSavedFeedback(false)}>
+                    ×
                   </button>
                 </div>
               )}
+
+              {/* Dedicated Add Follow-up Form Card (opens when showFollowUpForm is true) */}
+              {showFollowUpForm && (
+                <div className="lead-followup-form-card">
+                  {/* Form Header */}
+                  <div className="lead-followup-form-head">
+                    <div>
+                      <span className="lead-followup-form-eyebrow">NEW FOLLOW-UP</span>
+                      <h3 className="lead-followup-form-title">Schedule follow-up</h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="lead-followup-form-close-btn"
+                      onClick={() => setShowFollowUpForm(false)}
+                      aria-label="Close follow-up form"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+
+                  <div className="lead-followup-form-fields">
+                    {/* Row 1: Date & Time */}
+                    <div className="lead-followup-row">
+                      <div className="lead-followup-field">
+                        <label className="lead-followup-label" htmlFor="lead-followup-date-input">
+                          Date <span className="req">*</span>
+                        </label>
+                        <div className="lead-followup-input-icon">
+                          <CalendarIcon color="var(--ink-2)" />
+                          <input
+                            id="lead-followup-date-input"
+                            type="date"
+                            className="lead-followup-clean-input"
+                            value={followUpDate}
+                            onChange={(e) => setFollowUpDate(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="lead-followup-field">
+                        <label className="lead-followup-label" htmlFor="lead-followup-time-input">
+                          Follow-up time <span className="req">*</span>
+                        </label>
+                        <div className="lead-followup-input-icon">
+                          <ClockIcon />
+                          <input
+                            id="lead-followup-time-input"
+                            type="time"
+                            className="lead-followup-clean-input"
+                            value={followUpTime}
+                            onChange={(e) => setFollowUpTime(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Row 2: Follow-up Note */}
+                    <div className="lead-followup-field">
+                      <label className="lead-followup-label" htmlFor="lead-followup-note-input">
+                        Follow-up Note <span className="req">*</span>
+                      </label>
+                      <textarea
+                        id="lead-followup-note-input"
+                        className="lead-followup-textarea"
+                        rows={3}
+                        value={followUpNote}
+                        onChange={(e) => setFollowUpNote(e.target.value)}
+                        placeholder="What needs to be discussed or followed up on?"
+                      />
+                    </div>
+
+                    {/* Row 3: Notification Set */}
+                    <div className="lead-followup-field">
+                      <label className="lead-followup-label">Notification set</label>
+                      <span className="lead-followup-helper">
+                        Choose reminder channels for this follow-up:
+                      </span>
+                      <div className="lead-followup-notify-cards">
+                        <button
+                          type="button"
+                          className={`lead-followup-notify-card ${followUpNotifyApp ? "selected" : ""}`}
+                          onClick={() => setFollowUpNotifyApp((v) => !v)}
+                        >
+                          <div className="notify-card-head">
+                            <span className={`custom-checkbox-box ${followUpNotifyApp ? "checked" : ""}`}>
+                              {followUpNotifyApp ? "✓" : ""}
+                            </span>
+                            <DesktopIcon color={followUpNotifyApp ? "var(--red)" : "var(--ink-2)"} />
+                            <strong>In-app pop-up</strong>
+                          </div>
+                          <span className="notify-card-desc">Desktop pop-up alert in application</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className={`lead-followup-notify-card ${followUpNotifyEmail ? "selected" : ""}`}
+                          onClick={() => setFollowUpNotifyEmail((v) => !v)}
+                        >
+                          <div className="notify-card-head">
+                            <span className={`custom-checkbox-box ${followUpNotifyEmail ? "checked" : ""}`}>
+                              {followUpNotifyEmail ? "✓" : ""}
+                            </span>
+                            <EmailIcon color={followUpNotifyEmail ? "var(--red)" : "var(--ink-2)"} />
+                            <strong>Email notification</strong>
+                          </div>
+                          <span className="notify-card-desc">Send reminder by email</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Form Footer */}
+                  <div className="lead-followup-form-footer">
+                    <button
+                      type="button"
+                      className="lead-followup-cancel-btn"
+                      onClick={() => setShowFollowUpForm(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="lead-followup-save-btn"
+                      onClick={() => {
+                        if (!followUpNote.trim()) return;
+                        const newFollowUp = {
+                          id: `fu-${Date.now()}`,
+                          dueDate: followUpDate,
+                          dueTime: followUpTime,
+                          status: "Upcoming",
+                          note: followUpNote,
+                          notifyApp: followUpNotifyApp,
+                          notifyEmail: followUpNotifyEmail,
+                          createdAt: "Just now",
+                        };
+                        setSavedFollowUpsList((prev) => [newFollowUp, ...prev]);
+                        screen.setActivityForm((form) => ({
+                          ...form,
+                          happened_at: `${followUpDate}T${followUpTime}`,
+                          body: followUpNote,
+                        }));
+                        void screen.addActivity("followup");
+                        setFollowUpSavedFeedback(true);
+                        setShowFollowUpForm(false);
+                        setTimeout(() => setFollowUpSavedFeedback(false), 3000);
+                      }}
+                    >
+                      Save follow-up
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Follow-up Feed Container */}
+              <div className="lead-followup-feed-container">
+                {savedFollowUpsList.length === 0 && screen.detail.followups.length === 0 ? (
+                  <div className="lead-detail-empty">
+                    <p>No follow-ups are currently scheduled for this lead.</p>
+                    {!showFollowUpForm && (
+                      <button
+                        className="leads-button"
+                        style={{ marginTop: 12 }}
+                        type="button"
+                        onClick={() => setShowFollowUpForm(true)}
+                      >
+                        ＋ Schedule follow-up
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="lead-followup-cards">
+                    {/* Render saved follow-ups */}
+                    {savedFollowUpsList.map((fu) => (
+                      <div className="lead-followup-card" key={fu.id}>
+                        <div className="lead-followup-card-head">
+                          <span className="lead-followup-date-badge">
+                            📅 {fu.dueDate} • {fu.dueTime}
+                          </span>
+                          <span className="lead-followup-status-badge badge-upcoming">
+                            {fu.status}
+                          </span>
+                          <div className="lead-followup-notify-pills">
+                            {fu.notifyApp && <span className="notify-pill">🔔 In-app pop-up</span>}
+                            {fu.notifyEmail && <span className="notify-pill">✉ Email</span>}
+                          </div>
+                          <span className="lead-followup-card-date">{fu.createdAt}</span>
+                        </div>
+                        <p className="lead-followup-card-text">{fu.note}</p>
+                      </div>
+                    ))}
+
+                    {/* Render lead's existing follow-ups from database */}
+                    {screen.detail.followups.map((followup, index) => (
+                      <div className="lead-followup-card" key={String(followup.id || `db-${index}`)}>
+                        <div className="lead-followup-card-head">
+                          <span className="lead-followup-date-badge">
+                            📅 {displayField(followup.due_at || followup.dueAt)}
+                          </span>
+                          <span className="lead-followup-status-badge">
+                            {displayField(followup.status || "Pending")}
+                          </span>
+                        </div>
+                        {Boolean(followup.note || followup.notes) && (
+                          <p className="lead-followup-card-text">
+                            {displayField(followup.note || followup.notes)}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
           )}
+        </aside>
+      </div>
+    )}
+
+    {/* Redesigned "Add Activity" Drawer Panel */}
+    {showAddActivityDrawer && (
+      <div
+        className="drawer-backdrop add-activity-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShowAddActivityDrawer(false);
+        }}
+      >
+        <aside
+          className="lead-add-activity-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Log an activity"
+        >
+          {/* Header */}
+          <div className="lead-add-activity-header">
+            <div>
+              <span className="lead-add-activity-eyebrow">ADD ACTIVITY</span>
+              <h2 className="lead-add-activity-title">Log an activity</h2>
+            </div>
+            <button
+              type="button"
+              className="lead-add-activity-close-btn"
+              onClick={() => setShowAddActivityDrawer(false)}
+              aria-label="Close activity form"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+
+          <div className="lead-add-activity-body">
+            {/* Lead context row */}
+            <div className="lead-add-activity-lead-row">
+              <div className="lead-add-activity-avatar" aria-hidden="true">
+                {leadName
+                  .split(" ")
+                  .map((n: string) => n[0])
+                  .slice(0, 2)
+                  .join("")
+                  .toUpperCase()}
+              </div>
+              <span className="lead-add-activity-lead-name">{leadName}</span>
+              <span className="lead-add-activity-lead-status">{leadStatus || "Fresh lead"}</span>
+              <span className="lead-add-activity-row-divider" aria-hidden="true">|</span>
+              <span className="lead-add-activity-score">Score 42</span>
+              <span className="lead-add-activity-row-divider" aria-hidden="true">|</span>
+              <button
+                type="button"
+                className="lead-add-activity-view-link"
+                onClick={() => {
+                  setShowAddActivityDrawer(false);
+                  setDetailTab("details");
+                }}
+              >
+                View lead <span aria-hidden="true">→</span>
+              </button>
+            </div>
+
+            {/* Activity type: full-width searchable dropdown */}
+            <div className="lead-add-activity-field">
+              <label className="lead-add-activity-label" htmlFor="lead-activity-type-picker">
+                Activity type <span className="req">*</span>
+              </label>
+              <div className="lead-add-activity-dropdown-container">
+                <button
+                  type="button"
+                  id="lead-activity-type-picker"
+                  className="lead-add-activity-select-box"
+                  onClick={() => setActivityTypeDropdownOpen((prev) => !prev)}
+                  aria-expanded={activityTypeDropdownOpen}
+                >
+                  <div className="lead-add-activity-select-left">
+                    {(() => {
+                      const match = ADMIN_ACTIVITY_TYPES.find((t) => t.label === activityType) || ADMIN_ACTIVITY_TYPES[0];
+                      const Icon = match.icon;
+                      return <Icon color="var(--ink)" />;
+                    })()}
+                    <span className="selected-type-label">{activityType}</span>
+                  </div>
+                  <div className="lead-add-activity-select-right">
+                    <SearchIcon />
+                    <ChevronDownIcon />
+                  </div>
+                </button>
+
+                {activityTypeDropdownOpen && (
+                  <div className="lead-add-activity-dropdown-menu" role="listbox">
+                    <div className="dropdown-search-wrap">
+                      <SearchIcon />
+                      <input
+                        type="text"
+                        className="lead-add-activity-dropdown-search"
+                        placeholder="Search activity types..."
+                        value={activityTypeSearch}
+                        onChange={(e) => setActivityTypeSearch(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="dropdown-items-scroll">
+                      {ADMIN_ACTIVITY_TYPES.filter((item) =>
+                        item.label.toLowerCase().includes(activityTypeSearch.toLowerCase())
+                      ).map((item) => {
+                        const ItemIcon = item.icon;
+                        const isSelected = item.label === activityType;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            className={`lead-add-activity-dropdown-item ${isSelected ? "selected" : ""}`}
+                            onClick={() => {
+                              setActivityType(item.label);
+                              setActivityTypeDropdownOpen(false);
+                              setActivityTypeSearch("");
+                              if (!activityDetailsText || ADMIN_ACTIVITY_TYPES.some((a) => a.placeholder === activityDetailsText)) {
+                                setActivityDetailsText(item.placeholder);
+                              }
+                            }}
+                          >
+                            <ItemIcon color={isSelected ? "var(--red)" : "var(--ink-2)"} />
+                            <span>{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <span className="lead-add-activity-helper">Activity types are managed by your administrator.</span>
+            </div>
+
+            {/* Activity details: generic multiline input */}
+            <div className="lead-add-activity-field">
+              <label className="lead-add-activity-label" htmlFor="lead-activity-details-text">
+                Activity details <span className="req">*</span>
+              </label>
+              <textarea
+                id="lead-activity-details-text"
+                className="lead-add-activity-textarea"
+                rows={3}
+                value={activityDetailsText}
+                onChange={(e) => setActivityDetailsText(e.target.value)}
+                placeholder="Interested in a product walkthrough next week. Asked to share the proposal before the demo."
+              />
+            </div>
+
+            {/* Attachments */}
+            <div className="lead-add-activity-attachments-section">
+              <div className="lead-add-activity-attachments-row">
+                <span className="lead-add-activity-label no-margin">Attachments</span>
+                <button
+                  type="button"
+                  className="lead-add-activity-attach-btn"
+                  onClick={() => {
+                    const fileName = prompt("Attachment name (e.g. proposal.pdf):");
+                    if (fileName) setActivityAttachments((prev) => [...prev, fileName.trim()]);
+                  }}
+                >
+                  <PaperclipIcon />
+                  <span>Add attachment</span>
+                </button>
+              </div>
+              {activityAttachments.length > 0 && (
+                <div className="lead-add-activity-attachment-chips">
+                  {activityAttachments.map((file) => (
+                    <div className="lead-note-file-chip small" key={file}>
+                      <span className="lead-note-pdf-icon small">PDF</span>
+                      <span className="lead-note-file-name">{file}</span>
+                      <button
+                        type="button"
+                        className="lead-note-file-remove"
+                        onClick={() => setActivityAttachments((prev) => prev.filter((f) => f !== file))}
+                        aria-label={`Remove attachment ${file}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Optional follow-up task */}
+            <div className="lead-add-activity-switch-block">
+              <label className="lead-add-activity-switch-label">
+                <span className="lead-toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={addFollowUpTask}
+                    onChange={(e) => setAddFollowUpTask(e.target.checked)}
+                  />
+                  <span className="lead-toggle-slider" />
+                </span>
+                <span className="lead-add-activity-switch-title">Add follow-up task</span>
+              </label>
+
+              {/* Follow-up task subfields */}
+              {addFollowUpTask && (
+                <div className="lead-add-activity-task-container">
+                  <div className="lead-add-activity-task-grid">
+                    <div className="lead-add-activity-task-col">
+                      <span className="lead-add-activity-sublabel">Task title <span className="req">*</span></span>
+                      <input
+                        type="text"
+                        className="lead-add-activity-input"
+                        value={followUpTitle}
+                        onChange={(e) => setFollowUpTitle(e.target.value)}
+                        placeholder="Send proposal and confirm demo time"
+                      />
+                    </div>
+                    <div className="lead-add-activity-task-col">
+                      <span className="lead-add-activity-sublabel">Due date <span className="req">*</span></span>
+                      <div className="lead-add-activity-input-icon">
+                        <CalendarIcon color="var(--ink-2)" />
+                        <input
+                          type="date"
+                          className="lead-add-activity-clean-input"
+                          value={followUpDueDate}
+                          onChange={(e) => setFollowUpDueDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="lead-add-activity-task-col">
+                      <span className="lead-add-activity-sublabel">Due time <span className="req">*</span></span>
+                      <div className="lead-add-activity-input-icon">
+                        <ClockIcon />
+                        <input
+                          type="time"
+                          className="lead-add-activity-clean-input"
+                          value={followUpDueTime}
+                          onChange={(e) => setFollowUpDueTime(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="lead-add-activity-task-col">
+                      <span className="lead-add-activity-sublabel">Assign to <span className="req">*</span></span>
+                      <div className="lead-add-activity-select-wrap">
+                        <select
+                          className="lead-add-activity-select"
+                          value={followUpAssignee}
+                          onChange={(e) => setFollowUpAssignee(e.target.value)}
+                        >
+                          <option value="Aarav Mehta">Aarav Mehta</option>
+                          <option value="Nikhil Shah">Nikhil Shah</option>
+                          <option value="Assignee">Assignee</option>
+                        </select>
+                        <ChevronDownIcon />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Send notification inside follow-up task */}
+                  <div className="lead-add-activity-notification-block">
+                    <label className="lead-add-activity-switch-label">
+                      <span className="lead-toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={sendNotification}
+                          onChange={(e) => setSendNotification(e.target.checked)}
+                        />
+                        <span className="lead-toggle-slider" />
+                      </span>
+                      <span className="lead-add-activity-switch-title">Send notification</span>
+                    </label>
+
+                    {sendNotification && (
+                      <div className="lead-add-activity-notify-row">
+                        {/* Notify me checkbox */}
+                        <div className="notify-me-box">
+                          <label className="lead-add-activity-checkbox-label">
+                            <input
+                              type="checkbox"
+                              className="lead-add-activity-checkbox"
+                              checked={notifyMe}
+                              onChange={(e) => setNotifyMe(e.target.checked)}
+                            />
+                            <span>Notify me</span>
+                          </label>
+                        </div>
+
+                        {/* Notify before dropdown */}
+                        <div className="notify-before-box">
+                          <span className="lead-add-activity-sublabel">Notify before</span>
+                          <div className="lead-add-activity-select-wrap">
+                            <select
+                              className="lead-add-activity-select"
+                              value={notifyBefore}
+                              onChange={(e) => setNotifyBefore(e.target.value)}
+                            >
+                              {NOTIFY_BEFORE_OPTIONS.map((opt) => (
+                                <option key={opt} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDownIcon />
+                          </div>
+                        </div>
+
+                        {/* Send notification via choice controls */}
+                        <div className="notify-via-box">
+                          <span className="lead-add-activity-sublabel">Send notification via</span>
+                          <div className="lead-add-activity-choice-cards">
+                            <button
+                              type="button"
+                              className={`lead-add-activity-choice-card ${notifyVia === "desktop" ? "selected" : ""}`}
+                              onClick={() => setNotifyVia("desktop")}
+                            >
+                              <div className="choice-head">
+                                <span className={`choice-radio ${notifyVia === "desktop" ? "active" : ""}`} />
+                                <DesktopIcon color={notifyVia === "desktop" ? "var(--red)" : "var(--ink-2)"} />
+                                <strong>Desktop</strong>
+                              </div>
+                              <span className="choice-helper">Chrome desktop pop-up</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className={`lead-add-activity-choice-card ${notifyVia === "email" ? "selected" : ""}`}
+                              onClick={() => setNotifyVia("email")}
+                            >
+                              <div className="choice-head">
+                                <span className={`choice-radio ${notifyVia === "email" ? "active" : ""}`} />
+                                <EmailIcon color={notifyVia === "email" ? "var(--red)" : "var(--ink-2)"} />
+                                <strong>Email</strong>
+                              </div>
+                              <span className="choice-helper">Send by email</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Sticky footer */}
+          <div className="lead-add-activity-footer">
+            <button
+              type="button"
+              className="lead-add-activity-cancel-btn"
+              onClick={() => setShowAddActivityDrawer(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="lead-add-activity-save-btn"
+              onClick={() => {
+                if (!activityDetailsText.trim()) return;
+                const newNote = {
+                  id: `act-${Date.now()}`,
+                  type: activityType.toLowerCase().replace(/[^a-z]/g, ""),
+                  text: `[${activityType}] ${activityDetailsText}`,
+                  tags: [activityType],
+                  pinned: false,
+                  createdAt: "Just now",
+                  attachments: [...activityAttachments],
+                };
+                setSavedNotesList((prev) => [newNote, ...prev]);
+                screen.setActivityForm((form) => ({ ...form, body: `[${activityType}] ${activityDetailsText}` }));
+                void screen.addActivity("note");
+                setShowAddActivityDrawer(false);
+                setNoteSavedFeedback(true);
+                setTimeout(() => setNoteSavedFeedback(false), 3000);
+              }}
+            >
+              Save activity
+            </button>
+          </div>
         </aside>
       </div>
     )}

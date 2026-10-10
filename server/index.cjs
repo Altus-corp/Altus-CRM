@@ -240,12 +240,14 @@ async function addLeadNote(req, res, db, actor, id) {
 }
 
 async function addLeadCall(req, res, db, actor, id) {
+  const lead = (await db.query("SELECT id,permission FROM leads WHERE id=$1", [id])).rows[0];
+  if (!lead) return json(res, 404, { error: "Lead not found." });
+  if (lead.permission !== "Yes") return json(res, 403, { error: "Permission to Call is required before logging a call." });
   const body = await readJson(req); const happenedAt = activityDate(body.happened_at || body.happenedAt) || new Date().toISOString();
   const duration = body.duration_seconds == null || body.duration_seconds === "" ? null : Number(body.duration_seconds);
   const note = body.note == null ? null : activityText(body.note);
   const resolution = body.resolution == null ? null : activityText(body.resolution, 200);
   if (!happenedAt || (duration != null && (!Number.isInteger(duration) || duration < 0 || duration > 86400)) || (body.note != null && note == null) || (body.resolution != null && resolution == null)) return json(res, 400, { error: "Invalid call data." });
-  if (!(await activityLeadExists(db, id))) return json(res, 404, { error: "Lead not found." });
   const callId = `lead-call-${crypto.randomUUID()}`;
   await db.query("INSERT INTO lead_calls(id,lead_id,user_id,happened_at,note,resolution,duration_seconds,created_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,now(),$3)", [callId, id, actor.id, happenedAt, note, resolution, duration]);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.call_created", entityType: "lead", entityId: id, newValue: "call", ip: req.socket.remoteAddress });
@@ -514,7 +516,7 @@ async function route(req, res, db) {
   const noteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/notes$/);
   if (noteMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadNote(req, res, db, user, decodeURIComponent(noteMatch[1])); }
   const callMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/calls$/);
-  if (callMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadCall(req, res, db, user, decodeURIComponent(callMatch[1])); }
+  if (callMatch && req.method === "POST") { if (!requireCapability("leads.call", user)) return json(res, 403, { error: "You do not have permission to log calls." }); return addLeadCall(req, res, db, user, decodeURIComponent(callMatch[1])); }
   const followupCreateMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups$/);
   if (followupCreateMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadFollowup(req, res, db, user, decodeURIComponent(followupCreateMatch[1])); }
   const followupActionMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups\/([^/]+)\/(reschedule|complete)$/);

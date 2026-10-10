@@ -21,7 +21,7 @@ test("Viewer cannot add activity", async () => {
 });
 
 test("activity add endpoints validate and write fixture rows", async () => {
-  const queries = []; const db = { query: async (sql, params) => { queries.push({ sql, params }); if (sql.startsWith("SELECT id FROM leads")) return { rows: [{ id: "fixture-lead" }] }; return { rows: [] }; } };
+  const queries = []; const db = { query: async (sql, params) => { queries.push({ sql, params }); if (sql.startsWith("SELECT id FROM leads") || sql.startsWith("SELECT id,permission FROM leads")) return { rows: [{ id: "fixture-lead", permission: "Yes" }] }; return { rows: [] }; } };
   const actor = { id: "user-1" };
   let res = response(); await addLeadNote(request("POST", "/", { body: "fixture note" }), res, db, actor, "fixture-lead"); assert.equal(res.status, 201);
   res = response(); await addLeadCall(request("POST", "/", { duration_seconds: -1 }), res, db, actor, "fixture-lead"); assert.equal(res.status, 400);
