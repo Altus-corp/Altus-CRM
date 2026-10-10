@@ -16,6 +16,8 @@ const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQ
 const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
 const { isSupabaseUrl } = require("./write-guard.cjs");
 const LeadImport = require("./lead-import.cjs");
+const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
+const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -65,7 +67,6 @@ function leadView(view) {
 
 const LEAD_COUNT_VIEWS = Object.freeze({ all: "TRUE", ...LEAD_VIEWS });
 const LEAD_TYPES = Object.freeze({ DL: "P3", L: "P3", QDL: "P3", QL: "P2", R: "P1" });
-const LEAD_STAGES = new Set(["database", "lead", "qualified", "reference", "assigned", "calling", "registered", "prepso", "attended", "notattended", "psreg", "preps", "billed"]);
 const PRODUCT_FUNNELS = Object.freeze({ Keynote: "keynote" });
 function leadTypeValue(value) { const type = String(value || "").trim().toUpperCase(); return Object.prototype.hasOwnProperty.call(LEAD_TYPES, type) ? type : null; }
 function leadPriority(type) { return LEAD_TYPES[type]; }

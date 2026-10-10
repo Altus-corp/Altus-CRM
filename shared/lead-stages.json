@@ -1,0 +1,18 @@
+[
+  { "value": "database", "label": "Database" },
+  { "value": "lead", "label": "Lead" },
+  { "value": "qualified", "label": "Qualified" },
+  { "value": "reference", "label": "Reference" },
+  { "value": "assigned", "label": "Assigned" },
+  { "value": "calling", "label": "Calling" },
+  { "value": "registered", "label": "Registered" },
+  { "value": "prepso", "label": "Pre PSO" },
+  { "value": "duringpso", "label": "During PSO" },
+  { "value": "attended", "label": "Attended" },
+  { "value": "notattended", "label": "Not Attended" },
+  { "value": "psreg", "label": "Sale / Registration" },
+  { "value": "preps", "label": "Pre PS" },
+  { "value": "billed", "label": "Billed" },
+  { "value": "pool", "label": "Pool" },
+  { "value": "completed", "label": "Completed" }
+]

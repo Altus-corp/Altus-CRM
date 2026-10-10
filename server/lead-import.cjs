@@ -3,6 +3,8 @@
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const { writeAudit } = require("./audit.cjs");
+const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
+const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 5000;
@@ -17,7 +19,6 @@ const TEMPLATE_ROWS = Object.freeze([
   ["Sample Lead 3 (test row)", "sample3@example.test", "0000000003", "Sample Company", "R", "calling", "Pending", "", "", "2026-03-15", "2026-03-20", "Sample City", "Sample Role", "SAMPLE-003", "SAMPLE-DELETE-ME"],
 ]);
 const LEAD_TYPES = Object.freeze({ DL: "P3", L: "P3", QDL: "P3", QL: "P2", R: "P1" });
-const LEAD_STAGES = new Set(["database", "lead", "qualified", "reference", "assigned", "calling", "registered", "prepso", "attended", "notattended", "psreg", "preps", "billed"]);
 
 const HEADER_ALIASES = new Map([
   ["name", "name"], ["fullname", "name"], ["leadname", "name"],
