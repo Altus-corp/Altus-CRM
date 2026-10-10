@@ -15,12 +15,12 @@
 
 | Phase | Current repository status | Working mode |
 |---|---|---|
-| Leads | Implemented: list views, stage/permission filters, search, pagination, counts, detail drawer, create/edit controls, and lead APIs are present. | Active |
-| Accounts & Contacts | Placeholder view over lead data; no dedicated data model yet. | Placeholder view |
-| Tasks & Activity | Placeholder view over lead data; no dedicated data model yet. | Placeholder view |
-| Reports | Placeholder view over lead data; no dedicated data model yet. | Placeholder view |
-| Quote & Invoicing | Placeholder view over lead data; no dedicated data model yet. | Placeholder view |
-| Marketing | Placeholder view over lead data; no dedicated data model yet. | Placeholder view / draft-test mode |
+| Leads | Core list, filters, pagination, detail, CRUD and activity APIs are present. Daily Calling Engine, assignment automation, timers and reporting are not yet implemented. | Active |
+| Accounts & Contacts | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
+| Tasks & Activity | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
+| Reports | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
+| Quote & Invoicing | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
+| Marketing | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
 | Dashboard | No dashboard route or dedicated dashboard screen exists in the current repository. | Not started |
 
 The six core navigation items are available to every role. Admin groups appear only with the `nav.admin` capability. Old stages remain filters/tabs inside Leads.
@@ -33,8 +33,8 @@ Each candidate requires its own plan before implementation, including affected f
 - Support tickets
 - Telephony
 - Messaging
-- Workflow automation
-- Lead distribution
+- Daily Calling Engine (planned, not implemented)
+- Assignment automation (planned, not implemented)
 - Custom fields
 - Deduplication
 
@@ -42,10 +42,11 @@ Each candidate requires its own plan before implementation, including affected f
 
 The following are planning rules only and must be explicitly confirmed before being treated as implemented behavior:
 
-- Process: `Lead -> Qualified -> Permission to Call -> Assignment -> Calling -> Follow-up -> PSO/Event -> Attendance -> PS Registration -> Sales -> Payment`.
-- `Permission to Call = Yes` gates calling.
-- Round-robin assignment exists, with a named-caller override.
-- Daily targets are configurable.
+- Planned process: Lead -> Qualified -> Permission to Call -> Assignment -> Calling -> Follow-up -> PSO/Event -> Attendance -> PS Registration -> Sales -> Payment; only portions of this flow are currently implemented.
+- Permission to Call = Yes is a required business rule; the call-write endpoint enforces it (Slice 2).
+- Round-robin assignment and named-caller override are planned; no assignment engine is currently implemented.
+- Daily targets have a data model and settings UI; daily list generation, carry-forward and pool shortfall logic are not implemented.
+- Stage integrity: lead stages come from shared/lead-stages.json (includes pool, duringpso, completed) and are used by server writes, the importer and the Leads UI.
 - `Balance = Payable - Paid`.
 - `Target Date = Last Payment Date + 3 days`.
 
