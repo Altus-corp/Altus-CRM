@@ -10,7 +10,9 @@ const { Client } = require("pg");
 async function main() {
   const guarded = guardedDatabaseUrl();
   if (!guarded.ok) { reportFailure("migration", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
-  const client = new Client({ connectionString: guarded.value });
+  const host = guarded.url.hostname;
+  const ssl = host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com") ? { rejectUnauthorized: false } : undefined;
+  const client = new Client({ connectionString: guarded.value, ...(ssl ? { ssl } : {}) });
   try {
     await client.connect();
     await client.query("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())");

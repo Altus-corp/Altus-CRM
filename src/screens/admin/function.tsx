@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../shared/api/client";
 
-export type AdminScreenKey = "dashboard" | "call-history" | "analytics" | "assignment" | "panel" | "templates" | "import-export" | "integrations" | "audit" | "process-flow" | "reports";
+export type AdminScreenKey = "dashboard" | "call-history" | "analytics" | "assignment" | "panel" | "templates" | "import-export" | "integrations" | "audit" | "process-flow" | "reports" | "database-status";
 type AdminValue = string | number | boolean | null;
 type AdminRow = Record<string, AdminValue>;
 type AdminResponse = { screen: AdminScreenKey; metrics?: AdminRow; rows?: AdminRow[]; rules?: AdminRow[]; note?: string };
@@ -18,6 +18,7 @@ export const ADMIN_SCREEN_COPY: Record<AdminScreenKey, { title: string; descript
   audit: { title: "Audit Log", description: "Review append-only activity history for imported records." },
   "process-flow": { title: "Process Flow", description: "A compact map of the workspace lifecycle from acquisition to sale." },
   reports: { title: "Reports", description: "Review the main pipeline totals for the workspace." },
+  "database-status": { title: "Database Status", description: "Check whether the application server can reach the configured PostgreSQL database." },
 };
 
 export function useAdminScreen(screen: AdminScreenKey) {

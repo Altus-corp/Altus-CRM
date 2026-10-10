@@ -15,7 +15,14 @@ CREATE INDEX IF NOT EXISTS login_attempts_expires ON login_attempts (expires_at)
 
 async function openDb(connectionString) {
   if (!Pool) throw new Error("The PostgreSQL driver is not installed. Review and approve: npm install pg");
-  const pool = new Pool({ connectionString, max: 10 });
+  let ssl;
+  try {
+    const host = new URL(connectionString).hostname;
+    if (host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com")) ssl = { rejectUnauthorized: false };
+  } catch {
+    // guardedDatabaseUrl validates application startup URLs before openDb is called.
+  }
+  const pool = new Pool({ connectionString, max: 10, ...(ssl ? { ssl } : {}) });
   await pool.query("SELECT 1");
   await pool.query(SCHEMA);
   const q = (text, params) => pool.query(text, params);

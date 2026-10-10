@@ -2,7 +2,7 @@
 
 const ADMIN_SCREENS = new Set([
   "dashboard", "call-history", "analytics", "assignment", "panel", "templates",
-  "import-export", "integrations", "audit", "process-flow", "reports",
+  "import-export", "integrations", "audit", "process-flow", "reports", "database-status",
 ]);
 
 async function optionalRows(db, text, params = []) {
@@ -16,6 +16,11 @@ async function optionalOne(db, text, params = []) {
 
 async function adminData(db, screen) {
   if (!ADMIN_SCREENS.has(screen)) return null;
+  if (screen === "database-status") {
+    await db.query("SELECT 1");
+    const target = await db.query("SELECT current_database() AS database, inet_server_port()::int AS port");
+    return { metrics: { status: "Connected", database: target.rows[0]?.database || "postgres", port: target.rows[0]?.port || null }, note: "The application server can reach the configured PostgreSQL database. Credentials and connection strings are not displayed." };
+  }
   if (screen === "dashboard") {
     const [metrics, followups] = await Promise.all([
       optionalOne(db, `SELECT

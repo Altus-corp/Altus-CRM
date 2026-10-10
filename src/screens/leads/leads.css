@@ -62,6 +62,25 @@
 .lead-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; }
 .lead-facts dt { color: var(--ink-2); font-size: 11px; }
 .lead-facts dd { margin: 0; color: var(--ink); font-weight: 700; text-align: right; }
+.lead-detail-tabs { display: flex; gap: 22px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.lead-detail-tab { position: relative; flex: 0 0 auto; padding: 15px 0 12px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.lead-detail-tab::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: transparent; content: ""; }
+.lead-detail-tab:hover, .lead-detail-tab:focus-visible { color: var(--red); outline: none; }
+.lead-detail-tab:focus-visible { box-shadow: 0 0 0 3px var(--red-tint); }
+.lead-detail-tab.active { color: var(--red); }
+.lead-detail-tab.active::after { background: var(--red); }
+.lead-detail-tab-panel { padding: 22px 0; color: var(--ink-2); font-size: 13px; }
+.lead-detail-tab-panel h3 { margin: 0 0 14px; color: var(--ink); font-family: var(--display); font-size: 15px; }
+.lead-activity-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.lead-activity-summary span { padding: 13px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); }
+.lead-activity-summary strong { display: block; margin-bottom: 3px; color: var(--ink); font-size: 18px; }
+.lead-detail-empty { min-height: 120px; }
+.lead-detail-empty p { margin: 0; }
+.lead-follow-up-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.lead-follow-up-list li { padding: 13px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); }
+.lead-follow-up-list li strong { color: var(--ink); }
+.lead-follow-up-list li span { float: right; color: var(--ink-2); font-size: 11px; }
+.lead-follow-up-list li p { margin: 7px 0 0; color: var(--ink-2); }
 @media (min-width: 720px) { .lead-search { grid-column: span 2; } }
 @media (max-width: 640px) { .leads-header { align-items: flex-start; flex-direction: column; } .lead-search { grid-column: auto; } .lead-pagination { align-items: flex-start; flex-direction: column; } }
 
@@ -369,6 +388,7 @@
     max-width: 100vw;
     padding: 22px 20px;
   }
+  .lead-detail-tabs { gap: 18px; }
 }
 
 /* Keep the saved-view trigger, active view, and filter action in separate space. */

@@ -13,12 +13,12 @@ const { ADMIN_SCREENS, adminScreen } = require("./admin.cjs");
 const { writeAudit } = require("./audit.cjs");
 const A = require("./accounts.cjs");
 const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
-const { guardedDatabaseUrl, reportFailure } = require("./load-env.cjs");
+const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
 const STATIC = path.resolve(process.env.CRM_STATIC || path.join(__dirname, "..", "dist"));
-const PG_URL = process.env.CRM_PG_URL || "";
+const PG_URL = databaseConnectionString();
 const PROXY_CONFIG = { behindProxy: process.env.CRM_BEHIND_PROXY === "1", publicIsHttps: String(process.env.CRM_PUBLIC_URL || "").startsWith("https:"), trustedProxies: new Set(String(process.env.CRM_TRUSTED_PROXIES || "").split(",").map((v) => v.trim()).filter(Boolean)) };
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, must_change_password: Boolean(u.must_change_password) });
 const LEAD_SORTS = {
@@ -186,7 +186,7 @@ async function transaction(db, work) {
 function invalidLead(res) { return json(res, 400, { error: "Invalid lead data." }); }
 function duplicateLeadError(res) { return json(res, 409, { error: "Possible duplicate lead." }); }
 async function findLeadDuplicates(db, phone, email, excludeId = null) {
-  const rows = await db.query("SELECT id FROM leads WHERE (($1 IS NOT NULL AND phone = $1) OR ($2 IS NOT NULL AND lower(email) = lower($2))) AND ($3 IS NULL OR id <> $3) ORDER BY id ASC", [phone || null, email || null, excludeId]);
+  const rows = await db.query("SELECT id FROM leads WHERE (($1::text IS NOT NULL AND phone = $1::text) OR ($2::text IS NOT NULL AND lower(email) = lower($2::text))) AND ($3::text IS NULL OR id <> $3::text) ORDER BY id ASC", [phone || null, email || null, excludeId]);
   return rows.rows;
 }
 function leadFields(body) {
@@ -197,10 +197,31 @@ function leadFields(body) {
   return { name, email: String(body.email || "").trim() || null, phone: String(body.phone || "").trim() || null, company: String(body.company || "").trim() || null, lead_type: type, priority: leadPriority(type), stage, permission, lead_status: String(body.lead_status || "").trim() || null, owner_user_id: body.owner_user_id ? String(body.owner_user_id) : null, pso_date: body.pso_date || null, custom_values: body.custom_values && typeof body.custom_values === "object" ? body.custom_values : {}, legacy_finance: body.legacy_finance && typeof body.legacy_finance === "object" ? body.legacy_finance : {} };
 }
 async function createLead(req, res, db, actor) {
-  const body = await readJson(req); if (body.permission && body.permission !== "Pending" && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields(body); if (!fields) return invalidLead(res);
-  const duplicates = await findLeadDuplicates(db, fields.phone, fields.email); if (duplicates.length && body.duplicate_action !== "merge") return duplicateLeadError(res);
-  const products = leadProductRows("pending", Array.isArray(body.products) ? body.products : []); const targetId = duplicates[0]?.id || `lead-${crypto.randomUUID()}`;
-  try { await transaction(db, async (tx) => { if (duplicates.length) { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,lead_type=$6,priority=$7,stage=$8,permission=$9,lead_status=$10,owner_user_id=$11,pso_date=$12,custom_values=$13,legacy_finance=$14,updated_at=now() WHERE id=$1", [targetId, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.merged", entityType: "lead", entityId: targetId, newValue: "duplicate_merge", ip: req.socket.remoteAddress }); } else { await tx.query("INSERT INTO leads (id,name,email,phone,company,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,custom_values,legacy_finance,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())", [targetId, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.created", entityType: "lead", entityId: targetId, newValue: fields.lead_type, ip: req.socket.remoteAddress }); } for (const product of products) { await tx.query("INSERT INTO lead_products (id,lead_id,product_code,stage,call_stage,funnel) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,call_stage=EXCLUDED.call_stage,funnel=EXCLUDED.funnel,updated_at=now()", [product.id, targetId, product.product_code, product.stage, product.call_stage, product.funnel]); } }); return json(res, duplicates.length ? 200 : 201, { id: targetId, merged: Boolean(duplicates.length) }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
+  let body;
+  try { body = await readJson(req); } catch { return invalidLead(res); }
+  if (body.permission && body.permission !== "Pending" && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
+  const fields = leadFields(body); if (!fields) return invalidLead(res);
+  const duplicates = await findLeadDuplicates(db, fields.phone, fields.email);
+  if (duplicates.length && body.duplicate_action !== "merge") return duplicateLeadError(res);
+  let products;
+  try { products = leadProductRows("pending", Array.isArray(body.products) ? body.products : []); } catch (error) { return error?.status === 400 ? invalidLead(res) : json(res, 500, { error: "Unable to save lead." }); }
+  const targetId = duplicates[0]?.id || `lead-${crypto.randomUUID()}`;
+  try {
+    await transaction(db, async (tx) => {
+      if (duplicates.length) {
+        await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,lead_type=$6,priority=$7,stage=$8,permission=$9,lead_status=$10,owner_user_id=$11,pso_date=$12,custom_values=$13,legacy_finance=$14,updated_at=now() WHERE id=$1", [targetId, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]);
+        await writeAudit(tx, { actorUserId: actor.id, action: "lead.merged", entityType: "lead", entityId: targetId, newValue: "duplicate_merge", ip: req.socket.remoteAddress });
+      } else {
+        await tx.query("INSERT INTO leads (id,name,email,phone,company,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,custom_values,legacy_finance,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())", [targetId, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]);
+        await writeAudit(tx, { actorUserId: actor.id, action: "lead.created", entityType: "lead", entityId: targetId, newValue: fields.lead_type, ip: req.socket.remoteAddress });
+      }
+      for (const product of products) await tx.query("INSERT INTO lead_products (id,lead_id,product_code,stage,call_stage,funnel) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,call_stage=EXCLUDED.call_stage,funnel=EXCLUDED.funnel,updated_at=now()", [product.id, targetId, product.product_code, product.stage, product.call_stage, product.funnel]);
+    });
+    return json(res, duplicates.length ? 200 : 201, { id: targetId, merged: Boolean(duplicates.length) });
+  } catch (error) {
+    console.error(`lead create failed code=${error?.code || "unknown"} constraint=${error?.constraint || "none"}`);
+    return json(res, 500, { error: "Unable to save lead." });
+  }
 }
 async function updateLead(req, res, db, actor, id) {
   const body = await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); if (body.permission !== undefined && body.permission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields({ ...current, ...body }); if (!fields) return invalidLead(res); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,lead_type=$6,priority=$7,stage=$8,permission=$9,lead_status=$10,owner_user_id=$11,pso_date=$12,custom_values=$13,legacy_finance=$14,updated_at=now() WHERE id=$1", [id, fields.name, fields.email, fields.phone, fields.company, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
@@ -416,7 +437,7 @@ async function start() {
   await db.pruneSessions();
   await db.throttlePrune();
   setInterval(() => { db.pruneSessions().catch(() => {}); db.throttlePrune().catch(() => {}); }, 5 * 60000).unref();
-  const server = http.createServer((req, res) => route(req, res, db).catch(() => json(res, 500, { error: "Request failed." })));
+  const server = http.createServer((req, res) => route(req, res, db).catch((error) => { console.error(`request failed method=${req.method} path=${new URL(req.url || "/", "http://localhost").pathname} code=${error?.code || error?.name || "unknown"}`); return json(res, 500, { error: "Request failed." }); }));
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(PORT, HOST, () => { console.log(`Altus CRM server listening on http://${HOST}:${PORT}`); resolve(); }); });
 }
 
