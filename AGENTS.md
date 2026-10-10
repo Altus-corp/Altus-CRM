@@ -64,3 +64,13 @@ Plan before implementation. The plan must name files, endpoints, data model chan
 - There is no CI configuration.
 - There are no rollback migrations.
 - There is no complete deployment or production runbook.
+
+## Supabase safety
+
+- Supabase is the database target for this environment; use only the configured target and never the old project or ports 5433/5434.
+- Public tables must keep RLS enabled and must not grant table, sequence, or function access to `anon` or `authenticated`.
+- Write-capable scripts must require process-scoped `ALLOW_SUPABASE_WRITE=1` and record an audit row; never persist the flag.
+- Tests must use fixtures or mocks and must refuse Supabase targets.
+- Apply migrations through a reviewed pull request, after a backup, by one designated operator.
+- Never print or commit credentials, keys, connection strings, or customer values.
+- Preserve the three leads with missing created date/source metadata.

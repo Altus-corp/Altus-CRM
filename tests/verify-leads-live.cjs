@@ -15,6 +15,7 @@ if (!urlText) {
   console.error("CRM_PG_URL not set");
   process.exit(1);
 }
+if (/\.supabase\.co$|\.pooler\.supabase\.com$/.test(new URL(urlText).hostname)) throw new Error("Live verification refuses Supabase targets.");
 
 let pgUrl;
 try {

@@ -15,6 +15,7 @@ function response() { return { status: 0, headers: {}, body: "", setHeader() {},
 
 test("database login integration suite", async (t) => {
   if (!process.env.CRM_PG_URL) return t.skip("CRM_PG_URL not set in environment or .env.");
+  if (/\.supabase\.co$|\.pooler\.supabase\.com$/.test(new URL(process.env.CRM_PG_URL).hostname)) throw new Error("Tests refuse Supabase targets.");
   const db = await openDb(process.env.CRM_PG_URL);
   if (!process.env.CRM_OWNER_EMAIL || !process.env.CRM_OWNER_PASSWORD) { await db.close(); return t.skip("CRM_OWNER_EMAIL and CRM_OWNER_PASSWORD are required in environment or .env."); }
   const email = String(process.env.CRM_OWNER_EMAIL).toLowerCase();

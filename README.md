@@ -158,6 +158,12 @@ Preserve the existing security model:
 - server-side authorization;
 - mirrored client/server role maps.
 
+Supabase is the configured database target for this environment. Public tables must remain protected by RLS, with no `anon` or `authenticated` table grants and no public policies unless explicitly reviewed. Scripts that write to Supabase require `ALLOW_SUPABASE_WRITE=1` for that process only and record a script audit entry. Never commit `.env` or database credentials.
+
+Team database changes require a numbered migration in a pull request. Back up the target first; one designated operator applies the approved migration and verifies the recorded migration and counts. Tests use fixtures and must never connect to Supabase. Real customer data must never be copied into development fixtures, logs, docs, or screenshots.
+
+The database currently contains three leads without a created date or source metadata. They are retained and must not be deleted as part of unrelated work.
+
 Real customer data stays in the local development database. Documentation, tests, fixtures, logs, and screenshots must contain counts or synthetic values only, never customer values.
 
 ## Known gaps

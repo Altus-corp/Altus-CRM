@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { Client } = require("pg");
 const load = require("../server/load-env.cjs");
+const { assertSupabaseWriteAllowed, auditScriptRun } = require("../server/write-guard.cjs");
 load();
 
 function sourceUrl() {
@@ -17,7 +18,9 @@ function quote(value) { return `"${String(value).replace(/"/g, '""')}"`; }
 
 (async () => {
   const source = await connect(sourceUrl());
+  assertSupabaseWriteAllowed(load.databaseConnectionString(), "align-source-metadata");
   const target = await connect(load.databaseConnectionString());
+  await auditScriptRun(target, "align-source-metadata");
   const report = {};
   await target.query("BEGIN");
   try {

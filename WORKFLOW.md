@@ -73,6 +73,14 @@ The following are planning rules only and must be explicitly confirmed before be
 - Imports must support dry-run, apply, and verify modes and remain idempotent by source ID.
 - Never expose secrets, passwords, keys, hashes, connection strings, or customer values.
 - Keep real customer data in the local development database; output counts only.
+
+## Supabase operations
+
+Supabase is the configured database target. All public tables use RLS and `anon`/`authenticated` receive no table, sequence, or function grants. No policies are added without review. Use a limited application role for runtime access; migrations use a separate operator role.
+
+Database changes require a numbered `.sql` migration in a pull request. Back up the target first, then one designated operator applies the migration and verifies the migration record and counts. Any write-capable script must refuse Supabase unless `ALLOW_SUPABASE_WRITE=1` is set for that process. Tests must never use Supabase. Real customer data must never appear in development fixtures, logs, docs, or screenshots.
+
+Three existing leads have no created date or source metadata. Preserve them; do not delete them as cleanup.
 - Preserve scrypt hashing, hashed session tokens, HttpOnly SameSite cookies, `x-altus` POST protection, throttling, security headers, and server-side authorization.
 - Hidden UI is never security. Client/server role maps must stay mirrored.
 

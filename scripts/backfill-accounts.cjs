@@ -5,6 +5,7 @@ require("../server/load-env.cjs")();
 
 const crypto = require("crypto");
 const { Client } = require("pg");
+const { assertSupabaseWriteAllowed, auditScriptRun } = require("../server/write-guard.cjs");
 
 function mode() {
   const args = new Set(process.argv.slice(2));
@@ -55,6 +56,7 @@ async function apply(client) {
 async function main() {
   const guarded = guardedDatabaseUrl();
   if (!guarded.ok) { reportFailure("backfill", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
+  try { assertSupabaseWriteAllowed(guarded.value, "backfill-accounts"); } catch (error) { reportFailure("backfill", { code: "SUPABASE_WRITE_BLOCKED" }, error.message, guarded.target); process.exitCode = 3; return; }
   const selectedMode = mode();
   const client = new Client({ connectionString: guarded.value });
   try {
@@ -65,7 +67,7 @@ async function main() {
     }
     if (process.env.CRM_ACCOUNTS_BACKUP_CONFIRMED !== "1") { console.log("backup confirmation required"); process.exitCode = 4; return; }
     await client.query("BEGIN");
-    try { console.log(JSON.stringify({ mode: selectedMode, ...(await apply(client)) })); await client.query("COMMIT"); }
+    try { await auditScriptRun(client, "backfill-accounts"); console.log(JSON.stringify({ mode: selectedMode, ...(await apply(client)) })); await client.query("COMMIT"); }
     catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
   } catch (error) { reportFailure("backfill", error, "Check PostgreSQL availability and credentials.", guarded.target); process.exitCode = 1; }
   finally { await client.end().catch(() => {}); }

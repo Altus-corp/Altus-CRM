@@ -6,15 +6,19 @@ require("../server/load-env.cjs")();
 const fs = require("fs");
 const path = require("path");
 const { Client } = require("pg");
+const { auditScriptRun } = require("../server/write-guard.cjs");
 
 async function main() {
   const guarded = guardedDatabaseUrl();
   if (!guarded.ok) { reportFailure("migration", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
+  const isSupabase = guarded.url.hostname.endsWith(".supabase.co") || guarded.url.hostname.endsWith(".pooler.supabase.com");
+  if (isSupabase && process.env.ALLOW_SUPABASE_WRITE !== "1") { reportFailure("migration", { code: "SUPABASE_WRITE_BLOCKED" }, "Set ALLOW_SUPABASE_WRITE=1 for this process.", guarded.target); process.exitCode = 3; return; }
   const host = guarded.url.hostname;
   const ssl = host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com") ? { rejectUnauthorized: false } : undefined;
   const client = new Client({ connectionString: guarded.value, ...(ssl ? { ssl } : {}) });
   try {
     await client.connect();
+    await auditScriptRun(client, "migrate");
     await client.query("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())");
     const files = fs.readdirSync(path.resolve(__dirname, "..", "migrations")).filter((file) => /^\d+_.+\.sql$/.test(file)).sort();
     for (const file of files) {

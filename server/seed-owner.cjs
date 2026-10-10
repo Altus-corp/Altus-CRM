@@ -2,6 +2,7 @@
 
 const crypto = require("crypto");
 const { openDb } = require("./db.cjs");
+const { assertSupabaseWriteAllowed, auditScriptRun } = require("./write-guard.cjs");
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -23,6 +24,7 @@ function ownerPassword() {
 async function main() {
   const url = process.env.CRM_PG_URL;
   if (!url) throw new Error("CRM_PG_URL is required.");
+  assertSupabaseWriteAllowed(url, "seed-owner");
 
   const email = String(process.env.CRM_OWNER_EMAIL || "").trim().toLowerCase();
   if (!email) throw new Error("CRM_OWNER_EMAIL is required.");
@@ -32,6 +34,7 @@ async function main() {
   const db = await openDb(url);
 
   try {
+    await auditScriptRun(db, "seed-owner");
     const existing = await db.userByEmail(email);
     const owners = await db.query(
       "SELECT id FROM users WHERE role IN ('Owner', 'Super Admin') ORDER BY created_at ASC, id ASC"

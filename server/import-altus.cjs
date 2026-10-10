@@ -2,6 +2,7 @@
 
 const crypto = require("crypto");
 const { Client } = require("pg");
+const { assertSupabaseWriteAllowed, auditScriptRun } = require("./write-guard.cjs");
 
 const SOURCE_TENANT = "altus";
 const SNAPSHOT_SQL = "SELECT seq, state FROM t_altus.snapshots ORDER BY seq DESC LIMIT 1";
@@ -224,9 +225,11 @@ async function main() {
   const targetUrl = process.env.CRM_PG_URL;
   const sourceUrl = process.env.CRM_IMPORT_PG_URL;
   if (!targetUrl || !sourceUrl) throw new Error("CRM_PG_URL and CRM_IMPORT_PG_URL are required.");
+  assertSupabaseWriteAllowed(targetUrl, "import-altus");
   const source = new Client({ connectionString: sourceUrl });
   const target = new Client({ connectionString: targetUrl });
   await source.connect(); await target.connect();
+  await auditScriptRun(target, "import-altus");
   try {
     const data = await sourceData(source);
     const targetUserState = await targetUsers(target);
