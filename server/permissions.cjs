@@ -6,6 +6,7 @@ const CAPABILITIES = Object.freeze({
   "leads.permission": Object.freeze(["Owner", "Admin"]),
   "leads.assign": Object.freeze(["Owner", "Admin"]),
   "leads.export": Object.freeze(["Owner", "Admin"]),
+  "leads.import": Object.freeze(["Owner", "Admin", "Sales"]),
   "settings.view": Object.freeze(["Owner", "Admin"]),
   "users.manage": Object.freeze(["Owner", "Admin"]),
   "users.reset_password": Object.freeze(["Owner"]),
@@ -28,7 +29,9 @@ const CAPABILITIES = Object.freeze({
 });
 
 function hasCapability(role, capability) {
-  return Boolean(CAPABILITIES[capability]?.includes(role === "Super Admin" ? "Owner" : role));
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const canonicalRole = normalizedRole === "super admin" ? "Owner" : normalizedRole ? normalizedRole[0].toUpperCase() + normalizedRole.slice(1) : "";
+  return Boolean(CAPABILITIES[capability]?.includes(canonicalRole));
 }
 
 function requireCapability(capability, user) {

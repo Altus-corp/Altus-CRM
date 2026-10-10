@@ -80,6 +80,8 @@ Supabase is the configured database target. All public tables use RLS and `anon`
 
 Database changes require a numbered `.sql` migration in a pull request. Back up the target first, then one designated operator applies the migration and verifies the migration record and counts. Any write-capable script must refuse Supabase unless `ALLOW_SUPABASE_WRITE=1` is set for that process. Tests must never use Supabase. Real customer data must never appear in development fixtures, logs, docs, or screenshots.
 
+For a Supabase backup, use `pg_dump` with the direct database connection or the session pooler on port `5432`. Do not use the transaction pooler on port `6543` for backups. `scripts/backup-migration.cjs` is not a sufficient Supabase backup because it is not a `pg_dump` backup and does not verify the server certificate.
+
 Three existing leads have no created date or source metadata. Preserve them; do not delete them as cleanup.
 - Preserve scrypt hashing, hashed session tokens, HttpOnly SameSite cookies, `x-altus` POST protection, throttling, security headers, and server-side authorization.
 - Hidden UI is never security. Client/server role maps must stay mirrored.

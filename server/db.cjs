@@ -3,7 +3,10 @@
 let Pool;
 try { ({ Pool } = require("pg")); } catch { Pool = null; }
 const crypto = require("crypto");
+const fs = require("fs");
 const { passwordHash, sha, SESSION_SECONDS, throttle } = require("./security.cjs");
+
+let supabaseSslWarningShown = false;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, role TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT true, offboarded BOOLEAN NOT NULL DEFAULT false, must_change_password BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
@@ -16,11 +19,26 @@ CREATE INDEX IF NOT EXISTS login_attempts_expires ON login_attempts (expires_at)
 async function openDb(connectionString) {
   if (!Pool) throw new Error("The PostgreSQL driver is not installed. Review and approve: npm install pg");
   let ssl;
+  let host;
   try {
-    const host = new URL(connectionString).hostname;
-    if (host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com")) ssl = { rejectUnauthorized: false };
+    host = new URL(connectionString).hostname;
   } catch {
     // guardedDatabaseUrl validates application startup URLs before openDb is called.
+  }
+  const isSupabase = Boolean(host && (host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com")));
+  if (isSupabase) {
+    const caPath = String(process.env.CRM_PG_CA_CERT || "").trim();
+    if (caPath) {
+      let ca;
+      try { ca = fs.readFileSync(caPath); } catch { throw new Error("CRM_PG_CA_CERT could not be read."); }
+      ssl = { ca, rejectUnauthorized: true };
+    } else {
+      ssl = { rejectUnauthorized: false };
+      if (!supabaseSslWarningShown) {
+        console.warn("Supabase PostgreSQL SSL certificate verification is not configured; set CRM_PG_CA_CERT to the downloaded project root CA certificate.");
+        supabaseSslWarningShown = true;
+      }
+    }
   }
   const pool = new Pool({ connectionString, max: 10, ...(ssl ? { ssl } : {}) });
   await pool.query("SELECT 1");

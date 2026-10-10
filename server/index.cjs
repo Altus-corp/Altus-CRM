@@ -14,6 +14,8 @@ const { writeAudit } = require("./audit.cjs");
 const A = require("./accounts.cjs");
 const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
 const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
+const { isSupabaseUrl } = require("./write-guard.cjs");
+const LeadImport = require("./lead-import.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -524,6 +526,20 @@ async function route(req, res, db) {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     try { return await leadsCounts(res, db); } catch { return json(res, 500, { error: "Unable to load lead counts." }); }
   }
+  if (url.pathname === "/api/leads/import/preview" && req.method === "POST") {
+    if (!requireCapability("leads.import", user)) return json(res, 403, { error: "You do not have permission to import leads." });
+    try { return json(res, 200, await LeadImport.preview(req, db)); } catch (error) { return json(res, error.status || 500, error.analysis ? { error: error.message, ...error.analysis } : { error: error.status ? error.message : "Unable to preview the lead file." }); }
+  }
+  if (url.pathname === "/api/leads/import/template" && req.method === "GET") {
+    if (!requireCapability("leads.import", user)) return json(res, 403, { error: "You do not have permission to import leads." });
+    try { const format = url.searchParams.get("format") || "xlsx"; const file = await LeadImport.template(format); res.writeHead(200, { "Content-Type": file.contentType, "Content-Disposition": `attachment; filename="${file.filename}"`, "Cache-Control": "no-store" }); return res.end(file.body); }
+    catch (error) { return json(res, error.status || 500, { error: error.status ? error.message : "Unable to create the lead template." }); }
+  }
+  if (url.pathname === "/api/leads/import/apply" && req.method === "POST") {
+    if (!requireCapability("leads.import", user)) return json(res, 403, { error: "You do not have permission to import leads." });
+    if (isSupabaseUrl(databaseConnectionString()) && process.env.ALLOW_SUPABASE_WRITE !== "1") return json(res, 403, { code: "SUPABASE_WRITE_BLOCKED", error: "Imports are blocked on this database. Start the server with ALLOW_SUPABASE_WRITE=1 for this process." });
+    try { return json(res, 200, await LeadImport.apply(req, db, user)); } catch (error) { return json(res, error.status || 500, error.analysis ? { error: error.message, ...error.analysis } : { error: error.status ? error.message : "Unable to apply the lead import." }); }
+  }
   if (url.pathname === "/api/leads" && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return createLead(req, res, db, user); }
   const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);
   if (leadWriteMatch && req.method === "POST") { const id = decodeURIComponent(leadWriteMatch[1]); if (leadWriteMatch[2] === "permission") { if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." }); return changeLeadPermission(req, res, db, user, id); } if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id); }
@@ -541,6 +557,7 @@ async function route(req, res, db) {
 async function start() {
   const guarded = guardedDatabaseUrl(PG_URL);
   if (!guarded.ok) { reportFailure("server", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
+  if (HOST !== "127.0.0.1") console.warn("Altus CRM server is listening beyond the local machine; allow only the app port through the firewall.");
   const db = await openDb(guarded.value);
   await db.pruneSessions();
   await db.throttlePrune();

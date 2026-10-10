@@ -11,6 +11,53 @@ export const NAV_ITEMS = [
   ["/tasks-activity", "Tasks & Activity"],
 ] as const;
 
+const CORE_NAV_MENUS: Record<string, readonly { to: string; label: string }[]> = {
+  "/leads": [
+    { to: "/leads", label: "All Leads" },
+    { to: "/leads?view=new_leads", label: "New Leads" },
+    { to: "/leads?view=qualified", label: "Qualified Leads" },
+    { to: "/leads?view=permission_granted", label: "Permission to Call" },
+    { to: "/leads?view=calling_queue", label: "Calling Sheet" },
+    { to: "/leads?view=daily_call_chart", label: "Daily Call Chart" },
+    { to: "/leads?view=pre_pso", label: "Pre PSO" },
+    { to: "/leads?view=during_pso", label: "During PSO" },
+    { to: "/leads?view=attended", label: "PSO Attended" },
+    { to: "/leads?view=registered", label: "PS Registration" },
+    { to: "/leads?view=pre_ps", label: "Pre PS" },
+    { to: "/leads?view=not_attended", label: "PSO Not Attended" },
+    { to: "/leads?new=1", label: "Add New Lead" },
+  ],
+  "/marketing": [
+    { to: "/marketing", label: "Marketing Overview" },
+    { to: "/marketing?view=campaigns", label: "Campaigns" },
+    { to: "/marketing?view=audiences", label: "Audiences" },
+    { to: "/marketing?view=templates", label: "Templates" },
+  ],
+  "/reports": [
+    { to: "/reports", label: "Reports Overview" },
+    { to: "/reports?view=leads", label: "Lead Reports" },
+    { to: "/reports?view=conversion", label: "Conversion Reports" },
+    { to: "/reports?view=activity", label: "Activity Reports" },
+  ],
+  "/quotes-invoicing": [
+    { to: "/quotes-invoicing", label: "Quotes Overview" },
+    { to: "/quotes-invoicing?view=quotes", label: "Quotes" },
+    { to: "/quotes-invoicing?view=invoices", label: "Invoices" },
+    { to: "/quotes-invoicing?view=payments", label: "Payments" },
+  ],
+  "/accounts-contacts": [
+    { to: "/accounts-contacts", label: "Accounts Overview" },
+    { to: "/accounts-contacts?view=accounts", label: "Accounts" },
+    { to: "/accounts-contacts?view=contacts", label: "Contacts" },
+  ],
+  "/tasks-activity": [
+    { to: "/tasks-activity", label: "Tasks Overview" },
+    { to: "/tasks-activity?view=tasks", label: "Tasks" },
+    { to: "/tasks-activity?view=activity", label: "Activity" },
+    { to: "/tasks-activity?view=completed", label: "Completed" },
+  ],
+};
+
 export type ExtendedNavItem = {
   to: string;
   label: string;
@@ -91,7 +138,6 @@ function navLink(
 }
 
 function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active: boolean; onSelect?: () => void }) {
-  const isLeads = item.to === "/leads";
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -118,21 +164,9 @@ function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active
     };
   }, [dropdownOpen]);
 
-  if (!isLeads) {
-    return React.createElement(
-      NavLink,
-      {
-        to: item.to,
-        end: true,
-        "aria-label": item.label,
-        className: active ? "nav-link active" : "nav-link",
-        onClick: onSelect,
-      },
-      React.createElement("span", { className: "nav-label" }, item.label)
-    );
-  }
-
-  const menuItems = [
+  const menuItems = CORE_NAV_MENUS[item.to] ?? [{ to: item.to, label: item.label }];
+  const menuId = `${item.to.slice(1).replace(/[^a-z0-9]+/gi, "-")}-nav-menu`;
+  /* const legacyLeadsMenu = [
     { to: "/leads", label: "All Leads" },
     { to: "/leads?view=new_leads", label: "New Leads" },
     { to: "/leads?view=qualified", label: "Qualified Leads" },
@@ -148,13 +182,15 @@ function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active
     { to: "/leads?new=1", label: "＋ Add New Lead" },
   ];
 
+  */
+
   const unifiedLeadLink = React.createElement(
     NavLink,
     {
       to: item.to,
       end: true,
       "aria-label": item.label,
-      className: active ? "nav-link leads-nav-link active" : "nav-link leads-nav-link",
+      className: active ? "nav-link core-nav-link active" : "nav-link core-nav-link",
       onClick: onSelect,
     },
     React.createElement("span", { className: "nav-label" }, item.label),
@@ -163,11 +199,11 @@ function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active
       {
         ref: toggleRef,
         type: "button",
-        className: dropdownOpen ? "leads-dropdown-toggle open" : "leads-dropdown-toggle",
-        "aria-label": "Toggle Leads dropdown menu",
+        className: dropdownOpen ? "core-dropdown-toggle open" : "core-dropdown-toggle",
+        "aria-label": `Toggle ${item.label} dropdown menu`,
         "aria-haspopup": "menu",
         "aria-expanded": dropdownOpen,
-        "aria-controls": "leads-nav-menu",
+        "aria-controls": menuId,
         onClick: (event: React.MouseEvent) => {
           event.preventDefault();
           event.stopPropagation();
@@ -184,7 +220,7 @@ function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active
       React.createElement(
         "svg",
         {
-          className: "leads-chevron-icon",
+          className: "core-chevron-icon",
           viewBox: "0 0 12 12",
           width: "10",
           height: "10",
@@ -201,16 +237,16 @@ function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active
 
   return React.createElement(
     "div",
-    { ref: wrapRef, className: "leads-nav-wrap" },
+    { ref: wrapRef, className: "core-nav-wrap" },
     unifiedLeadLink,
     dropdownOpen &&
       React.createElement(
         "div",
         {
-          id: "leads-nav-menu",
-          className: "leads-dropdown-menu",
+          id: menuId,
+          className: "core-dropdown-menu",
           role: "menu",
-          "aria-label": "Leads dropdown menu",
+          "aria-label": `${item.label} dropdown menu`,
         },
         ...menuItems.map((menuItem, index) =>
           React.createElement(
@@ -222,7 +258,7 @@ function CoreNavItem({ item, active, onSelect }: { item: ExtendedNavItem; active
               },
               to: menuItem.to,
               role: "menuitem",
-              className: menuItem.to.includes("new=1") ? "leads-dropdown-item leads-action-item" : "leads-dropdown-item",
+              className: menuItem.to.includes("new=1") ? "core-dropdown-item core-action-item" : "core-dropdown-item",
               onClick: () => setDropdownOpen(false),
               onKeyDown: (event: React.KeyboardEvent<HTMLAnchorElement>) => {
                 if (event.key === "ArrowDown") {

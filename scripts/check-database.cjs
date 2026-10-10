@@ -50,11 +50,7 @@ async function check(name, value) {
 
 (async () => {
   console.log("Altus CRM database connectivity check");
-  const results = await Promise.all([
-    check("DATABASE_URL", process.env.DATABASE_URL),
-    check("DIRECT_URL", process.env.DIRECT_URL),
-    check("CRM_PG_URL", process.env.CRM_PG_URL),
-  ]);
+  const results = await Promise.all([check("CRM_PG_URL", process.env.CRM_PG_URL)]);
   if (!results.some(Boolean)) process.exitCode = 1;
 })().catch((error) => {
   console.log(`check failed (${error.code || error.name || "unknown error"})`);

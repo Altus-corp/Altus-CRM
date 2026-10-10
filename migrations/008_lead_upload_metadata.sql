@@ -1,0 +1,2 @@
+ALTER TABLE import_runs ADD COLUMN IF NOT EXISTS file_hash TEXT;
+ALTER TABLE import_runs ADD COLUMN IF NOT EXISTS actor_user_id TEXT REFERENCES users(id);

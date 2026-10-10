@@ -6,6 +6,7 @@ export const CAPABILITIES = {
   "leads.permission": ["Owner", "Admin"],
   "leads.assign": ["Owner", "Admin"],
   "leads.export": ["Owner", "Admin"],
+  "leads.import": ["Owner", "Admin", "Sales"],
   "settings.view": ["Owner", "Admin"],
   "users.manage": ["Owner", "Admin"],
   "users.reset_password": ["Owner"],
@@ -35,7 +36,9 @@ export function displayRole(role: string | undefined) {
 }
 
 export function hasCapability(role: string | undefined, capability: Capability) {
-  return (CAPABILITIES[capability] as readonly string[]).includes(role === "Super Admin" ? "Owner" : role || "");
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const canonicalRole = normalizedRole === "super admin" ? "Owner" : normalizedRole ? normalizedRole[0].toUpperCase() + normalizedRole.slice(1) : "";
+  return (CAPABILITIES[capability] as readonly string[]).includes(canonicalRole);
 }
 
 export function canManageRole(actorRole: string | undefined, targetRole: string) {

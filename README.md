@@ -31,17 +31,15 @@ npm install
 
 Using a PostgreSQL administrator connection, create the application role and the development database. Use a locally chosen password; do not put it in Git or print it in logs.
 
-The expected connection target is:
-
-```text
-127.0.0.1:5435/crm_dev
-```
+The expected development database is `crm_dev` on the configured PostgreSQL host and port.
 
 The repository does not provide a database-creation script. The application role needs permission to use and create objects in `crm_dev`.
 
 ### 3. Create the environment file
 
-Copy `.env.example` to `.env`, then fill in the values. `.env.example` contains variable names only and must never contain secrets.
+Copy `.env.example` to `.env`, then fill in the values. `.env.example` contains variable names only and must never contain secrets. Set `CRM_PG_URL` to the approved PostgreSQL connection URL for this environment; do not use `DATABASE_URL` or `DIRECT_URL`.
+
+For a Supabase database, download the project root CA certificate from Database Settings → SSL Configuration and set `CRM_PG_CA_CERT` to its local filesystem path. The server uses that certificate to verify Supabase PostgreSQL connections. If it is not set, the connection remains encrypted but certificate verification is unavailable and the server logs one warning per process.
 
 The supported names are:
 
@@ -83,7 +81,7 @@ In one terminal:
 npm run server
 ```
 
-The default API server listens on `127.0.0.1:4321`. It connects to PostgreSQL before listening and creates the small authentication schema bootstrap if needed.
+By default the API server listens only on the local machine at port `4321`. It connects to PostgreSQL before listening and creates the small authentication schema bootstrap if needed.
 
 ### 7. Start Vite
 
@@ -94,6 +92,19 @@ npm run dev
 ```
 
 Vite serves the client and proxies `/api` requests to the API server. The browser should use the Vite URL printed by Vite.
+
+### 8. Share with teammates on a LAN
+
+On the computer running the API and Vite development server:
+
+1. Copy `.env.example` to `.env` and set `CRM_PG_URL` without committing the file.
+2. Set `CRM_HOST=0.0.0.0` only when sharing on a trusted LAN. Leave it blank for local-only use.
+3. Start the API with `npm run server` and start Vite with `npm run dev -- --host 0.0.0.0`.
+4. Teammates open `http://HOST_IP:5173`, replacing `HOST_IP` with the host computer's LAN address.
+5. For the built server, run `npm run build`, set `CRM_HOST=0.0.0.0`, and run `npm run server`; teammates open `http://HOST_IP:4321`.
+6. Allow only the app port (`5173` for development or `4321` for the built server) in the host firewall. Do not expose the PostgreSQL port.
+
+The Vite proxy target is configurable with `VITE_API_PROXY_TARGET`; it defaults to the API on the same computer. Frontend API calls remain relative `/api/...` paths, so teammates do not need a project-specific IP in the client bundle.
 
 ## Navigation and authorization
 
@@ -144,6 +155,14 @@ The import workflow is separate from ordinary application startup:
 6. Run `node server/import-altus.cjs --apply` only after review and approval.
 
 The importer uses source IDs and checksums for idempotent updates. It records import runs in the target database. The scripts contain hard-coded local paths and guarded database targets; those are known gaps.
+
+### Leads bulk upload
+
+Owners and Admins can bulk upload leads from the Leads screen using `.csv` or `.xlsx` files. The upload is previewed and validated before apply; apply re-reads the file and requires the preview SHA-256 hash. Only the first worksheet is read from an `.xlsx` file, and formula cells without cached values are row errors.
+
+Accepted columns are `name` (required), `email`, `phone`, `company`, `lead_type`, `stage`, `permission`, `lead_status`, `owner`, `pso_date`, `next_follow_up`, `city`, `designation`, `lead_number`, and `source_ref`. Headers are case-insensitive and may use spaces, underscores, or supported aliases. Dates accept `YYYY-MM-DD`, real Excel dates, and `DD/MM/YYYY`.
+
+The server limits files to 5 MB, 5,000 data rows, 50 columns, and 2,000 characters per cell. Possible duplicates are detected within the file and against existing leads by normalized phone or lower-cased email; they are skipped by default and can only be imported with the explicit duplicate checkbox. Upload IDs are deterministic (`upload:<file hash>:<row number>`) so re-uploading the same file is idempotent. Uploads do not assign owners or create accounts and contacts.
 
 ## Security rules
 
