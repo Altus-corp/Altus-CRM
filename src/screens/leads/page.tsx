@@ -154,6 +154,95 @@ function UserIcon() {
   );
 }
 
+function BulletListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <line x1="9" y1="6" x2="20" y2="6" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <line x1="9" y1="18" x2="20" y2="18" />
+      <circle cx="4" cy="6" r="1.5" fill="currentColor" />
+      <circle cx="4" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="4" cy="18" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function NumberedListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <line x1="10" y1="6" x2="20" y2="6" />
+      <line x1="10" y1="12" x2="20" y2="12" />
+      <line x1="10" y1="18" x2="20" y2="18" />
+      <path d="M4 4.5v3M3.5 7.5h2M3.5 12h2a1 1 0 0 1 0 2H3.5v2h2.5" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function AtIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
+    </svg>
+  );
+}
+
+function UndoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7v6h6" />
+      <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </svg>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 7v6h-6" />
+      <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l7.88-7.88" />
+    </svg>
+  );
+}
+
+function HandoffIcon({ color = "var(--red)" }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+
 type LeadDetailTab = "activity" | "details" | "notes" | "follow-up";
 
 const LEAD_DETAIL_TABS: Array<[LeadDetailTab, string]> = [
@@ -196,6 +285,35 @@ export function LeadsPage() {
   const [activityFilterOpen, setActivityFilterOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [activityComposer, setActivityComposer] = useState<"note" | "call" | "followup" | null>(null);
+
+  // Add Note composer state matching reference design
+  const [noteType, setNoteType] = useState<"general" | "call" | "meeting" | "handoff">("general");
+  const [noteText, setNoteText] = useState(
+    "Nikhil wants a 30-minute product walkthrough next week.\nKey interest: team productivity reporting and follow-up tracking.\nShare proposal before the demo."
+  );
+  const [relatedActivity, setRelatedActivity] = useState("Call - 10 Oct 2026, 10:18 AM");
+  const [noteTags, setNoteTags] = useState<string[]>(["Warm lead", "Demo requested"]);
+  const [noteVisibility, setNoteVisibility] = useState("Team");
+  const [pinToLead, setPinToLead] = useState(true);
+  const [setReminder, setSetReminder] = useState(true);
+  const [reminderDate, setReminderDate] = useState("2026-10-13");
+  const [reminderTime, setReminderTime] = useState("10:00");
+  const [reminderNotify, setReminderNotify] = useState("Aarav Mehta");
+  const [showInHistory, setShowInHistory] = useState(true);
+  const [noteAttachments, setNoteAttachments] = useState<string[]>(["Productivity-Shastra-overview.pdf"]);
+  const [savedNotesList, setSavedNotesList] = useState<
+    Array<{
+      id: string;
+      type: string;
+      text: string;
+      tags: string[];
+      pinned: boolean;
+      createdAt: string;
+      attachments: string[];
+    }>
+  >([]);
+  const [noteSavedFeedback, setNoteSavedFeedback] = useState(false);
+
   const detailTabRefs = useRef<Partial<Record<LeadDetailTab, HTMLButtonElement | null>>>({});
   useEffect(() => {
     if (screen.detail?.lead.id) setDetailTab("activity");
@@ -249,112 +367,114 @@ export function LeadsPage() {
           aria-modal="true"
           aria-label={`Lead details for ${screen.detail.lead.name}`}
         >
-          {/* 1. Header */}
-          <div className="lead-detail-header">
-            <div className="lead-detail-title-group">
-              <span className="lead-detail-eyebrow">LEAD DETAIL</span>
-              <h2 className="lead-detail-title">{screen.detail.lead.name || "Nikhil Shah"}</h2>
-            </div>
-            <button
-              className="lead-detail-close-btn"
-              type="button"
-              onClick={screen.closeDetail}
-              aria-label="Close lead details"
-            >
-              <CloseIcon />
-            </button>
-          </div>
-
-          {/* 2. Quick actions */}
-          <div className="lead-quick-actions-bar" aria-label="Quick actions">
-            <span className="lead-quick-actions-label">Quick actions</span>
-            <div className="lead-quick-actions-list">
+          {/* 1-3. Static Top Section (Header, Quick Actions, Tabs) */}
+          <div className="lead-detail-static-top">
+            {/* 1. Header */}
+            <div className="lead-detail-header">
+              <div className="lead-detail-title-group">
+                <span className="lead-detail-eyebrow">LEAD DETAIL</span>
+                <h2 className="lead-detail-title">{screen.detail.lead.name || "Nikhil Shah"}</h2>
+              </div>
               <button
+                className="lead-detail-close-btn"
                 type="button"
-                className="lead-quick-action-btn"
-                onClick={() => {
-                  setDetailTab("activity");
-                  setActivityComposer("call");
-                }}
+                onClick={screen.closeDetail}
+                aria-label="Close lead details"
               >
-                <CallIcon />
-                <span>Call</span>
-              </button>
-              <button
-                type="button"
-                className="lead-quick-action-btn"
-                onClick={() => {
-                  if (screen.detail?.lead.email) {
-                    window.location.href = `mailto:${screen.detail.lead.email}`;
-                  } else {
-                    alert("No email address registered for this lead.");
-                  }
-                }}
-              >
-                <EmailIcon />
-                <span>Email</span>
-              </button>
-              <button
-                type="button"
-                className="lead-quick-action-btn"
-                onClick={() => {
-                  const phone = screen.detail?.lead.phone;
-                  if (phone) {
-                    const clean = phone.replace(/[^0-9]/g, "");
-                    window.open(`https://wa.me/${clean}`, "_blank", "noopener,noreferrer");
-                  } else {
-                    alert("No phone number registered for this lead.");
-                  }
-                }}
-              >
-                <WhatsAppIcon />
-                <span>WhatsApp</span>
-              </button>
-              <button
-                type="button"
-                className="lead-quick-action-btn"
-                onClick={() => {
-                  setDetailTab("activity");
-                  setActivityComposer("note");
-                }}
-              >
-                <NoteIcon />
-                <span>Note</span>
-              </button>
-              <button
-                type="button"
-                className="lead-quick-action-btn"
-                onClick={() => {
-                  setDetailTab("activity");
-                  setActivityComposer("followup");
-                }}
-              >
-                <CalendarIcon />
-                <span>Follow-up</span>
+                <CloseIcon />
               </button>
             </div>
-          </div>
 
-          {/* 3. Section Tabs */}
-          <div className="lead-detail-tabs" role="tablist" aria-label="Lead detail sections">
-            {LEAD_DETAIL_TABS.map(([tab, label]) => (
-              <button
-                key={tab}
-                ref={(element) => {
-                  detailTabRefs.current[tab] = element;
-                }}
-                className={detailTab === tab ? "lead-detail-tab active" : "lead-detail-tab"}
-                type="button"
-                role="tab"
-                aria-selected={detailTab === tab}
-                aria-controls={`lead-detail-panel-${tab}`}
-                tabIndex={detailTab === tab ? 0 : -1}
-                onClick={() => setDetailTab(tab)}
-                onKeyDown={(event) => moveDetailTab(event, tab)}
-              >
-                {label}
-              </button>
-            ))}
+            {/* 2. Quick actions */}
+            <div className="lead-quick-actions-bar" aria-label="Quick actions">
+              <span className="lead-quick-actions-label">Quick actions</span>
+              <div className="lead-quick-actions-list">
+                <button
+                  type="button"
+                  className="lead-quick-action-btn"
+                  onClick={() => {
+                    setDetailTab("activity");
+                    setActivityComposer("call");
+                  }}
+                >
+                  <CallIcon />
+                  <span>Call</span>
+                </button>
+                <button
+                  type="button"
+                  className="lead-quick-action-btn"
+                  onClick={() => {
+                    if (screen.detail?.lead.email) {
+                      window.location.href = `mailto:${screen.detail.lead.email}`;
+                    } else {
+                      alert("No email address registered for this lead.");
+                    }
+                  }}
+                >
+                  <EmailIcon />
+                  <span>Email</span>
+                </button>
+                <button
+                  type="button"
+                  className="lead-quick-action-btn"
+                  onClick={() => {
+                    const phone = screen.detail?.lead.phone;
+                    if (phone) {
+                      const clean = phone.replace(/[^0-9]/g, "");
+                      window.open(`https://wa.me/${clean}`, "_blank", "noopener,noreferrer");
+                    } else {
+                      alert("No phone number registered for this lead.");
+                    }
+                  }}
+                >
+                  <WhatsAppIcon />
+                  <span>WhatsApp</span>
+                </button>
+                <button
+                  type="button"
+                  className="lead-quick-action-btn"
+                  onClick={() => {
+                    setDetailTab("notes");
+                  }}
+                >
+                  <NoteIcon />
+                  <span>Note</span>
+                </button>
+                <button
+                  type="button"
+                  className="lead-quick-action-btn"
+                  onClick={() => {
+                    setDetailTab("activity");
+                    setActivityComposer("followup");
+                  }}
+                >
+                  <CalendarIcon />
+                  <span>Follow-up</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Section Tabs */}
+            <div className="lead-detail-tabs" role="tablist" aria-label="Lead detail sections">
+              {LEAD_DETAIL_TABS.map(([tab, label]) => (
+                <button
+                  key={tab}
+                  ref={(element) => {
+                    detailTabRefs.current[tab] = element;
+                  }}
+                  className={detailTab === tab ? "lead-detail-tab active" : "lead-detail-tab"}
+                  type="button"
+                  role="tab"
+                  aria-selected={detailTab === tab}
+                  aria-controls={`lead-detail-panel-${tab}`}
+                  tabIndex={detailTab === tab ? 0 : -1}
+                  onClick={() => setDetailTab(tab)}
+                  onKeyDown={(event) => moveDetailTab(event, tab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* 4. Tab Panel: Activity */}
@@ -393,9 +513,8 @@ export function LeadsPage() {
                           type="button"
                           role="menuitem"
                           onClick={() => {
-                            setActivityComposer("note");
+                            setDetailTab("notes");
                             setActivityMenuOpen(false);
-                            screen.loadActivity("notes");
                           }}
                         >
                           Add note
@@ -959,34 +1078,440 @@ export function LeadsPage() {
           {/* Notes tab */}
           {detailTab === "notes" && (
             <section
-              className="lead-detail-tab-panel"
+              className="lead-detail-tab-panel lead-notes-tab-panel"
               id="lead-detail-panel-notes"
               role="tabpanel"
               aria-label="Lead notes"
             >
-              <form
-                className="lead-activity-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void screen.addActivity("note");
-                }}
-              >
-                <textarea
-                  required
-                  maxLength={4000}
-                  value={screen.activityForm.body}
-                  onChange={(event) =>
-                    screen.setActivityForm((form) => ({ ...form, body: event.target.value }))
-                  }
-                  placeholder="Add a new note for this lead..."
-                />
-                <button className="leads-button" type="submit">
-                  Save note
-                </button>
-              </form>
-              <div className="lead-detail-empty">
-                <p>Notes will appear in the activity feed and note history.</p>
+              {noteSavedFeedback && (
+                <div className="lead-note-alert-success" role="status">
+                  <span>✓ Note saved successfully</span>
+                  <button type="button" onClick={() => setNoteSavedFeedback(false)}>
+                    ×
+                  </button>
+                </div>
+              )}
+
+              {/* Dedicated Add Note UI Card matching Reference */}
+              <div className="lead-note-composer-card">
+                {/* Header */}
+                <div className="lead-note-composer-head">
+                  <div>
+                    <span className="lead-note-composer-eyebrow">NEW NOTE</span>
+                    <h3 className="lead-note-composer-title">Add note</h3>
+                  </div>
+                </div>
+
+                {/* Lead Context Bar */}
+                <div className="lead-note-context-bar">
+                  <div className="lead-note-context-lead">
+                    <div className="lead-note-avatar-badge" aria-hidden="true">
+                      {leadName
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .slice(0, 2)
+                        .join("")
+                        .toUpperCase()}
+                    </div>
+                    <span className="lead-note-lead-name">{leadName}</span>
+                    <span className="lead-note-lead-stage">| {leadStatus || "Fresh lead"}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="lead-note-view-lead-btn"
+                    onClick={() => setDetailTab("details")}
+                  >
+                    View lead <span aria-hidden="true">↗</span>
+                  </button>
+                </div>
+
+                {/* Note Type Pills */}
+                <div className="lead-note-type-pills" role="radiogroup" aria-label="Note type">
+                  <button
+                    type="button"
+                    className={`lead-note-type-pill ${noteType === "general" ? "active" : ""}`}
+                    onClick={() => setNoteType("general")}
+                    role="radio"
+                    aria-checked={noteType === "general"}
+                  >
+                    <NoteIcon color={noteType === "general" ? "var(--red)" : "var(--ink-2)"} />
+                    <span>General note</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`lead-note-type-pill ${noteType === "call" ? "active" : ""}`}
+                    onClick={() => setNoteType("call")}
+                    role="radio"
+                    aria-checked={noteType === "call"}
+                  >
+                    <CallIcon color={noteType === "call" ? "var(--red)" : "var(--ink-2)"} />
+                    <span>Call note</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`lead-note-type-pill ${noteType === "meeting" ? "active" : ""}`}
+                    onClick={() => setNoteType("meeting")}
+                    role="radio"
+                    aria-checked={noteType === "meeting"}
+                  >
+                    <CalendarIcon color={noteType === "meeting" ? "var(--red)" : "var(--ink-2)"} />
+                    <span>Meeting note</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`lead-note-type-pill ${noteType === "handoff" ? "active" : ""}`}
+                    onClick={() => setNoteType("handoff")}
+                    role="radio"
+                    aria-checked={noteType === "handoff"}
+                  >
+                    <HandoffIcon color={noteType === "handoff" ? "var(--red)" : "var(--ink-2)"} />
+                    <span>Internal handoff</span>
+                  </button>
+                </div>
+
+                {/* Note Editor */}
+                <div className="lead-note-editor-wrapper">
+                  <label className="lead-note-input-label" htmlFor="lead-note-textarea">
+                    Note
+                  </label>
+                  <div className="lead-note-editor-box">
+                    {/* Toolbar */}
+                    <div className="lead-note-toolbar" role="toolbar" aria-label="Text formatting">
+                      <div className="lead-note-toolbar-group">
+                        <button type="button" className="lead-note-tool-btn" title="Bold" aria-label="Bold">
+                          <strong>B</strong>
+                        </button>
+                        <button type="button" className="lead-note-tool-btn" title="Italic" aria-label="Italic">
+                          <em>I</em>
+                        </button>
+                        <button type="button" className="lead-note-tool-btn" title="Underline" aria-label="Underline">
+                          <u>U</u>
+                        </button>
+                        <div className="lead-note-tool-divider" aria-hidden="true" />
+                        <button type="button" className="lead-note-tool-btn" title="Bullet list" aria-label="Bullet list">
+                          <BulletListIcon />
+                        </button>
+                        <button type="button" className="lead-note-tool-btn" title="Numbered list" aria-label="Numbered list">
+                          <NumberedListIcon />
+                        </button>
+                        <div className="lead-note-tool-divider" aria-hidden="true" />
+                        <button type="button" className="lead-note-tool-btn" title="Insert link" aria-label="Insert link">
+                          <LinkIcon />
+                        </button>
+                        <button type="button" className="lead-note-tool-btn" title="Mention team member" aria-label="Mention">
+                          <AtIcon />
+                        </button>
+                      </div>
+                      <div className="lead-note-toolbar-group right">
+                        <button type="button" className="lead-note-tool-btn" title="Undo" aria-label="Undo">
+                          <UndoIcon />
+                        </button>
+                        <button type="button" className="lead-note-tool-btn" title="Redo" aria-label="Redo">
+                          <RedoIcon />
+                        </button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      id="lead-note-textarea"
+                      className="lead-note-textarea"
+                      rows={4}
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      placeholder="Type your note here..."
+                    />
+                  </div>
+                </div>
+
+                {/* 3-Column Metadata Row: Related activity, Tags, Visibility */}
+                <div className="lead-note-meta-grid">
+                  <div className="lead-note-meta-field">
+                    <label className="lead-note-input-label" htmlFor="lead-note-related-activity">
+                      Related activity
+                    </label>
+                    <div className="lead-note-select-wrap">
+                      <select
+                        id="lead-note-related-activity"
+                        className="lead-note-select"
+                        value={relatedActivity}
+                        onChange={(e) => setRelatedActivity(e.target.value)}
+                      >
+                        <option value="Call - 10 Oct 2026, 10:18 AM">Call - 10 Oct 2026, 10:18 AM</option>
+                        <option value="Email - 09 Oct 2026, 04:30 PM">Email - 09 Oct 2026, 04:30 PM</option>
+                        <option value="Meeting - 08 Oct 2026, 02:00 PM">Meeting - 08 Oct 2026, 02:00 PM</option>
+                        <option value="None">None</option>
+                      </select>
+                      <ChevronDownIcon />
+                    </div>
+                  </div>
+
+                  <div className="lead-note-meta-field">
+                    <label className="lead-note-input-label">Tags</label>
+                    <div className="lead-note-tags-input-container">
+                      <div className="lead-note-tag-chips">
+                        {noteTags.map((tag) => (
+                          <span className="lead-note-tag-chip" key={tag}>
+                            <span>{tag}</span>
+                            <button
+                              type="button"
+                              className="lead-note-tag-remove"
+                              onClick={() => setNoteTags(noteTags.filter((t) => t !== tag))}
+                              aria-label={`Remove tag ${tag}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className="lead-note-tag-dropdown-btn"
+                        onClick={() => {
+                          const newTag = prompt("Enter tag name:");
+                          if (newTag && !noteTags.includes(newTag.trim())) {
+                            setNoteTags([...noteTags, newTag.trim()]);
+                          }
+                        }}
+                        aria-label="Add tag"
+                      >
+                        <ChevronDownIcon />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="lead-note-meta-field">
+                    <label className="lead-note-input-label" htmlFor="lead-note-visibility">
+                      Visibility
+                    </label>
+                    <div className="lead-note-select-wrap">
+                      <select
+                        id="lead-note-visibility"
+                        className="lead-note-select"
+                        value={noteVisibility}
+                        onChange={(e) => setNoteVisibility(e.target.value)}
+                      >
+                        <option value="Team">Team</option>
+                        <option value="Private">Private</option>
+                        <option value="Everyone">Everyone</option>
+                      </select>
+                      <ChevronDownIcon />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Switches & Reminders Container */}
+                <div className="lead-note-switches-container">
+                  {/* Switch 1: Pin to lead */}
+                  <div className="lead-note-switch-block">
+                    <label className="lead-note-switch-label">
+                      <span className="lead-toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={pinToLead}
+                          onChange={(e) => setPinToLead(e.target.checked)}
+                        />
+                        <span className="lead-toggle-slider" />
+                      </span>
+                      <div className="lead-note-switch-texts">
+                        <span className="lead-note-switch-title">Pin to lead</span>
+                        <span className="lead-note-switch-desc">Keep this note visible for the team</span>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Switch 2: Set a reminder */}
+                  <div className="lead-note-switch-block">
+                    <label className="lead-note-switch-label">
+                      <span className="lead-toggle-switch">
+                        <input
+                          type="checkbox"
+                          checked={setReminder}
+                          onChange={(e) => setSetReminder(e.target.checked)}
+                        />
+                        <span className="lead-toggle-slider" />
+                      </span>
+                      <div className="lead-note-switch-texts">
+                        <span className="lead-note-switch-title">Set a reminder</span>
+                      </div>
+                    </label>
+
+                    {/* Subfields for Reminder */}
+                    {setReminder && (
+                      <div className="lead-note-reminder-subrow">
+                        <div className="lead-note-reminder-field">
+                          <span className="lead-note-sublabel">Reminder date</span>
+                          <div className="lead-note-input-with-icon">
+                            <CalendarIcon color="var(--ink-2)" />
+                            <input
+                              type="date"
+                              className="lead-note-clean-input"
+                              value={reminderDate}
+                              onChange={(e) => setReminderDate(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="lead-note-reminder-field">
+                          <span className="lead-note-sublabel">Time</span>
+                          <div className="lead-note-input-with-icon">
+                            <ClockIcon />
+                            <input
+                              type="time"
+                              className="lead-note-clean-input"
+                              value={reminderTime}
+                              onChange={(e) => setReminderTime(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="lead-note-reminder-field">
+                          <span className="lead-note-sublabel">Notify</span>
+                          <div className="lead-note-input-with-icon">
+                            <UserIcon />
+                            <select
+                              className="lead-note-clean-select"
+                              value={reminderNotify}
+                              onChange={(e) => setReminderNotify(e.target.value)}
+                            >
+                              <option value="Aarav Mehta">Aarav Mehta</option>
+                              <option value="Nikhil Shah">Nikhil Shah</option>
+                              <option value="Self">Assignee</option>
+                            </select>
+                            <ChevronDownIcon />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Attachments Section */}
+                <div className="lead-note-attachments-section">
+                  <label className="lead-note-input-label">Attachments</label>
+                  <div className="lead-note-attachments-row">
+                    <button
+                      type="button"
+                      className="lead-note-attach-btn"
+                      onClick={() => {
+                        const fileName = prompt("Attach file name (e.g. proposal.pdf):");
+                        if (fileName) setNoteAttachments([...noteAttachments, fileName.trim()]);
+                      }}
+                    >
+                      <PaperclipIcon />
+                      <span>Attach files</span>
+                    </button>
+
+                    {noteAttachments.map((file) => (
+                      <div className="lead-note-file-chip" key={file}>
+                        <span className="lead-note-pdf-icon" aria-hidden="true">
+                          PDF
+                        </span>
+                        <span className="lead-note-file-name">{file}</span>
+                        <button
+                          type="button"
+                          className="lead-note-file-remove"
+                          onClick={() => setNoteAttachments(noteAttachments.filter((f) => f !== file))}
+                          aria-label={`Remove attachment ${file}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Bottom Switch 3: Show in activity history */}
+                <div className="lead-note-switch-block single-line">
+                  <label className="lead-note-switch-label">
+                    <span className="lead-toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={showInHistory}
+                        onChange={(e) => setShowInHistory(e.target.checked)}
+                      />
+                      <span className="lead-toggle-slider" />
+                    </span>
+                    <div className="lead-note-switch-texts">
+                      <span className="lead-note-switch-title">Show in activity history</span>
+                      <span className="lead-note-switch-desc">This note becomes the latest activity.</span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Footer Action Buttons */}
+                <div className="lead-note-footer-actions">
+                  <button
+                    type="button"
+                    className="lead-note-cancel-btn"
+                    onClick={() => {
+                      setNoteText("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="lead-note-save-btn"
+                    onClick={() => {
+                      if (!noteText.trim()) return;
+                      const newNote = {
+                        id: `note-${Date.now()}`,
+                        type: noteType,
+                        text: noteText,
+                        tags: [...noteTags],
+                        pinned: pinToLead,
+                        createdAt: "Just now",
+                        attachments: [...noteAttachments],
+                      };
+                      setSavedNotesList((prev) => [newNote, ...prev]);
+                      screen.setActivityForm((form) => ({ ...form, body: noteText }));
+                      void screen.addActivity("note");
+                      setNoteSavedFeedback(true);
+                      setTimeout(() => setNoteSavedFeedback(false), 3000);
+                    }}
+                  >
+                    Save note
+                  </button>
+                </div>
               </div>
+
+              {/* Saved Notes Feed in same UI */}
+              {savedNotesList.length > 0 && (
+                <div className="lead-note-saved-section">
+                  <h4 className="lead-note-saved-heading">Saved Notes ({savedNotesList.length})</h4>
+                  <div className="lead-note-saved-cards">
+                    {savedNotesList.map((sn) => (
+                      <div className="lead-note-saved-card" key={sn.id}>
+                        <div className="lead-note-saved-head">
+                          <span className="lead-note-saved-badge">{sn.type.toUpperCase()} NOTE</span>
+                          {sn.pinned && <span className="lead-note-pinned-badge">📌 Pinned</span>}
+                          <span className="lead-note-saved-date">{sn.createdAt}</span>
+                        </div>
+                        <p className="lead-note-saved-text">{sn.text}</p>
+                        {sn.tags.length > 0 && (
+                          <div className="lead-note-saved-tags">
+                            {sn.tags.map((t) => (
+                              <span className="lead-note-saved-tag-pill" key={t}>
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {sn.attachments.length > 0 && (
+                          <div className="lead-note-saved-attachments">
+                            {sn.attachments.map((att) => (
+                              <span className="lead-note-file-chip small" key={att}>
+                                <span className="lead-note-pdf-icon small">PDF</span>
+                                <span>{att}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
