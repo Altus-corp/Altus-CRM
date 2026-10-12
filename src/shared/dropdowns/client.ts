@@ -32,6 +32,10 @@ export function clearDropdownCache() {
   request = null;
 }
 
+export function primeDropdownCache(definitions: DropdownDefinition[]) {
+  definitions.forEach((dropdown) => cache.set(dropdown.key, { ...dropdown, options: [...dropdown.options].sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id)) }));
+}
+
 async function loadAll() {
   if (!request) {
     request = api<{ dropdowns: DropdownDefinition[] }>("/api/dropdowns").then(({ dropdowns }) => {

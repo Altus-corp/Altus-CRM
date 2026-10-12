@@ -25,12 +25,35 @@ test("users endpoints cover 401, 403, 409 and 201 without credential fields", as
   const forbidden = response(); await route(request("GET", "/api/users"), forbidden, dbFor({ ...admin, role: "Sales" })); assert.equal(forbidden.status, 403);
   const duplicate = response(); await route(request("POST", "/api/users", { name: "Member", email: "member@example.invalid", role: "Sales", temporary_password: "long-enough-password" }), duplicate, dbFor(admin, { existing: { id: "existing" } })); assert.equal(duplicate.status, 409); assert.equal(JSON.parse(duplicate.body).error, "User already exists.");
   const created = response(); await route(request("POST", "/api/users", { name: "Member", email: "member@example.invalid", role: "Admin", temporary_password: "long-enough-password" }), created, dbFor(owner)); assert.equal(created.status, 201); assert.doesNotMatch(created.body, /hash|salt|password/i);
+  const customId = response(); await route(request("POST", "/api/users", { user_id: "001", name: "Numbered Member", email: "numbered@example.invalid", department: "Sales", role: "Sales", temporary_password: "long-enough-password" }), customId, dbFor(admin)); assert.equal(customId.status, 201); assert.match(customId.body, /001/);
+  const invalidId = response(); await route(request("POST", "/api/users", { user_id: "bad id", name: "Invalid", email: "invalid@example.invalid", role: "Sales", temporary_password: "long-enough-password" }), invalidId, dbFor(admin)); assert.equal(invalidId.status, 400);
 });
 
 test("Admin cannot create Admin or Owner", async () => {
   for (const role of ["Admin", "Owner"]) {
     const res = response(); await route(request("POST", "/api/users", { name: "Member", email: "member@example.invalid", role, temporary_password: "long-enough-password" }), res, dbFor(admin)); assert.equal(res.status, 403, role);
   }
+});
+
+test("Admin can create and list departments", async () => {
+  const sql = [];
+  const db = dbFor(admin);
+  db.query = async (text, params) => {
+    sql.push({ text, params });
+    if (text.startsWith("SELECT id,name FROM departments")) return { rows: [{ id: "department-it", name: "IT" }] };
+    return { rows: [] };
+  };
+  const created = response();
+  await route(request("POST", "/api/departments", { name: "IT" }), created, db);
+  assert.equal(created.status, 201);
+  assert.equal(JSON.parse(created.body).name, "IT");
+  assert.ok(sql.some(({ text }) => text.startsWith("INSERT INTO departments")));
+  assert.ok(sql.some(({ text }) => text.includes("audit_log")));
+
+  const listed = response();
+  await route(request("GET", "/api/departments", {}), listed, db);
+  assert.equal(listed.status, 200);
+  assert.deepEqual(JSON.parse(listed.body).departments, [{ id: "department-it", name: "IT" }]);
 });
 
 test("only Owner can reset member passwords", async () => {

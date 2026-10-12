@@ -36,7 +36,7 @@ function hasCapability(role, capability) {
 }
 
 function requireCapability(capability, user) {
-  return hasCapability(user?.role, capability);
+  return hasCapability(user?.role, capability) || Array.isArray(user?.capability_overrides) && user.capability_overrides.includes(capability);
 }
 
 function canManageRole(actorRole, targetRole) {

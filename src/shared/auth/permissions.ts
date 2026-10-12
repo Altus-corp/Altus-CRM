@@ -36,10 +36,10 @@ export function displayRole(role: string | undefined) {
   return role === "Super Admin" ? "Owner" : role || "Viewer";
 }
 
-export function hasCapability(role: string | undefined, capability: Capability) {
+export function hasCapability(role: string | undefined, capability: Capability, overrides: readonly string[] = []) {
   const normalizedRole = String(role || "").trim().toLowerCase();
   const canonicalRole = normalizedRole === "super admin" ? "Owner" : normalizedRole ? normalizedRole[0].toUpperCase() + normalizedRole.slice(1) : "";
-  return (CAPABILITIES[capability] as readonly string[]).includes(canonicalRole);
+  return (CAPABILITIES[capability] as readonly string[]).includes(canonicalRole) || overrides.includes(capability);
 }
 
 export function canManageRole(actorRole: string | undefined, targetRole: string) {
@@ -49,5 +49,5 @@ export function canManageRole(actorRole: string | undefined, targetRole: string)
 
 export function usePermission(capability: Capability) {
   const { user } = useAuth();
-  return hasCapability(user?.role, capability);
+  return hasCapability(user?.role, capability, user?.capability_overrides || []);
 }

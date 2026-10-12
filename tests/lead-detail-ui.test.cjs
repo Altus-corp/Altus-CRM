@@ -199,8 +199,9 @@ test("Leads list exposes supported rows-per-page choices", () => {
   assert.match(pageSource, /Rows per page/);
   assert.match(pageSource, /dropdownKey="page_size"/);
   assert.match(fs.readFileSync("shared/dropdown-seed.json", "utf8"), /"page_size"/);
+  assert.match(functionSource, /pageSizeDropdown\.options/);
   assert.match(functionSource, /params\.set\("page_size", String\(pageSize\)\)/);
-  assert.match(functionSource, /setPageSize\(nextSize\); setPage\(1\)/);
+  assert.match(functionSource, /setPageSize\(Number\(value\)\); setPage\(1\)/);
 });
 
 test("Leads list includes checkbox for every lead and select all option", () => {
@@ -220,12 +221,14 @@ test("Leads list includes checkbox for every lead and select all option", () => 
 
   // Function exposes selection state & controls
   assert.match(functionSource, /selectedLeadIds/);
+  assert.match(functionSource, /selectAllView/);
   assert.match(functionSource, /toggleSelectLead/);
   assert.match(functionSource, /toggleSelectAll/);
   assert.match(functionSource, /clearSelection/);
 
   // CSS has checkbox and selection styles
   assert.match(cssSource, /\.lead-table-checkbox-col/);
+  assert.match(cssSource, /\.lead-table-checkbox-label/);
   assert.match(cssSource, /\.lead-table-checkbox/);
   assert.match(cssSource, /\.is-selected/);
   assert.match(cssSource, /\.lead-selection-bar/);

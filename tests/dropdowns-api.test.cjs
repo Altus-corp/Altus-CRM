@@ -42,6 +42,15 @@ test("non-admin reads only visible definitions and active options", async () => 
   assert.equal(res.status, 200); assert.deepEqual(JSON.parse(res.body).dropdowns, [{ ...managed, options: [{ ...options[0] }] }]);
 });
 
+test("user options require login and expose only id and name", async () => {
+  const unauthenticatedDb = { sessionUser: async () => null, userById: async () => null, query: async () => ({ rows: [] }) };
+  const unauthenticated = response(); await route(request("GET", "/api/user-options", {}, {}), unauthenticated, unauthenticatedDb);
+  assert.equal(unauthenticated.status, 401);
+  const authenticatedDb = { sessionUser: async () => owner.id, userById: async () => owner, query: async (text) => text.includes("SELECT id,name FROM users") ? { rows: [{ id: "u-1", name: "A User", email: "hidden@example.invalid", role: "Sales" }] } : { rows: [] } };
+  const authenticated = response(); await route(request("GET", "/api/user-options", {}, { cookie: "crm_session=fixture" }), authenticated, authenticatedDb);
+  assert.equal(authenticated.status, 200); assert.deepEqual(JSON.parse(authenticated.body), { options: [{ id: "u-1", name: "A User" }] });
+});
+
 test("Admin and Owner can create options, other roles cannot", async () => {
   for (const actor of [admin, owner]) { const db = dbFor(actor, [managed]); const res = response(); await route(request("POST", `/api/dropdowns/${managed.id}/options`, { label: "QDL", value: "QDL" }), res, db); assert.equal(res.status, 201); assert.ok(db.sql.some((entry) => String(entry.text).includes("INSERT INTO dropdown_options"))); assert.ok(db.sql.some((entry) => String(entry.text).includes("audit_log"))); }
   for (const actor of [sales, viewer]) { const forbidden = response(); await route(request("POST", `/api/dropdowns/${managed.id}/options`, { label: "QDL", value: "QDL" }), forbidden, dbFor(actor, [managed])); assert.equal(forbidden.status, 403); }

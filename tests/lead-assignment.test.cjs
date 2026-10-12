@@ -15,6 +15,7 @@ test("rule conditions and eligible pool filters are deterministic", () => {
   assert.equal(matchesRule({ team: "beta", lead_type: "DL" }, { conditions: { team: "alpha" } }), false);
   assert.deepEqual(eligibleUsers(users, { actions: { roles: ["Sales"], team: "alpha" } }).map((user) => user.id), ["u-1", "u-2"]);
   assert.deepEqual(eligibleUsers(users, { actions: { pool: ["u-2", "u-3"] } }).map((user) => user.id), ["u-2", "u-3"]);
+  assert.deepEqual(eligibleUsers(users, { actions: { user_ids: ["u-3"] } }).map((user) => user.id), ["u-3"]);
 });
 
 test("rotation chooses the next user and wraps around", () => {
@@ -64,9 +65,14 @@ test("round-robin migration and source wiring are present", () => {
   const server = fs.readFileSync("server/index.cjs", "utf8");
   const importer = fs.readFileSync("server/lead-import.cjs", "utf8");
   const assignment = fs.readFileSync("server/lead-assignment.cjs", "utf8");
+  const settings = fs.readFileSync("src/screens/settings/page.tsx", "utf8");
   assert.match(migration, /last_assigned_user_id/);
   assert.match(migration, /employee_profiles.*team/);
   assert.match(server, /assignLeadRoundRobin/);
   assert.match(assignment, /FOR UPDATE/);
   assert.match(importer, /assignLeadRoundRobin/);
+  assert.match(importer, /team: text\(values\.team\)/);
+  assert.match(settings, /employeeDraft\.team/);
+  assert.match(settings, /<th>Team<\/th>/);
+  assert.match(settings, /employee\.team/);
 });

@@ -13,7 +13,9 @@ async function main() {
   const guarded = guardedDatabaseUrl();
   if (!guarded.ok) { reportFailure("dropdown seed", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
   if (isSupabaseUrl(guarded.value) && process.env.ALLOW_SUPABASE_WRITE !== "1") { reportFailure("dropdown seed", { code: "SUPABASE_WRITE_BLOCKED" }, "Set ALLOW_SUPABASE_WRITE=1 for this process.", guarded.target); process.exitCode = 3; return; }
-  const client = new Client({ connectionString: guarded.value });
+  const host = guarded.url.hostname;
+  const ssl = host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com") ? { rejectUnauthorized: false } : undefined;
+  const client = new Client({ connectionString: guarded.value, ...(ssl ? { ssl } : {}) });
   try {
     await client.connect();
     await auditScriptRun(client, "seed-dropdowns");
@@ -24,7 +26,7 @@ async function main() {
       if (!["managed", "system_locked"].includes(definition.rows[0].source_type)) throw new Error(`Cannot seed API-backed dropdown: ${key}`);
       for (const option of options) {
         const id = `dropdown-option-seed-${key}-${option.value}`.replace(/[^a-zA-Z0-9_-]/g, "-");
-        await client.query("INSERT INTO dropdown_options(id,dropdown_id,label,value,semantic_key,sort_order,is_active,updated_at) VALUES($1,$2,$3,$4,$5,$6,true,now()) ON CONFLICT(dropdown_id,value) DO UPDATE SET label=EXCLUDED.label,semantic_key=EXCLUDED.semantic_key,sort_order=EXCLUDED.sort_order,is_active=true,updated_at=now()", [id, definition.rows[0].id, option.label, option.value, option.semantic_key || null, option.sort_order]);
+        await client.query("INSERT INTO dropdown_options(id,dropdown_id,label,value,semantic_key,sort_order,is_active,updated_at) VALUES($1,$2,$3,$4,$5,$6,true,now()) ON CONFLICT(dropdown_id,value) DO NOTHING", [id, definition.rows[0].id, option.label, option.value, option.semantic_key || null, option.sort_order]);
       }
     }
     await client.query("COMMIT");

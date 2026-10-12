@@ -57,6 +57,7 @@ function fixtureDb({ role = "Owner", session = true, lead = fixtureLead() } = {}
     query: async (text, params = []) => {
       sql.push(text);
       if (text.includes("INSERT INTO audit_log")) auditParams.push(params);
+      if (text.includes("FROM dropdown_definitions d JOIN dropdown_options")) return { rows: [{ id: "stage-option" }] };
       if (text.startsWith("SELECT id,permission FROM leads")) return { rows: [{ id: LEAD_ID, permission: "Yes" }] };
       if (text.includes("FROM leads WHERE (($1::text IS NOT NULL")) return { rows: [] };
       if (text.startsWith("SELECT id FROM leads")) return { rows: [{ id: LEAD_ID }] };

@@ -4,8 +4,6 @@ const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const { writeAudit } = require("./audit.cjs");
 const { assignLeadRoundRobin } = require("./lead-assignment.cjs");
-const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
-const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 5000;
@@ -26,6 +24,7 @@ const HEADER_ALIASES = new Map([
   ["email", "email"], ["emailaddress", "email"],
   ["phone", "phone"], ["phonenumber", "phone"], ["mobile", "phone"], ["cell", "phone"], ["cellno", "phone"],
   ["company", "company"], ["companyname", "company"], ["organisation", "company"], ["organization", "company"],
+  ["team", "team"], ["salesteam", "team"],
   ["leadtype", "lead_type"], ["leadtypecode", "lead_type"], ["type", "lead_type"],
   ["stage", "stage"], ["leadstage", "stage"],
   ["permission", "permission"], ["permissiontocall", "permission"], ["permissiontocallstatus", "permission"],
@@ -173,14 +172,22 @@ async function loadReferenceData(db) {
   const masters = await db.query("SELECT master_type,code,label FROM master_values WHERE active=true", []);
   const values = new Map();
   for (const row of masters.rows || []) { const key = text(row.master_type).toLowerCase().replace(/[\s_-]+/g, ""); if (!values.has(key)) values.set(key, new Set()); values.get(key).add(text(row.code || row.label).toLowerCase()); values.get(key).add(text(row.label).toLowerCase()); }
+  const dropdowns = await db.query("SELECT d.key,o.value,o.label FROM dropdown_definitions d JOIN dropdown_options o ON o.dropdown_id=d.id WHERE d.is_active=true AND o.is_active=true AND d.key IN ('lead_type','lead_stage','permission')", []);
+  const dropdownValues = new Map();
+  for (const row of dropdowns.rows || []) { if (!dropdownValues.has(row.key)) dropdownValues.set(row.key, new Set()); dropdownValues.get(row.key).add(text(row.value).toLowerCase()); dropdownValues.get(row.key).add(text(row.label).toLowerCase()); }
   const users = await db.query("SELECT id,email FROM users WHERE active=true AND offboarded=false", []);
   const leads = await db.query("SELECT id,source_id,email,phone FROM leads", []);
-  return { masters: values, users: new Map((users.rows || []).map((row) => [normalizeEmail(row.email), row])), leads: leads.rows || [] };
+  return { masters: values, dropdowns: dropdownValues, users: new Map((users.rows || []).map((row) => [normalizeEmail(row.email), row])), leads: leads.rows || [] };
 }
 
 function masterHas(data, keys, value) {
   const sets = keys.map((key) => data.masters.get(key)).filter(Boolean);
   return !sets.length || sets.some((set) => set.has(text(value).toLowerCase()));
+}
+
+function dropdownHas(data, key, value, legacyKeys = []) {
+  const set = data.dropdowns?.get(key);
+  return set ? set.has(text(value).toLowerCase()) : masterHas(data, legacyKeys, value);
 }
 
 function mapHeaders(values) {
@@ -198,14 +205,14 @@ function rowValues(row, columns, reference, rowNumber) {
   const email = normalizeEmail(values.email); if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("email: invalid email address.");
   const phone = values.phone == null ? "" : text(values.phone); const normalizedPhone = normalizePhone(phone);
   if (phone && !normalizedPhone) errors.push("phone: must contain digits.");
-  const leadType = text(values.lead_type || "DL").toUpperCase(); if (!Object.prototype.hasOwnProperty.call(LEAD_TYPES, leadType) || !masterHas(reference, ["leadtype", "lead_type"], leadType)) errors.push("lead_type: invalid master value.");
-  const stage = text(values.stage || "lead").toLowerCase(); if (!LEAD_STAGES.has(stage) || !masterHas(reference, ["stage", "leadstage"], stage)) errors.push("stage: invalid master value.");
-  const permission = text(values.permission || "Pending"); if (!["Yes", "No", "Pending"].includes(permission)) errors.push("permission: must be Yes, No, or Pending.");
+  const leadType = text(values.lead_type || "DL").toUpperCase(); if (!dropdownHas(reference, "lead_type", leadType, ["leadtype", "lead_type"])) errors.push("lead_type: invalid master value.");
+  const stage = text(values.stage || "lead").toLowerCase(); if (!dropdownHas(reference, "lead_stage", stage, ["stage", "leadstage"])) errors.push("stage: invalid master value.");
+  const permission = text(values.permission || "Pending"); if (!dropdownHas(reference, "permission", permission, ["permission"])) errors.push("permission: invalid dropdown value.");
   const status = text(values.lead_status); if (status && !masterHas(reference, ["leadstatus", "status"], status)) errors.push("lead_status: invalid master value.");
   const psoDate = parseDate(values.pso_date, "pso_date"); if (values.pso_date && !psoDate) errors.push("pso_date: invalid date; use YYYY-MM-DD or DD/MM/YYYY.");
   const nextFollowup = parseDate(values.next_follow_up_at, "next_follow_up_at"); if (values.next_follow_up_at && !nextFollowup) errors.push("next_follow_up_at: invalid date; use YYYY-MM-DD or DD/MM/YYYY.");
   let ownerId = null; const owner = normalizeEmail(values.owner); if (owner) { ownerId = reference.users.get(owner)?.id || null; if (!ownerId) errors.push("owner: no active user matches that email."); }
-  return { rowNumber, errors, values: { name, email, phone: phone || null, normalizedPhone, company: text(values.company) || null, lead_type: leadType, priority: LEAD_TYPES[leadType], stage, permission, lead_status: status || null, owner_user_id: ownerId, pso_date: psoDate, next_follow_up_at: nextFollowup, city: text(values.city) || null, designation: text(values.designation) || null, lead_no: text(values.lead_no) || null, source_ref: text(values.source_ref) || null } };
+  return { rowNumber, errors, values: { name, email, phone: phone || null, normalizedPhone, company: text(values.company) || null, team: text(values.team) || null, lead_type: leadType, priority: LEAD_TYPES[leadType] || "P3", stage, permission, lead_status: status || null, owner_user_id: ownerId, pso_date: psoDate, next_follow_up_at: nextFollowup, city: text(values.city) || null, designation: text(values.designation) || null, lead_no: text(values.lead_no) || null, source_ref: text(values.source_ref) || null } };
 }
 
 function classifyRows(rows, reference, fileHash, allowDuplicates) {
@@ -288,7 +295,7 @@ async function apply(req, db, actor) {
         if (row.duplicate && req.headers["x-altus-allow-duplicates"] !== "1") continue;
         const leadId = `lead-upload-${analysis.fileHash}-${row.rowNumber}`;
         const customValues = row.values.source_ref ? { source_ref: row.values.source_ref } : {};
-        const inserted = await tx.query("INSERT INTO leads(id,source_id,name,email,phone,company,designation,city,lead_no,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,next_follow_up_at,custom_values,legacy_finance,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'{}'::jsonb,now()) ON CONFLICT(source_id) DO NOTHING RETURNING id", [leadId, row.sourceId, row.values.name, row.values.email, row.values.phone, row.values.company, row.values.designation, row.values.city, row.values.lead_no, row.values.lead_type, row.values.priority, row.values.stage, row.values.permission, row.values.lead_status, row.values.owner_user_id, row.values.pso_date, row.values.next_follow_up_at, JSON.stringify(customValues)]);
+        const inserted = await tx.query("INSERT INTO leads(id,source_id,name,email,phone,company,team,designation,city,lead_no,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,next_follow_up_at,custom_values,legacy_finance,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'{}'::jsonb,now()) ON CONFLICT(source_id) DO NOTHING RETURNING id", [leadId, row.sourceId, row.values.name, row.values.email, row.values.phone, row.values.company, row.values.team, row.values.designation, row.values.city, row.values.lead_no, row.values.lead_type, row.values.priority, row.values.stage, row.values.permission, row.values.lead_status, row.values.owner_user_id, row.values.pso_date, row.values.next_follow_up_at, JSON.stringify(customValues)]);
         if (!inserted.rows[0]) { counts.skipped_duplicates += 1; continue; }
         counts.created += 1;
         await tx.query("INSERT INTO lead_history(id,source_id,lead_id,occurred_at,actor_id,action,entity,entity_id,note,custom_values,source_checksum,import_run_id) VALUES($1,$2,$3,now(),$4,'lead.imported','lead',$3,NULL,'{}'::jsonb,$5,$6)", [`upload-history-${analysis.fileHash}-${row.rowNumber}`, `upload-history:${analysis.fileHash}:${row.rowNumber}`, leadId, actor.id, analysis.fileHash, runId]);

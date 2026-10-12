@@ -15,3 +15,5 @@ backups/
 *.log
 visual-check/
 .vercel
+.dropdown-component-test-*
+backup.patch

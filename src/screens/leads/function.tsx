@@ -5,6 +5,8 @@ import { useAuth } from "../../shared/auth/auth";
 import { displayRole, usePermission } from "../../shared/auth/permissions";
 import { useDropdown, type DropdownOption } from "../../shared/dropdowns/client";
 
+const DEFAULT_PAGE_SIZE_OPTIONS: DropdownOption[] = [];
+
 export type Lead = { id: string; source_id: string; name: string; first_name?: string | null; last_name?: string | null; email: string | null; company: string | null; phone: string | null; stage: string | null; permission: string | null; lead_status: string | null; owner_user_id: string | null; pso_date: string | null; next_follow_up_at: string | null; last_call_at: string | null; updated_at: string | null; is_pre_ps_done: boolean | null; lead_no: string | null; lead_type: string | null; lead_source: string | null; source_system: string | null; designation: string | null; city: string | null; custom_values?: Record<string, unknown>; legacy_finance?: Record<string, unknown> };
 export type LeadDetailResponse = { lead: Lead & Record<string, unknown>; calls: Record<string, unknown>[]; followups: Record<string, unknown>[]; history: Record<string, unknown>[]; messages: Record<string, unknown>[]; products: Record<string, unknown>[] };
 export type ActivityKind = "history" | "calls" | "followups" | "messages" | "notes";
@@ -45,6 +47,7 @@ export const LEAD_VIEW_GROUPS: readonly ViewGroup[] = [
 ];
 const VIEW_OPTIONS = LEAD_VIEW_GROUPS.flatMap((group) => group.views);
 
+
 function formatDate(value: string | null | undefined) { return value ? new Date(value).toLocaleDateString() : "—"; }
 
 export function useLeadsScreen() {
@@ -80,28 +83,35 @@ export function useLeadsScreen() {
   const [newLeadForm, setNewLeadForm] = useState({ name: "", email: "", phone: "", company: "", lead_type: "", permission: "", products: "" });
   const [editing, setEditing] = useState(false); const [editForm, setEditForm] = useState({ name: "", email: "", phone: "", company: "", lead_type: "" });
   const [userOptions, setUserOptions] = useState<DropdownOption[]>([]);
-  useEffect(() => { void api<{ options: DropdownOption[] }>("/api/user-options").then((response) => setUserOptions(response.options || [])).catch(() => setUserOptions([])); }, []);
+  useEffect(() => { void api<{ options: Array<{ id: string; name: string }> }>("/api/user-options").then((response) => setUserOptions((response.options || []).map((option, index) => ({ id: option.id, dropdown_id: "api-users", label: option.name, value: option.id, semantic_key: null, sort_order: index, is_active: true })))).catch(() => setUserOptions([])); }, []);
   useEffect(() => { setNewLeadForm((current) => ({ ...current, lead_type: current.lead_type || leadTypeDropdown.defaultValue, permission: current.permission || permissionDropdown.defaultValue })); }, [leadTypeDropdown.defaultValue, permissionDropdown.defaultValue]);
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
-  const toggleSelectLead = useCallback((id: string) => {
+  const [selectAllView, setSelectAllView] = useState(false);
+  const toggleSelectLead = useCallback((id: string, visibleIds: string[] = []) => {
+    if (selectAllView) {
+      setSelectAllView(false);
+      setSelectedLeadIds(visibleIds.filter((item) => item !== id));
+      return;
+    }
     setSelectedLeadIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-  }, []);
+  }, [selectAllView]);
   const toggleSelectAll = useCallback((visibleIds: string[]) => {
-    setSelectedLeadIds((current) => {
-      const allSelected = visibleIds.length > 0 && visibleIds.every((id) => current.includes(id));
-      if (allSelected) {
-        return current.filter((id) => !visibleIds.includes(id));
-      }
-      const next = new Set([...current, ...visibleIds]);
-      return Array.from(next);
-    });
-  }, []);
+    if (selectAllView) {
+      setSelectAllView(false);
+      setSelectedLeadIds([]);
+      return;
+    }
+    setSelectAllView(true);
+    setSelectedLeadIds(visibleIds);
+  }, [selectAllView]);
   const clearSelection = useCallback(() => {
+    setSelectAllView(false);
     setSelectedLeadIds([]);
   }, []);
   useEffect(() => {
     setSelectedLeadIds([]);
-  }, [page, view, filters]);
+    setSelectAllView(false);
+  }, [view, filters]);
   const viewMenuRef = useRef<HTMLDivElement>(null); const viewButtonRef = useRef<HTMLButtonElement>(null); const viewOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const queryParams = useMemo(() => { const params = new URLSearchParams({ sort: "updated_at", direction: "desc" }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); if (advancedConditions.length) params.set("advanced", JSON.stringify({ conditions: advancedConditions.map(({ id: _id, ...condition }) => condition), join: advancedJoin })); return params; }, [advancedConditions, advancedJoin, filters]);
   const query = useMemo(() => { const params = new URLSearchParams(queryParams); params.set("page", String(page)); params.set("page_size", String(pageSize)); if (view) params.set("view", view); return params.toString(); }, [page, pageSize, queryParams, view]);
@@ -120,7 +130,7 @@ export function useLeadsScreen() {
   async function rescheduleActivity(followupId: string, dueAt: string) { if (!detail) return false; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/followups/${encodeURIComponent(followupId)}/reschedule`, { method: "POST", body: JSON.stringify({ due_at: dueAt }) }); await refreshActivity(); return true; } catch (cause) { setActivityError(cause instanceof Error ? cause.message : "Unable to reschedule follow-up."); return false; } }
   useEffect(() => { const id = searchParams.get("open"); if (id) void openDetail(id); }, [openDetail, searchParams]);
   function updateFilter(key: keyof LeadFilters, value: string) { setPage(1); setFilters((current) => ({ ...current, [key]: value })); }
-  function changePageSize(value: string) { if (value === "all") { setPageSize("all"); setPage(1); return; } const nextSize = Number(value); if (!pageSizeDropdown.options.some((option) => option.value === value) && ![10, 25, 50, 100].includes(nextSize)) return; setPageSize(nextSize); setPage(1); }
+  function changePageSize(value: string) { if (value === "all") { setPageSize("all"); setPage(1); return; } if (!pageSizeDropdown.options.some((option) => option.value === value)) return; setPageSize(Number(value)); setPage(1); }
   function clearFilters() { setPage(1); setView(""); setFilters({ ...EMPTY_FILTERS }); setAdvancedConditions([]); setAdvancedJoin("AND"); }
   function newCondition(): QuickFilterCondition { return { id: `condition-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, field: filterFieldDropdown.defaultValue || filterFieldDropdown.options[0]?.value || "", operator: filterOperatorDropdown.defaultValue || filterOperatorDropdown.options[0]?.value || "", value: "" }; }
   function openAdvancedFilter(saved?: SavedLeadFilter) { setEditingQuickFilter(saved?.id || null); setDraftConditions(saved?.conditions ? saved.conditions.map((condition) => ({ ...condition, id: condition.id || `condition-${Date.now()}` })) : advancedConditions.length ? advancedConditions.map((condition) => ({ ...condition })) : [newCondition()]); setDraftJoin(saved?.join || advancedJoin); setAdvancedOpen(true); }
@@ -146,7 +156,7 @@ export function useLeadsScreen() {
   }
   async function deleteSavedFilter(id: string) { try { await api(`/api/lead-quick-filters/${encodeURIComponent(id)}`, { method: "DELETE" }); setSavedFilters((current) => current.filter((item) => item.id !== id)); if (editingQuickFilter === id) setEditingQuickFilter(null); showToast("Quick filter deleted"); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete quick filter."); } }
   function closeNewLead() { const next = new URLSearchParams(searchParams); next.delete("new"); setSearchParams(next); }
-  async function createNewLead(event: React.FormEvent) { event.preventDefault(); setError(""); try { await api("/api/leads", { method: "POST", body: JSON.stringify({ ...newLeadForm, products: newLeadForm.products.split(",").map((product_code) => ({ product_code: product_code.trim() })).filter((product) => product.product_code) }) }); setNewLeadForm({ name: "", email: "", phone: "", company: "", lead_type: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue, products: "" }); closeNewLead(); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
+  async function createNewLead(event: React.FormEvent) { event.preventDefault(); setError(""); if (!newLeadForm.lead_type || !newLeadForm.permission || !leadTypeDropdown.options.length || !permissionDropdown.options.length) { setError("Lead options are still loading or unavailable. Choose valid values before saving."); return; } try { await api("/api/leads", { method: "POST", body: JSON.stringify({ ...newLeadForm, products: newLeadForm.products.split(",").map((product_code) => ({ product_code: product_code.trim() })).filter((product) => product.product_code) }) }); setNewLeadForm({ name: "", email: "", phone: "", company: "", lead_type: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue, products: "" }); closeNewLead(); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
   async function saveLeadEdit(event: React.FormEvent) { event.preventDefault(); if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}`, { method: "PATCH", body: JSON.stringify(editForm) }); setEditing(false); await openDetail(detail.lead.id); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
   async function updateStage(stage: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/stage`, { method: "POST", body: JSON.stringify({ stage }) }); await openDetail(detail.lead.id); await load(); } catch { setError("Unable to change lead stage."); } }
   async function updatePermission(permission: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/permission`, { method: "POST", body: JSON.stringify({ permission }) }); await openDetail(detail.lead.id); await load(); } catch { setError("Unable to change permission."); } }
@@ -168,7 +178,7 @@ export function useLeadsScreen() {
   const filtersActive = !!view || Object.values(filters).some(Boolean) || advancedConditions.length > 0;
   const canLogCall = canCall && detail?.lead.permission === "Yes";
   const callDisabledReason = !canCall ? "Your role cannot log calls." : "Permission to Call is required.";
-  return { data, detail, detailLoading, error, filters, filtersActive, loading, page, pageSize, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, savedFilters, quickFilterLoading, advancedConditions, advancedJoin, advancedOpen, editingQuickFilter, toast, draftConditions, draftJoin, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, editing, editForm, setEditing, setEditForm, canChangePermission, canCall, canLogCall, callDisabledReason, canConvertAccount, canImport, canAssign, bulkImportLabel, formatDate, load, openDetail, closeDetail: () => { setDetail(null); setActivityKind(null); }, closeNewLead, createNewLead, saveLeadEdit, updateStage, updatePermission, reassignByRoundRobin, convertLead, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, clearFilters, changePageSize, saveSavedFilter, applySavedFilter, deleteSavedFilter, openAdvancedFilter, applyAdvancedFilter, updateCondition, addCondition, removeCondition, setAdvancedOpen, setDraftJoin, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)), activityKind, activityItems, activityPage, activityTotal, activityLoading, activityError, activityForm, setActivityForm, loadActivity, closeActivity: () => { setActivityKind(null); setActivityItems([]); }, addActivity, rescheduleActivity, bulkUploadOpen, bulkFile, bulkPreview, bulkResult, bulkLoading, bulkError, bulkAllowDuplicates, setBulkAllowDuplicates, openBulkUpload, closeBulkUpload, downloadBulkTemplate, previewBulkUpload, applyBulkUpload, selectedLeadIds, toggleSelectLead, toggleSelectAll, clearSelection, userOptions, dropdownOptions: { leadType: leadTypeDropdown.options, stage: stageDropdown.options, permission: permissionDropdown.options, join: joinDropdown.options, filterField: filterFieldDropdown.options, filterOperator: filterOperatorDropdown.options, pageSize: pageSizeDropdown.options, relatedActivity: relatedActivityDropdown.options, noteVisibility: noteVisibilityDropdown.options, notifyBefore: notifyBeforeDropdown.options }, dropdownDefaults: { leadType: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue } };
+  return { data, detail, detailLoading, error, filters, filtersActive, loading, page, pageSize, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, savedFilters, quickFilterLoading, advancedConditions, advancedJoin, advancedOpen, editingQuickFilter, toast, draftConditions, draftJoin, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, editing, editForm, setEditing, setEditForm, canChangePermission, canCall, canLogCall, callDisabledReason, canConvertAccount, canImport, canAssign, bulkImportLabel, formatDate, load, openDetail, closeDetail: () => { setDetail(null); setActivityKind(null); }, closeNewLead, createNewLead, saveLeadEdit, updateStage, updatePermission, reassignByRoundRobin, convertLead, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, clearFilters, changePageSize, saveSavedFilter, applySavedFilter, deleteSavedFilter, openAdvancedFilter, applyAdvancedFilter, updateCondition, addCondition, removeCondition, setAdvancedOpen, setDraftJoin, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)), activityKind, activityItems, activityPage, activityTotal, activityLoading, activityError, activityForm, setActivityForm, loadActivity, closeActivity: () => { setActivityKind(null); setActivityItems([]); }, addActivity, rescheduleActivity, bulkUploadOpen, bulkFile, bulkPreview, bulkResult, bulkLoading, bulkError, bulkAllowDuplicates, setBulkAllowDuplicates, openBulkUpload, closeBulkUpload, downloadBulkTemplate, previewBulkUpload, applyBulkUpload, selectedLeadIds, selectAllView, setSelectAllView, toggleSelectLead, toggleSelectAll, clearSelection, userOptions, dropdownOptions: { leadType: leadTypeDropdown.options, stage: stageDropdown.options, permission: permissionDropdown.options, join: joinDropdown.options, filterField: filterFieldDropdown.options, filterOperator: filterOperatorDropdown.options, pageSize: pageSizeDropdown.options.length ? pageSizeDropdown.options : DEFAULT_PAGE_SIZE_OPTIONS, relatedActivity: relatedActivityDropdown.options, noteVisibility: noteVisibilityDropdown.options, notifyBefore: notifyBeforeDropdown.options }, dropdownDefaults: { leadType: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue } };
 }
 
 export function fieldValue(lead: Lead, key: string) {

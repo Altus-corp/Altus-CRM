@@ -2,7 +2,7 @@
 
 const ADMIN_SCREENS = new Set([
   "dashboard", "call-history", "analytics", "assignment", "panel", "templates",
-  "import-export", "integrations", "audit", "process-flow", "reports", "database-status",
+  "import-export", "integrations", "audit", "process-flow", "reports", "database-status", "dropdown-management",
 ]);
 
 async function optionalRows(db, text, params = []) {
@@ -26,7 +26,7 @@ async function adminData(db, screen) {
       optionalOne(db, `SELECT
         (SELECT count(*)::int FROM leads) AS total_leads,
         (SELECT count(*)::int FROM lead_calls WHERE happened_at >= CURRENT_DATE) AS calls_today,
-        (SELECT count(*)::int FROM leads WHERE stage IN ('registered','psreg') AND created_at >= CURRENT_DATE) AS registered_today,
+        (SELECT count(*)::int FROM leads l WHERE (SELECT o.semantic_key FROM dropdown_options o JOIN dropdown_definitions d ON d.id=o.dropdown_id WHERE d.key='lead_stage' AND o.value=l.stage AND o.is_active=true LIMIT 1) IN ('registered','psreg') AND created_at >= CURRENT_DATE) AS registered_today,
         (SELECT count(*)::int FROM lead_followups WHERE due_at < CURRENT_DATE AND completed_at IS NULL) AS overdue_followups,
         (SELECT count(*)::int FROM lead_followups WHERE due_at >= CURRENT_DATE AND due_at < CURRENT_DATE + INTERVAL '1 day' AND completed_at IS NULL) AS due_today`, []),
       optionalRows(db, `SELECT id, lead_id, due_at, status FROM lead_followups WHERE completed_at IS NULL ORDER BY due_at ASC NULLS LAST, id ASC LIMIT $1`, [10]),
@@ -47,11 +47,11 @@ async function adminData(db, screen) {
     ]);
     return { metrics: pool, rows: users, rules };
   }
-  if (screen === "panel") return { rows: await optionalRows(db, `SELECT id, name, email, role, active, created_at FROM users ORDER BY name ASC, id ASC`) };
+  if (screen === "panel") return { rows: await optionalRows(db, `SELECT u.id, u.name, u.email, COALESCE(ep.role_label, u.role) AS role, u.role AS access_level, ep.team AS department, u.active, u.created_at FROM users u LEFT JOIN employee_profiles ep ON ep.user_id = u.id ORDER BY u.name ASC, u.id ASC`) };
   if (screen === "templates") return { rows: await optionalRows(db, `SELECT source_id, category, sequence, channel, subject, language, active FROM admin_templates ORDER BY category ASC, sequence ASC, source_id ASC`) };
   if (screen === "integrations") return { rows: await optionalRows(db, `SELECT source_id, name, enabled FROM integration_catalog ORDER BY name ASC, source_id ASC`) };
   if (screen === "audit") return { rows: await optionalRows(db, `SELECT id, occurred_at, actor_id, action, entity, entity_id, field FROM lead_history ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT $1`, [100]) };
-  if (screen === "reports") return { metrics: await optionalOne(db, `SELECT count(*)::int AS leads, count(*) FILTER (WHERE stage = 'registered')::int AS registered, count(*) FILTER (WHERE stage = 'attended')::int AS attended, count(*) FILTER (WHERE stage = 'psreg')::int AS sales FROM leads`, []), rows: [] };
+  if (screen === "reports") return { metrics: await optionalOne(db, `SELECT count(*)::int AS leads, count(*) FILTER (WHERE (SELECT o.semantic_key FROM dropdown_options o JOIN dropdown_definitions d ON d.id=o.dropdown_id WHERE d.key='lead_stage' AND o.value=l.stage AND o.is_active=true LIMIT 1) = 'registered')::int AS registered, count(*) FILTER (WHERE (SELECT o.semantic_key FROM dropdown_options o JOIN dropdown_definitions d ON d.id=o.dropdown_id WHERE d.key='lead_stage' AND o.value=l.stage AND o.is_active=true LIMIT 1) = 'attended')::int AS attended, count(*) FILTER (WHERE (SELECT o.semantic_key FROM dropdown_options o JOIN dropdown_definitions d ON d.id=o.dropdown_id WHERE d.key='lead_stage' AND o.value=l.stage AND o.is_active=true LIMIT 1) = 'psreg')::int AS sales FROM leads l`, []), rows: [] };
   if (screen === "import-export") return { metrics: {}, rows: [], note: "Import and export history is not available in this workspace yet." };
   return { metrics: {}, rows: [
     { step: 1, name: "Acquire and qualify" },

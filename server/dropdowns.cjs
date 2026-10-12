@@ -25,14 +25,54 @@ function optionInput(body, current = {}) {
   if (!label || !value) return { error: "Option label and value are required." };
   return { value: { label, value, semantic_key: body.semantic_key ?? current.semantic_key ?? null, sort_order: Number.isInteger(body.sort_order) ? body.sort_order : Number(current.sort_order || 0), is_active: body.is_active ?? current.is_active ?? true } };
 }
+let cachedSeedDropdowns = null;
+function getSeedDropdowns() {
+  if (!cachedSeedDropdowns) {
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const seedJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "shared", "dropdown-seed.json"), "utf8"));
+      cachedSeedDropdowns = Object.entries(seedJson).map(([key, opts], idx) => ({
+        id: `dd-${key}`,
+        key,
+        label: key.replace(/_/g, " "),
+        source_type: "system_locked",
+        required: true,
+        default_value: opts[0]?.value || null,
+        is_visible: true,
+        is_active: true,
+        sort_order: (idx + 1) * 10,
+        options: opts.map((opt, oIdx) => ({
+          id: `opt-${key}-${opt.value}`,
+          dropdown_id: `dd-${key}`,
+          label: opt.label,
+          value: opt.value,
+          semantic_key: opt.semantic_key || null,
+          sort_order: opt.sort_order ?? (oIdx + 1) * 10,
+          is_active: true,
+        })),
+      }));
+    } catch {
+      cachedSeedDropdowns = [];
+    }
+  }
+  return cachedSeedDropdowns;
+}
+
 async function dropdownsList(req, res, db, actor) {
-  const admin = isDropdownAdmin(actor);
-  const definitions = await db.query(`SELECT id,key,label,source_type,required,default_value,is_visible,is_active,sort_order,created_at,updated_at FROM dropdown_definitions ${admin ? "" : "WHERE is_active=true AND is_visible=true"} ORDER BY sort_order,key`, []);
-  const ids = definitions.rows.map((row) => row.id);
-  const options = ids.length ? await db.query(`SELECT id,dropdown_id,label,value,semantic_key,sort_order,is_active,created_at,updated_at FROM dropdown_options WHERE dropdown_id = ANY($1::text[]) ${admin ? "" : "AND is_active=true"} ORDER BY dropdown_id,sort_order,id`, [ids]) : { rows: [] };
-  const byDefinition = new Map(ids.map((id) => [id, []]));
-  for (const row of options.rows) byDefinition.get(row.dropdown_id)?.push(publicOption(row));
-  return json(res, 200, { dropdowns: definitions.rows.map((row) => publicDefinition(row, byDefinition.get(row.id) || [])) });
+  try {
+    const admin = isDropdownAdmin(actor);
+    const definitions = await db.query(`SELECT id,key,label,source_type,required,default_value,is_visible,is_active,sort_order,created_at,updated_at FROM dropdown_definitions ${admin ? "" : "WHERE is_active=true AND is_visible=true"} ORDER BY sort_order,key`, []);
+    const ids = definitions.rows.map((row) => row.id);
+    const options = ids.length ? await db.query(`SELECT id,dropdown_id,label,value,semantic_key,sort_order,is_active,created_at,updated_at FROM dropdown_options WHERE dropdown_id = ANY($1::text[]) ${admin ? "" : "AND is_active=true"} ORDER BY dropdown_id,sort_order,id`, [ids]) : { rows: [] };
+    const byDefinition = new Map(ids.map((id) => [id, []]));
+    for (const row of options.rows) byDefinition.get(row.dropdown_id)?.push(publicOption(row));
+    return json(res, 200, { dropdowns: definitions.rows.map((row) => publicDefinition(row, byDefinition.get(row.id) || [])) });
+  } catch (err) {
+    const fallback = getSeedDropdowns();
+    if (fallback.length) return json(res, 200, { dropdowns: fallback });
+    throw err;
+  }
 }
 async function loadDefinition(db, id) { return (await db.query("SELECT id,key,label,source_type,required,default_value,is_visible,is_active,sort_order,created_at,updated_at FROM dropdown_definitions WHERE id=$1", [id])).rows[0] || null; }
 async function loadOption(db, id) { return (await db.query("SELECT id,dropdown_id,label,value,semantic_key,sort_order,is_active,created_at,updated_at FROM dropdown_options WHERE id=$1", [id])).rows[0] || null; }

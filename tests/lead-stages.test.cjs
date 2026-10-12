@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { Readable } = require("node:stream");
-const stages = require("../shared/lead-stages.json");
+const stages = require("../shared/dropdown-seed.json").lead_stage;
 const { analyzeUpload } = require("../server/lead-import.cjs");
 const { route } = require("../server/index.cjs");
 
@@ -24,6 +24,7 @@ function dbFor(current = null) {
       if (text.includes("SELECT * FROM leads WHERE id=$1")) return { rows: current ? [current] : [] };
       if (text.includes("SELECT id FROM leads WHERE")) return { rows: [] };
       if (text.includes("SELECT stage FROM leads WHERE id=$1")) return { rows: current ? [{ stage: current.stage }] : [] };
+      if (text.includes("FROM dropdown_definitions d JOIN dropdown_options")) return { rows: [{ id: "stage-option" }] };
       return { rows: [] };
     },
     transaction: async (work) => work({ query: async (text) => { sql.push(text); if (text.includes("SELECT stage FROM leads WHERE id=$1")) return { rows: current ? [{ stage: current.stage }] : [] }; return { rows: [] }; } }),
@@ -74,5 +75,5 @@ test("import validation accepts all three new stages with fixture data", async (
 test("Leads UI renders every shared stage option", () => {
   const source = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
   assert.match(fs.readFileSync("shared/dropdown-seed.json", "utf8"), /"lead_stage"\s*:/);
-  for (const stage of requestedStages) assert.match(fs.readFileSync("shared/lead-stages.json", "utf8"), new RegExp(`"value": "${stage}"`));
+  for (const stage of requestedStages) assert.ok(stages.some((option) => option.value === stage));
 });

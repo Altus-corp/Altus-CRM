@@ -5,8 +5,8 @@ const ExcelJS = require("exceljs");
 const { analyzeUpload, parseCsv, apply, excelCellValue, template, TEMPLATE_HEADERS, publicAnalysis, comparablePhone } = require("../server/lead-import.cjs");
 const { route } = require("../server/index.cjs");
 
-function referenceDb({ leads = [], users = [{ id: "owner-1", email: "owner@example.test" }], masters = [], columns = ["file_hash", "actor_user_id"] } = {}) {
-  return { query: async (sql) => sql.includes("information_schema.columns") ? { rows: columns.map((column_name) => ({ column_name })) } : sql.includes("master_values") ? { rows: masters } : sql.includes("FROM users") ? { rows: users } : sql.includes("FROM leads") ? { rows: leads } : { rows: [] } };
+function referenceDb({ leads = [], users = [{ id: "owner-1", email: "owner@example.test" }], masters = [], dropdowns = [], columns = ["file_hash", "actor_user_id"] } = {}) {
+  return { query: async (sql) => sql.includes("information_schema.columns") ? { rows: columns.map((column_name) => ({ column_name })) } : sql.includes("master_values") ? { rows: masters } : sql.includes("dropdown_definitions") ? { rows: dropdowns } : sql.includes("FROM users") ? { rows: users } : sql.includes("FROM leads") ? { rows: leads } : { rows: [] } };
 }
 
 function csvRequest(buffer, filename, headers = {}) {
@@ -77,6 +77,18 @@ test("import validation reports required name, master values, dates, and duplica
   const analysis = await analyzeUpload(Buffer.from(data), "fixture.csv", referenceDb({ leads: [{ id: "existing", phone: "9000000000", email: "old@example.test" }] }));
   assert.equal(analysis.fileHash.length, 64); assert.equal(analysis.errors.length, 1); assert.equal(analysis.mapped.some((row) => row.errors.length > 0), true); assert.equal(analysis.mapped.some((row) => row.duplicate), true); assert.equal(analysis.mapped.some((row) => row.sourceId === `upload:${analysis.fileHash}:2`), true);
   const missingName = await analyzeUpload(Buffer.from("name,email\n,empty@example.test\n"), "missing.csv", referenceDb()); assert.match(missingName.errors[0].errors[0], /name: value is required/);
+});
+
+test("CSV import accepts an admin-added stage and lead type from active dropdown options", async () => {
+  const dropdowns = [
+    { key: "lead_type", value: "PARTNER", label: "Partner" },
+    { key: "lead_stage", value: "admin-stage", label: "Admin stage" },
+    { key: "permission", value: "Pending", label: "Pending" },
+  ];
+  const analysis = await analyzeUpload(Buffer.from("name,lead_type,stage\nImported,PARTNER,admin-stage\n"), "admin-added.csv", referenceDb({ dropdowns }));
+  assert.equal(analysis.errors.length, 0);
+  assert.equal(analysis.valid[0].values.stage, "admin-stage");
+  assert.equal(analysis.valid[0].values.lead_type, "PARTNER");
 });
 
 test("same file hash and row number produce the same idempotent source_id", async () => {

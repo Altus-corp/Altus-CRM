@@ -8,3 +8,13 @@ test("admin screens have explicit dataset mappings", () => {
   assert.match(source, /setData\(null\)/);
   assert.match(source, /setError\(true\)/);
 });
+
+test("admin panel renders and refreshes the complete department list", () => {
+  const page = require("fs").readFileSync("src/screens/admin/page.tsx", "utf8");
+  const logic = require("fs").readFileSync("src/screens/admin/function.tsx", "utf8");
+  assert.match(page, /Departments/);
+  assert.match(page, /view\.departments\.map/);
+  assert.match(page, /departmentError/);
+  assert.match(logic, /\/api\/departments/);
+  assert.match(logic, /await loadDepartments\(\)/);
+});

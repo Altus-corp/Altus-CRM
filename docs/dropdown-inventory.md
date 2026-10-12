@@ -33,6 +33,6 @@ Phase 1 reconciles the scan as 26 select controls: 17 in Leads and 9 in Settings
 
 ## Lead stage semantics
 
-Stage values are used by `server/index.cjs` for lead views, create/update validation, and stage writes. They are also used by `server/lead-import.cjs` for import validation. No `won`/`lost` stage logic exists in the current branch. Phase 1 therefore seeds each current stage with `semantic_key` equal to its stable value and keeps `shared/lead-stages.json` authoritative until Phase 4 replaces those consumers.
+Stage values are active DB-backed `lead_stage` options. `server/index.cjs`, `server/admin.cjs`, and the importer validate against active options; reports and funnel predicates resolve `semantic_key`, so label edits do not change logic. No `won`/`lost` stage logic exists in the current branch. `shared/lead-stages.json` remains only as a compatibility seed/reference artifact and is no longer consumed by application code.
 
 The current related-activity values are existing synthetic demo values. They are seeded only to preserve current UI behavior; no customer data is added to the seed.

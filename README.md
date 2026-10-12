@@ -160,7 +160,7 @@ The importer uses source IDs and checksums for idempotent updates. It records im
 
 Owners and Admins can bulk upload leads from the Leads screen using `.csv` or `.xlsx` files. The upload is previewed and validated before apply; apply re-reads the file and requires the preview SHA-256 hash. Only the first worksheet is read from an `.xlsx` file, and formula cells without cached values are row errors.
 
-Accepted columns are `name` (required), `email`, `phone`, `company`, `lead_type`, `stage`, `permission`, `lead_status`, `owner`, `pso_date`, `next_follow_up`, `city`, `designation`, `lead_number`, and `source_ref`. Headers are case-insensitive and may use spaces, underscores, or supported aliases. Dates accept `YYYY-MM-DD`, real Excel dates, and `DD/MM/YYYY`.
+Accepted columns are `name` (required), `email`, `phone`, `company`, `team`, `lead_type`, `stage`, `permission`, `lead_status`, `owner`, `pso_date`, `next_follow_up`, `city`, `designation`, `lead_number`, and `source_ref`. Headers are case-insensitive and may use spaces, underscores, or supported aliases. Dates accept `YYYY-MM-DD`, real Excel dates, and `DD/MM/YYYY`.
 
 The server limits files to 5 MB, 5,000 data rows, 50 columns, and 2,000 characters per cell. Possible duplicates are detected within the file and against existing leads by normalized phone or lower-cased email; they are skipped by default and can only be imported with the explicit duplicate checkbox. Upload IDs are deterministic (`upload:<file hash>:<row number>`) so re-uploading the same file is idempotent. Uploads do not assign owners or create accounts and contacts.
 

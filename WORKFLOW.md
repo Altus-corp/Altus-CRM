@@ -46,7 +46,7 @@ The following are planning rules only and must be explicitly confirmed before be
 - Permission to Call = Yes is a required business rule; the call-write endpoint enforces it (Slice 2).
 - Round-robin assignment is implemented for configured rules and eligible users; named-caller override and broader assignment automation remain planned.
 - Daily targets have a data model and settings UI; daily list generation, carry-forward and pool shortfall logic are not implemented.
-- Stage integrity: lead stages come from shared/lead-stages.json (includes pool, duringpso, completed) and are used by server writes, the importer and the Leads UI.
+- Stage integrity: lead stages are active DB-backed `lead_stage` options (including pool, duringpso, and completed); labels are presentation-only and stable `semantic_key` values drive reports and funnel predicates.
 - `Balance = Payable - Paid`.
 - `Target Date = Last Payment Date + 3 days`.
 

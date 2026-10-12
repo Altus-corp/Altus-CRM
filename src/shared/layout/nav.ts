@@ -85,6 +85,7 @@ export const ADMIN_NAV_GROUPS = [
       { to: "/admin/import-export", label: "Import / Export", placeholder: true },
       { to: "/admin/integrations", label: "Integrations", placeholder: true },
       { to: "/admin/audit", label: "Audit Log", placeholder: true },
+      { to: "/admin/dropdowns", label: "Dropdown Management" },
       { to: "/admin/process-flow", label: "Process Flow", placeholder: true },
     ],
   },
