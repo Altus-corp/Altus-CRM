@@ -14,3 +14,5 @@ backups/
 
 *.log
 visual-check/
+.vercel
+.env*
