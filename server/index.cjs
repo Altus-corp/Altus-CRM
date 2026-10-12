@@ -19,6 +19,7 @@ const Dropdowns = require("./dropdowns.cjs");
 const LeadImport = require("./lead-import.cjs");
 const { assignLeadRoundRobin, writeAssignmentHistory } = require("./lead-assignment.cjs");
 const PasswordReset = require("./password-reset.cjs");
+const Integrations = require("./integrations.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -505,6 +506,8 @@ async function login(req, res, db) {
 async function route(req, res, db) {
   S.securityHeaders(res);
   const url = new URL(req.url || "/", "http://localhost");
+  const publicIntegrationLeadMatch = url.pathname.match(/^\/api\/integrations\/([^/]+)\/leads$/);
+  if (publicIntegrationLeadMatch && req.method === "POST") return Integrations.receiveLead(req, res, db, decodeURIComponent(publicIntegrationLeadMatch[1]));
   if (req.method === "POST" && !S.csrfValid(req)) return json(res, 403, { error: "Missing request header." });
   if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { ok: true, app: "altus-crm", singleTenant: true });
   if (url.pathname === "/api/login" && req.method === "POST") return login(req, res, db);
@@ -555,6 +558,10 @@ async function route(req, res, db) {
   if (url.pathname === "/api/member-roles" && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRoleCreate(req, res, db, user)); }
   if (url.pathname === "/api/departments" && req.method === "GET") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage departments."); return safeUserOperation(res, () => departmentsList(res, db)); }
   if (url.pathname === "/api/departments" && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage departments."); return safeUserOperation(res, () => departmentCreate(req, res, db, user)); }
+  if (url.pathname === "/api/integrations" && req.method === "GET") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage integrations."); return safeUserOperation(res, () => Integrations.listConnections(res, db, req)); }
+  if (url.pathname === "/api/integrations" && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage integrations."); return safeUserOperation(res, () => Integrations.createConnection(req, res, db, user)); }
+  const integrationToggleMatch = url.pathname.match(/^\/api\/integrations\/([^/]+)$/);
+  if (integrationToggleMatch && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage integrations."); return safeUserOperation(res, () => Integrations.toggleConnection(req, res, db, user, decodeURIComponent(integrationToggleMatch[1]))); }
   const accessMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/access$/);
   if (accessMatch && ["GET", "POST"].includes(req.method)) { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user access."); const targetId = decodeURIComponent(accessMatch[1]); return safeUserOperation(res, () => req.method === "GET" ? userAccessList(res, db, user, targetId) : userAccessWrite(req, res, db, user, targetId)); }
   const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/(deactivate|offboard|reset-password)$/);
@@ -644,10 +651,14 @@ async function route(req, res, db) {
 }
 
 async function start() {
-  const db = await applicationDb();
-  if (!db) return;
+  const guarded = guardedDatabaseUrl(PG_URL);
+  if (!guarded.ok) { reportFailure("server", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
   if (HOST !== "127.0.0.1") console.warn("Altus CRM server is listening beyond the local machine; allow only the app port through the firewall.");
-  const server = http.createServer(handler);
+  const db = await openDb(guarded.value);
+  await db.pruneSessions();
+  await db.throttlePrune();
+  setInterval(() => { db.pruneSessions().catch(() => {}); db.throttlePrune().catch(() => {}); }, 5 * 60000).unref();
+  const server = http.createServer((req, res) => route(req, res, db).catch((error) => { console.error(`request failed method=${req.method} path=${new URL(req.url || "/", "http://localhost").pathname} code=${error?.code || error?.name || "unknown"}`); return json(res, 500, { error: "Request failed." }); }));
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(PORT, HOST, () => { console.log(`Altus CRM server listening on http://${HOST}:${PORT}`); resolve(); }); });
 }
 
