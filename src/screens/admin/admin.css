@@ -104,7 +104,17 @@
 .admin-integration-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .admin-integration-list article div { display: grid; gap: 3px; }
 .admin-integration-list span, .admin-integration-list small { color: var(--ink-2); font-size: 12px; }
+.admin-integration-copy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.admin-integration-copy-row button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink-1); cursor: pointer; font-weight: 700; }
+.admin-integration-guide { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-1); }
+.admin-integration-guide h2, .admin-integration-guide h3 { margin: 0; color: var(--ink); font-size: 16px; }
+.admin-integration-guide h3 { font-size: 13px; }
+.admin-integration-guide ol { display: grid; gap: 8px; margin: 0; padding-left: 22px; color: var(--ink-1); font-size: 12px; }
+.admin-integration-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.admin-integration-guide-grid pre { min-height: 92px; margin: 7px 0 0; padding: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink-1); font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
+.admin-integration-help { margin: 0; padding: 12px; border-left: 3px solid var(--red); background: var(--panel); color: var(--ink-1); font-size: 12px; line-height: 1.5; }
 @media (max-width: 700px) { .admin-integration-form { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .admin-integration-copy-row, .admin-integration-guide-grid { grid-template-columns: 1fr; } }
 /* Dropdown Management Modern Redesign */
 .dropdown-management { width: 100%; max-width: 100%; margin-top: 4px; }
 .dropdown-management-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 24px; align-items: start; }
