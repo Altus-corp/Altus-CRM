@@ -639,16 +639,42 @@ async function route(req, res, db) {
 }
 
 async function start() {
-  const guarded = guardedDatabaseUrl(PG_URL);
-  if (!guarded.ok) { reportFailure("server", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
+  const db = await applicationDb();
+  if (!db) return;
   if (HOST !== "127.0.0.1") console.warn("Altus CRM server is listening beyond the local machine; allow only the app port through the firewall.");
-  const db = await openDb(guarded.value);
-  await db.pruneSessions();
-  await db.throttlePrune();
-  setInterval(() => { db.pruneSessions().catch(() => {}); db.throttlePrune().catch(() => {}); }, 5 * 60000).unref();
-  const server = http.createServer((req, res) => route(req, res, db).catch((error) => { console.error(`request failed method=${req.method} path=${new URL(req.url || "/", "http://localhost").pathname} code=${error?.code || error?.name || "unknown"}`); return json(res, 500, { error: "Request failed." }); }));
+  const server = http.createServer(handler);
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(PORT, HOST, () => { console.log(`Altus CRM server listening on http://${HOST}:${PORT}`); resolve(); }); });
 }
 
+let databasePromise;
+function applicationDb() {
+  if (databasePromise) return databasePromise;
+  const guarded = guardedDatabaseUrl(PG_URL);
+  if (!guarded.ok) {
+    reportFailure("server", { code: guarded.code }, guarded.reason, guarded.target);
+    return null;
+  }
+  databasePromise = openDb(guarded.value).then(async (db) => {
+    await db.pruneSessions();
+    await db.throttlePrune();
+    return db;
+  }).catch((error) => {
+    databasePromise = undefined;
+    throw error;
+  });
+  return databasePromise;
+}
+
+async function handler(req, res) {
+  try {
+    const db = await applicationDb();
+    if (!db) return json(res, 503, { error: "Server configuration is unavailable." });
+    return await route(req, res, db);
+  } catch (error) {
+    console.error(`request failed method=${req.method} path=${new URL(req.url || "/", "http://localhost").pathname} code=${error?.code || error?.name || "unknown"}`);
+    return json(res, 500, { error: "Request failed." });
+  }
+}
+
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
