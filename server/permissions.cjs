@@ -10,7 +10,7 @@ const CAPABILITIES = Object.freeze({
   "leads.import": Object.freeze(["Owner", "Admin", "Sales"]),
   "settings.view": Object.freeze(["Owner", "Admin"]),
   "users.manage": Object.freeze(["Owner", "Admin"]),
-  "users.reset_password": Object.freeze(["Owner"]),
+  "users.reset_password": Object.freeze(["Owner", "Admin"]),
   "nav.admin": Object.freeze(["Owner", "Admin"]),
   "masters.view": Object.freeze(["Owner", "Admin"]),
   "masters.edit": Object.freeze(["Owner", "Admin"]),
@@ -36,7 +36,7 @@ function hasCapability(role, capability) {
 }
 
 function requireCapability(capability, user) {
-  return hasCapability(user?.role, capability);
+  return hasCapability(user?.role, capability) || Array.isArray(user?.capability_overrides) && user.capability_overrides.includes(capability);
 }
 
 function canManageRole(actorRole, targetRole) {
