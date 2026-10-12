@@ -149,4 +149,12 @@ test("Lead Details styles exist in leads.css", () => {
   assert.match(cssSource, /\.lead-followup-card/);
 });
 
+test("Quick Add Lead keeps fields in a responsive form grid", () => {
+  const cssSource = fs.readFileSync("src/screens/leads/leads.css", "utf8");
+
+  assert.match(cssSource, /\.lead-create-form\s*\{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(cssSource, /\.lead-create-form \.drawer-head\s*\{ grid-column: 1 \/ -1/);
+  assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*\.lead-create-form\s*\{ grid-template-columns: 1fr/);
+});
+
 
