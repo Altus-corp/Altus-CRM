@@ -1,6 +1,6 @@
-"use strict";
+import crm from "../server/index.cjs";
 
-const { handler } = require("../server/index.cjs");
+const { handler } = crm;
 
 function apiPath(req, res) {
   const url = new URL(req.url || "/", "http://localhost");
@@ -15,4 +15,6 @@ function apiPath(req, res) {
   return true;
 }
 
-module.exports = (req, res) => apiPath(req, res) && handler(req, res);
+export default function api(req, res) {
+  return apiPath(req, res) && handler(req, res);
+}
