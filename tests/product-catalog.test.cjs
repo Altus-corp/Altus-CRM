@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const { Readable } = require("node:stream");
 const test = require("node:test");
 const { route } = require("../server/index.cjs");
@@ -20,4 +21,12 @@ test("product catalog does not expose products to users without lead access", as
   const res = response();
   await route(request(), res, dbFor(null));
   assert.equal(res.status, 401);
+});
+
+test("Admin Panel exposes the product catalog controls", () => {
+  const page = fs.readFileSync("src/screens/admin/page.tsx", "utf8");
+  const logic = fs.readFileSync("src/screens/admin/function.tsx", "utf8");
+  assert.match(page, /Product catalog/);
+  assert.match(page, /view\.submitProduct/);
+  assert.match(logic, /\/api\/masters\?type=product/);
 });

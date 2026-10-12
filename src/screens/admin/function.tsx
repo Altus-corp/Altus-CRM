@@ -7,6 +7,7 @@ type AdminRow = Record<string, AdminValue>;
 type AdminResponse = { screen: AdminScreenKey; metrics?: AdminRow; rows?: AdminRow[]; rules?: AdminRow[]; note?: string };
 type MemberRole = { id: string; name: string; access_role: "Sales" | "Viewer" | "Admin" };
 type Department = { id: string; name: string };
+type Product = { id: string; master_type: "product"; code: string | null; label: string; active: boolean };
 
 export const ADMIN_SCREEN_COPY: Record<AdminScreenKey, { title: string; description: string }> = {
   dashboard: { title: "Today's Floor", description: "A live view of targets, calling activity, follow-ups, and the next work to do." },
@@ -39,11 +40,14 @@ export function useAdminScreen(screen: AdminScreenKey) {
   const [createMode, setCreateMode] = useState<"person" | "role" | "department">("person");
   const [roles, setRoles] = useState<MemberRole[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [newRole, setNewRole] = useState({ name: "", access_role: "Sales" as MemberRole["access_role"] });
   const [newDepartment, setNewDepartment] = useState("");
+  const [newProduct, setNewProduct] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
   const [departmentError, setDepartmentError] = useState("");
+  const [productError, setProductError] = useState("");
   const [accessTarget, setAccessTarget] = useState<{ id: string; name: string; email: string; role: string; accessLevel: string; department: string } | null>(null);
   const [accessOptions, setAccessOptions] = useState<string[]>([]);
   const [accessOverrides, setAccessOverrides] = useState<string[]>([]);
@@ -63,6 +67,16 @@ export function useAdminScreen(screen: AdminScreenKey) {
       setDepartmentError(cause instanceof Error ? cause.message : "Unable to load departments.");
     }
   }, []);
+  const loadProducts = useCallback(async () => {
+    try {
+      const result = await api<{ values: Product[] }>("/api/masters?type=product");
+      setProducts(result.values || []);
+      setProductError("");
+    } catch (cause) {
+      setProducts([]);
+      setProductError(cause instanceof Error ? cause.message : "Unable to load products.");
+    }
+  }, []);
   const load = useCallback(async () => {
     setLoading(true); setError(false);
     try {
@@ -71,13 +85,13 @@ export function useAdminScreen(screen: AdminScreenKey) {
       if (screen === "panel") {
         const [roleResult] = await Promise.allSettled([api<{ roles: MemberRole[] }>("/api/member-roles")]);
         setRoles(roleResult.status === "fulfilled" ? roleResult.value.roles : []);
-        await loadDepartments();
+        await Promise.all([loadDepartments(), loadProducts()]);
       }
     } catch {
       setData(null);
       setError(true);
     } finally { setLoading(false); }
-  }, [loadDepartments, screen]);
+  }, [loadDepartments, loadProducts, screen]);
   useEffect(() => { void load(); }, [load]);
   function beginReset(memberId: string, memberName: string) { setResetTarget({ id: memberId, name: memberName }); setResetPassword(""); setResetConfirmation(""); setShowResetPassword(false); setError(false); }
   function cancelReset() { setResetTarget(null); setResetPassword(""); setResetConfirmation(""); setShowResetPassword(false); }
@@ -102,6 +116,8 @@ export function useAdminScreen(screen: AdminScreenKey) {
   }
   async function submitRole(event: React.FormEvent) { event.preventDefault(); setCreateError(""); setCreateBusy(true); try { await api("/api/member-roles", { method: "POST", body: JSON.stringify(newRole) }); setNewRole({ name: "", access_role: "Sales" }); await load(); setCreateMode("person"); setShowCreateForm(false); } catch (cause) { setCreateError(cause instanceof Error ? cause.message : "Unable to add role."); } finally { setCreateBusy(false); } }
   async function submitDepartment(event: React.FormEvent) { event.preventDefault(); setCreateError(""); setCreateBusy(true); try { const created = await api<Department>("/api/departments", { method: "POST", body: JSON.stringify({ name: newDepartment }) }); setNewDepartment(""); await loadDepartments(); setCreateMode("person"); setShowCreateForm(false); if (!created?.id) setCreateError("Department was not created."); } catch (cause) { setCreateError(cause instanceof Error ? cause.message : "Unable to add department."); } finally { setCreateBusy(false); } }
+  async function submitProduct(event: React.FormEvent) { event.preventDefault(); const label = newProduct.trim(); if (!label) return; setProductError(""); setCreateBusy(true); try { await api("/api/masters", { method: "POST", body: JSON.stringify({ master_type: "product", code: label, label }) }); setNewProduct(""); await loadProducts(); } catch (cause) { setProductError(cause instanceof Error ? cause.message : "Unable to add product."); } finally { setCreateBusy(false); } }
+  async function toggleProduct(product: Product) { setProductError(""); try { await api(`/api/masters/${encodeURIComponent(product.id)}`, { method: "POST", body: JSON.stringify({ ...product, active: !product.active }) }); await loadProducts(); } catch (cause) { setProductError(cause instanceof Error ? cause.message : "Unable to update product."); } }
   function openCreateForm(mode: "person" | "role" | "department") { setCreateFocus(mode); setCreateMode(mode); setCreateError(""); setShowCreateForm(true); }
   async function beginAccess(memberId: string, details: { name: string; email: string; role: string; accessLevel: string; department: string }) { setAccessError(""); setAccessTarget({ id: memberId, ...details }); setAccessPassword(""); setAccessPasswordConfirmation(""); try { const result = await api<{ capabilities: string[]; overrides: string[] }>(`/api/users/${encodeURIComponent(memberId)}/access`); setAccessOptions(result.capabilities); setAccessOverrides(result.overrides); } catch (cause) { setAccessError(cause instanceof Error ? cause.message : "Unable to load access levels."); } }
   function cancelAccess() { setAccessTarget(null); setAccessOptions([]); setAccessOverrides([]); setAccessError(""); setAccessPassword(""); setAccessPasswordConfirmation(""); }
@@ -109,5 +125,5 @@ export function useAdminScreen(screen: AdminScreenKey) {
   async function submitAccess(event: React.FormEvent) { event.preventDefault(); if (!accessTarget) return; setAccessBusy(true); setAccessError(""); try { await api(`/api/users/${encodeURIComponent(accessTarget.id)}/access`, { method: "POST", body: JSON.stringify({ capabilities: accessOverrides }) }); await load(); cancelAccess(); } catch (cause) { setAccessError(cause instanceof Error ? cause.message : "Unable to update access levels."); } finally { setAccessBusy(false); } }
   async function submitAccessPassword(event: React.FormEvent) { event.preventDefault(); if (!accessTarget || accessPassword.length < 12 || accessPassword !== accessPasswordConfirmation) return; setAccessBusy(true); setAccessError(""); try { await api(`/api/users/${encodeURIComponent(accessTarget.id)}/reset-password`, { method: "POST", body: JSON.stringify({ temporary_password: accessPassword }) }); await load(); cancelAccess(); } catch (cause) { setAccessError(cause instanceof Error ? cause.message : "Unable to change password."); } finally { setAccessBusy(false); } }
   async function removeAccount(offboard: boolean) { if (!accessTarget || !window.confirm(`${offboard ? "Offboard" : "Deactivate"} ${accessTarget.name}?`)) return; setAccountBusy(true); setAccessError(""); try { await api(`/api/users/${encodeURIComponent(accessTarget.id)}/${offboard ? "offboard" : "deactivate"}`, { method: "POST", body: JSON.stringify({}) }); cancelAccess(); await load(); } catch (cause) { setAccessError(cause instanceof Error ? cause.message : "Unable to remove account."); } finally { setAccountBusy(false); } }
-  return { ...copy, data, loading, error, reload: load, resetTarget, resetPassword, resetConfirmation, showResetPassword, beginReset, cancelReset, setResetPassword, setResetConfirmation, setShowResetPassword, submitReset, newPerson, setNewPerson, showCreateForm, setShowCreateForm, openCreateForm, createFocus, createMode, showCreatePassword, setShowCreatePassword, createBusy, createError, submitPerson, submitRole, submitDepartment, roles, departments, departmentError, newRole, setNewRole, newDepartment, setNewDepartment, accessTarget, accessOptions, accessOverrides, accessError, accessBusy, beginAccess, cancelAccess, toggleAccess, submitAccess, accessPassword, setAccessPassword, accessPasswordConfirmation, setAccessPasswordConfirmation, submitAccessPassword, accountBusy, removeAccount };
+  return { ...copy, data, loading, error, reload: load, resetTarget, resetPassword, resetConfirmation, showResetPassword, beginReset, cancelReset, setResetPassword, setResetConfirmation, setShowResetPassword, submitReset, newPerson, setNewPerson, showCreateForm, setShowCreateForm, openCreateForm, createFocus, createMode, showCreatePassword, setShowCreatePassword, createBusy, createError, submitPerson, submitRole, submitDepartment, submitProduct, toggleProduct, roles, departments, products, departmentError, productError, newRole, setNewRole, newDepartment, setNewDepartment, newProduct, setNewProduct, accessTarget, accessOptions, accessOverrides, accessError, accessBusy, beginAccess, cancelAccess, toggleAccess, submitAccess, accessPassword, setAccessPassword, accessPasswordConfirmation, setAccessPasswordConfirmation, submitAccessPassword, accountBusy, removeAccount };
 }
