@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../../shared/auth/auth";
 import { useLoginForm } from "./function";
 import "./login.css";
@@ -56,7 +56,7 @@ export function LoginPage() {
           <div className="login-field"><label htmlFor="password">Password</label><div className="login-control"><LockIcon /><input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="••••••••" required value={password} onChange={(event) => setPassword(event.target.value)} /><button className={`password-toggle${showPassword ? " on" : ""}`} type="button" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}><EyeIcon /><EyeIcon off /></button></div></div>
           <button className="login-submit" type="submit" disabled={loading}>{loading ? "Signing in…" : "Sign in"}</button>
         </form>
-        <p className="login-help"><HelpIcon /><span><strong>Forgot your password?</strong> Ask your administrator to reset it.</span></p>
+        <p className="login-help"><HelpIcon /><span><Link className="login-forgot-link" to="/forgot-password">Forgot your password?</Link><br /><span>We’ll send a secure reset link to your account email.</span></span></p>
         <p className="login-foot">© {new Date().getFullYear()} Altus CRM</p>
       </div>
     </section>
