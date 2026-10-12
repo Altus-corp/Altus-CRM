@@ -457,6 +457,10 @@ async function mastersList(req, res, db) {
   const rows = await db.query(`SELECT id,source_id,master_type,code,label,colour,sort_order,active,value,${MASTER_FLAG_FIELDS.join(",")} FROM master_values ${type ? "WHERE master_type = $1" : ""} ORDER BY master_type,sort_order,label`, params);
   return json(res, 200, { values: rows.rows.map(masterPublic) });
 }
+async function productCatalogList(res, db) {
+  const rows = await db.query("SELECT id,code,label FROM master_values WHERE master_type='product' AND active=true ORDER BY sort_order,label", []);
+  return json(res, 200, { products: rows.rows.map((row) => ({ id: row.id, code: String(row.code || row.label), label: row.label })) });
+}
 async function masterWrite(req, res, db, actor, id = null) {
   const body = await readJson(req); const masterType = String(body.master_type || "").trim(); const label = String(body.label || "").trim();
   if (!masterType || !label) return userWriteError(res, 400, "Invalid master value.");
@@ -563,6 +567,7 @@ async function route(req, res, db) {
   if (url.pathname === "/api/masters" && req.method === "GET") { if (!requireCapability("masters.view", user)) return userWriteError(res, 403, "You do not have permission to view masters."); return safeUserOperation(res, () => mastersList(req, res, db)); }
   if (url.pathname === "/api/masters" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to edit masters."); return safeUserOperation(res, () => masterWrite(req, res, db, user)); }
   const masterMatch = url.pathname.match(/^\/api\/masters\/([^/]+)$/); if (masterMatch && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to edit masters."); return safeUserOperation(res, () => masterWrite(req, res, db, user, decodeURIComponent(masterMatch[1]))); }
+  if (url.pathname === "/api/products" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to view products." }); return safeUserOperation(res, () => productCatalogList(res, db)); }
   if (url.pathname === "/api/targets" && req.method === "GET") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to view targets."); return safeUserOperation(res, () => targetsList(res, db)); }
   if (url.pathname === "/api/targets" && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user)); }
   const targetMatch = url.pathname.match(/^\/api\/targets\/([^/]+)$/); if (targetMatch && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user, decodeURIComponent(targetMatch[1]))); }
@@ -677,4 +682,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
