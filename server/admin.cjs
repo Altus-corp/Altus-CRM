@@ -42,8 +42,8 @@ async function adminData(db, screen) {
   if (screen === "assignment") {
     const [pool, users, rules] = await Promise.all([
       optionalOne(db, `SELECT count(*) FILTER (WHERE owner_user_id IS NULL)::int AS unassigned, count(*)::int AS total FROM leads`, []),
-      optionalRows(db, `SELECT id, name, role, active FROM users ORDER BY name ASC, id ASC`, []),
-      optionalRows(db, `SELECT source_id, name, active, priority FROM assignment_rules ORDER BY priority ASC NULLS LAST, name ASC`, []),
+      optionalRows(db, `SELECT u.id, u.name, u.role, u.active, ep.team FROM users u LEFT JOIN employee_profiles ep ON ep.user_id=u.id ORDER BY u.name ASC, u.id ASC`, []),
+      optionalRows(db, `SELECT ar.source_id, ar.name, ar.enabled, ar.priority, ar.last_assigned_user_id, u.name AS last_assigned_user_name, ar.rotation_updated_at FROM assignment_rules ar LEFT JOIN users u ON u.id=ar.last_assigned_user_id ORDER BY ar.priority ASC NULLS LAST, ar.name ASC`, []),
     ]);
     return { metrics: pool, rows: users, rules };
   }

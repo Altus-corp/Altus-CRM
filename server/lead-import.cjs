@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const { writeAudit } = require("./audit.cjs");
+const { assignLeadRoundRobin } = require("./lead-assignment.cjs");
 const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
 const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
 
@@ -291,6 +292,7 @@ async function apply(req, db, actor) {
         if (!inserted.rows[0]) { counts.skipped_duplicates += 1; continue; }
         counts.created += 1;
         await tx.query("INSERT INTO lead_history(id,source_id,lead_id,occurred_at,actor_id,action,entity,entity_id,note,custom_values,source_checksum,import_run_id) VALUES($1,$2,$3,now(),$4,'lead.imported','lead',$3,NULL,'{}'::jsonb,$5,$6)", [`upload-history-${analysis.fileHash}-${row.rowNumber}`, `upload-history:${analysis.fileHash}:${row.rowNumber}`, leadId, actor.id, analysis.fileHash, runId]);
+        if (!row.values.owner_user_id) await assignLeadRoundRobin(tx, { leadId, lead: { ...row.values, id: leadId }, actorId: actor.id });
       }
       await tx.query("UPDATE import_runs SET status='completed',completed_at=now(),report=$2::jsonb WHERE id=$1", [runId, JSON.stringify(counts)]);
       await writeAudit(tx, { actorUserId: actor.id, action: "leads.imported", entityType: "import_run", entityId: runId, newValue: JSON.stringify({ created: counts.created, skipped_duplicates: counts.skipped_duplicates, skipped_errors: counts.skipped_errors }), ip: req.socket.remoteAddress });

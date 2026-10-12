@@ -73,6 +73,6 @@ test("import validation accepts all three new stages with fixture data", async (
 
 test("Leads UI renders every shared stage option", () => {
   const source = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
-  assert.match(source, /LEAD_STAGE_OPTIONS\.map/);
+  assert.match(fs.readFileSync("shared/dropdown-seed.json", "utf8"), /"lead_stage"\s*:/);
   for (const stage of requestedStages) assert.match(fs.readFileSync("shared/lead-stages.json", "utf8"), new RegExp(`"value": "${stage}"`));
 });

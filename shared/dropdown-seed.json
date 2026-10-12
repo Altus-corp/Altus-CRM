@@ -86,7 +86,8 @@
     { "value": "10", "label": "10", "sort_order": 10 },
     { "value": "25", "label": "25", "sort_order": 20 },
     { "value": "50", "label": "50", "sort_order": 30 },
-    { "value": "100", "label": "100", "sort_order": 40 }
+    { "value": "100", "label": "100", "sort_order": 40 },
+    { "value": "all", "label": "All", "sort_order": 50 }
   ],
   "follow_up_filter": [
     { "value": "overdue", "label": "Overdue", "sort_order": 10 },

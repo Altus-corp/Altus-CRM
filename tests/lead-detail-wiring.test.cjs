@@ -128,19 +128,20 @@ test("load detail is session and capability protected and reads drawer tables", 
   }
 });
 
-test("known gap: primary timeline still contains hard-coded demo content", () => {
+test("primary timeline renders persisted assignment history instead of a hard-coded assignment", () => {
   const source = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
   const knownDemoStrings = [
     "Follow-up scheduled",
     "Latest activity",
     "WhatsApp message sent",
     "Call activity marked",
-    "Lead round-robined to",
     "Aarav Mehta",
     "Nikhil Shah",
     "Productivity Shastra",
     "Score 42",
   ];
   for (const value of knownDemoStrings) assert.match(source, new RegExp(value.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")), value);
+  assert.doesNotMatch(source, /Lead round-robined to \{ownerName\}/);
+  assert.match(source, /assignmentHistory\.map/);
 });
 

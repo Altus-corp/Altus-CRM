@@ -46,6 +46,13 @@
 .lead-table tbody tr:hover, .lead-table tbody tr:focus { background: var(--red-050); }
 .lead-table td:first-child, .lead-table td strong { color: var(--ink); }
 .lead-table small { display: block; margin-top: 4px; color: var(--ink-2); font-size: 10px; }
+.lead-table-checkbox-col { width: 44px; min-width: 44px; max-width: 44px; padding: 12px 10px !important; text-align: center !important; }
+.lead-table-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--red); margin: 0; vertical-align: middle; }
+.lead-table tbody tr.is-selected { background: var(--red-050); }
+.lead-table tbody tr.is-selected:hover, .lead-table tbody tr.is-selected:focus { background: var(--red-tint); }
+.lead-selection-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding: 10px 16px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--red); border-radius: var(--radius); color: var(--ink-1); font-size: 12px; box-shadow: var(--shadow-1); }
+.lead-selection-count strong { color: var(--ink); font-weight: 700; }
+.lead-selection-clear-btn { padding: 5px 12px; font-size: 11px; border-radius: var(--radius-sm); }
 .lead-pill { display: inline-flex; padding: 4px 8px; border-radius: 999px; color: var(--info); background: var(--info-bg); font-size: 10px; font-weight: 800; }
 .lead-state { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 180px; margin-top: 16px; padding: 24px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--ink-2); }
 .lead-state strong { color: var(--ink); }

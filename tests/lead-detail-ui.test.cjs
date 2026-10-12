@@ -87,7 +87,7 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Task title/, "Should include Task title field");
   assert.match(pageSource, /Send notification/, "Should include Send notification toggle");
   assert.match(pageSource, /Notify me/, "Should include Notify me checkbox");
-  assert.match(pageSource, /15 minutes before/, "Should include 15 minutes before option");
+  assert.match(pageSource, /dropdownKey="notify_before"/, "Should load notification timing options dynamically");
   assert.match(pageSource, /<strong>App<\/strong>/, "Should include App notification choice");
   assert.match(pageSource, /In-app pop-up/, "Should include In-app pop-up helper");
   assert.match(pageSource, /Send by email/, "Should include Send by email helper");
@@ -197,9 +197,39 @@ test("Leads list exposes supported rows-per-page choices", () => {
   const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
   const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
   assert.match(pageSource, /Rows per page/);
-  for (const value of [10, 25, 50, 100]) assert.match(pageSource, new RegExp(`<option value=\\{${value}\\}>${value}<\\/option>`));
+  assert.match(pageSource, /dropdownKey="page_size"/);
+  assert.match(fs.readFileSync("shared/dropdown-seed.json", "utf8"), /"page_size"/);
   assert.match(functionSource, /params\.set\("page_size", String\(pageSize\)\)/);
   assert.match(functionSource, /setPageSize\(nextSize\); setPage\(1\)/);
 });
+
+test("Leads list includes checkbox for every lead and select all option", () => {
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
+  const cssSource = fs.readFileSync("src/screens/leads/leads.css", "utf8");
+
+  // Table header has select-all checkbox
+  assert.match(pageSource, /TableSelectAllCheckbox/);
+  assert.match(pageSource, /lead-table-checkbox-col/);
+  assert.match(pageSource, /Select all leads/);
+
+  // Table rows have checkbox with stopPropagation
+  assert.match(pageSource, /type="checkbox"/);
+  assert.match(pageSource, /lead-table-checkbox/);
+  assert.match(pageSource, /stopPropagation/);
+
+  // Function exposes selection state & controls
+  assert.match(functionSource, /selectedLeadIds/);
+  assert.match(functionSource, /toggleSelectLead/);
+  assert.match(functionSource, /toggleSelectAll/);
+  assert.match(functionSource, /clearSelection/);
+
+  // CSS has checkbox and selection styles
+  assert.match(cssSource, /\.lead-table-checkbox-col/);
+  assert.match(cssSource, /\.lead-table-checkbox/);
+  assert.match(cssSource, /\.is-selected/);
+  assert.match(cssSource, /\.lead-selection-bar/);
+});
+
 
 

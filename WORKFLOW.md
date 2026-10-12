@@ -15,7 +15,7 @@
 
 | Phase | Current repository status | Working mode |
 |---|---|---|
-| Leads | Core list, filters, pagination, detail, CRUD and activity APIs are present. Daily Calling Engine, assignment automation, timers and reporting are not yet implemented. | Active |
+| Leads | Core list, filters, pagination, detail, CRUD and activity APIs are present. Lead round-robin assignment is implemented; Daily Calling Engine, timers and reporting are not yet implemented. | Active |
 | Accounts & Contacts | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
 | Tasks & Activity | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
 | Reports | Placeholder view over lead data; no outbound marketing automation or channel sender is implemented. | Placeholder |
@@ -34,7 +34,7 @@ Each candidate requires its own plan before implementation, including affected f
 - Telephony
 - Messaging
 - Daily Calling Engine (planned, not implemented)
-- Assignment automation (planned, not implemented)
+- Assignment automation (lead round-robin is implemented; broader automation remains planned)
 - Custom fields
 - Deduplication
 
@@ -44,7 +44,7 @@ The following are planning rules only and must be explicitly confirmed before be
 
 - Planned process: Lead -> Qualified -> Permission to Call -> Assignment -> Calling -> Follow-up -> PSO/Event -> Attendance -> PS Registration -> Sales -> Payment; only portions of this flow are currently implemented.
 - Permission to Call = Yes is a required business rule; the call-write endpoint enforces it (Slice 2).
-- Round-robin assignment and named-caller override are planned; no assignment engine is currently implemented.
+- Round-robin assignment is implemented for configured rules and eligible users; named-caller override and broader assignment automation remain planned.
 - Daily targets have a data model and settings UI; daily list generation, carry-forward and pool shortfall logic are not implemented.
 - Stage integrity: lead stages come from shared/lead-stages.json (includes pool, duringpso, completed) and are used by server writes, the importer and the Leads UI.
 - `Balance = Payable - Paid`.
