@@ -1,13 +1,18 @@
-import { ActivityKind, fieldValue, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, useLeadsScreen, VIEW_FIELDS } from "./function";
+import { ActivityKind, fieldValue, isQuickFilterDateField, useLeadsScreen, VIEW_FIELDS } from "./function";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { LEAD_STAGE_OPTIONS } from "../../shared/leads/stages";
+import { DropdownSelect } from "../../shared/dropdowns/component";
 import "./leads.css";
 
 function displayField(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
+}
+
+function fieldOrFallback(value: unknown, fallback: string) {
+  const displayed = displayField(value);
+  return displayed === "—" || !displayed ? fallback : displayed;
 }
 
 function activityValue(value: unknown, _key?: string) { return value == null || value === "" ? "—" : String(value); }
@@ -53,6 +58,37 @@ function CloseIcon() {
     <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M2 2l10 10M12 2L2 12" />
     </svg>
+  );
+}
+
+function TableSelectAllCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  ariaLabel = "Select all leads",
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: () => void;
+  ariaLabel?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.indeterminate = indeterminate;
+    }
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className="lead-table-checkbox"
+      checked={checked}
+      onChange={onChange}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    />
   );
 }
 
@@ -262,6 +298,25 @@ function DesktopIcon({ color = "currentColor" }: { color?: string }) {
   );
 }
 
+function EditPencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  );
+}
+
+function VerticalDotsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <circle cx="12" cy="5" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="12" cy="19" r="1.8" />
+    </svg>
+  );
+}
+
 const ADMIN_ACTIVITY_TYPES = [
   { id: "call", label: "Phone call", icon: CallIcon, placeholder: "Interested in a product walkthrough next week. Asked to share the proposal before the demo." },
   { id: "meeting", label: "Meeting / Demo", icon: CalendarIcon, placeholder: "Met with client team. Discussed requirements, timeline, and next steps." },
@@ -272,17 +327,6 @@ const ADMIN_ACTIVITY_TYPES = [
   { id: "walkthrough", label: "Product walkthrough", icon: GlobeIcon, placeholder: "Walked client through core platform modules and answered questions." },
   { id: "note", label: "Internal note", icon: HandoffIcon, placeholder: "Internal coordination note for sales and delivery team." },
 ];
-
-const NOTIFY_BEFORE_OPTIONS = [
-  "5 minutes before",
-  "10 minutes before",
-  "15 minutes before",
-  "20 minutes before",
-  "30 minutes before",
-  "1 hour before",
-  "1 day before",
-];
-
 
 type LeadDetailTab = "activity" | "details" | "notes" | "follow-up";
 
@@ -300,11 +344,11 @@ function AdvancedFilterPanel({ screen, onSave }: { screen: ReturnType<typeof use
       <div className="drawer-head"><div><p className="eyebrow">Leads</p><h2>Advanced Filters</h2></div><button className="icon-button" type="button" aria-label="Close advanced filters" onClick={() => screen.setAdvancedOpen(false)}><CloseIcon /></button></div>
       <p className="advanced-filter-note">Match leads using one or more conditions. Conditions are joined with {screen.draftJoin}.</p>
       <div className="advanced-condition-list">
-        {screen.draftConditions.map((condition, index) => { const field = QUICK_FILTER_FIELDS.find((item) => item.key === condition.field) || QUICK_FILTER_FIELDS[0]; const operators = QUICK_FILTER_OPERATORS.filter((item) => field.kind === "date" || !["gt", "gte", "lt", "lte"].includes(item.key)); return <div className="advanced-condition-row" key={condition.id}>
-          {index > 0 && <select className="lead-control advanced-join" aria-label={`Join condition ${index + 1}`} value={screen.draftJoin} onChange={(event) => screen.setDraftJoin(event.target.value as "AND" | "OR")}><option>AND</option><option>OR</option></select>}
-          <select className="lead-control" aria-label={`Condition ${index + 1} field`} value={condition.field} onChange={(event) => { const nextField = QUICK_FILTER_FIELDS.find((item) => item.key === event.target.value) || QUICK_FILTER_FIELDS[0]; screen.updateCondition(condition.id, { field: nextField.key, operator: nextField.kind === "date" ? "equals" : "contains", value: "" }); }}>{QUICK_FILTER_FIELDS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select>
-          <select className="lead-control" aria-label={`Condition ${index + 1} operator`} value={condition.operator} onChange={(event) => screen.updateCondition(condition.id, { operator: event.target.value })}>{operators.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select>
-          {!['is_empty', 'is_not_empty'].includes(condition.operator) && <input className="lead-control" aria-label={`Condition ${index + 1} value`} type={field.kind === "date" ? "date" : "text"} value={condition.value} onChange={(event) => screen.updateCondition(condition.id, { value: event.target.value })} placeholder="Value" />}
+        {screen.draftConditions.map((condition, index) => { const isDateField = isQuickFilterDateField(condition.field); const operators = screen.dropdownOptions.filterOperator.filter((item) => isDateField || !["gt", "gte", "lt", "lte"].includes(item.value)); return <div className="advanced-condition-row" key={condition.id}>
+          {index > 0 && <DropdownSelect dropdownKey="filter_join_operator" options={screen.dropdownOptions.join} className="lead-control advanced-join" aria-label={`Join condition ${index + 1}`} value={screen.draftJoin} onValueChange={(value) => screen.setDraftJoin(value as "AND" | "OR")} />}
+          <DropdownSelect dropdownKey="filter_field" options={screen.dropdownOptions.filterField} className="lead-control" aria-label={`Condition ${index + 1} field`} value={condition.field} onValueChange={(value) => screen.updateCondition(condition.id, { field: value, operator: isQuickFilterDateField(value) ? "equals" : "contains", value: "" })} />
+          <DropdownSelect dropdownKey="filter_operator" options={operators} className="lead-control" aria-label={`Condition ${index + 1} operator`} value={condition.operator} onValueChange={(value) => screen.updateCondition(condition.id, { operator: value })} />
+          {!['is_empty', 'is_not_empty'].includes(condition.operator) && <input className="lead-control" aria-label={`Condition ${index + 1} value`} type={isDateField ? "date" : "text"} value={condition.value} onChange={(event) => screen.updateCondition(condition.id, { value: event.target.value })} placeholder="Value" />}
           <button className="icon-button advanced-remove" type="button" aria-label={`Remove condition ${index + 1}`} onClick={() => screen.removeCondition(condition.id)}><CloseIcon /></button>
         </div>; })}
       </div>
@@ -312,6 +356,19 @@ function AdvancedFilterPanel({ screen, onSave }: { screen: ReturnType<typeof use
       <div className="advanced-filter-footer"><button className="leads-button secondary" type="button" disabled={!screen.advancedConditions.length} onClick={onSave}>{screen.editingQuickFilter ? "Update Quick Filter" : "Save as Quick Filter"}</button></div>
     </aside>
   </div>;
+}
+
+type TimelineEntry = { id: string; date: string | null; title: string; subtitle: string; body: string; kind: "followup" | "note" | "message" | "call" | "assignment"; badge?: string };
+
+function LeadTimeline({ detail, leadName, ownerName }: { detail: any; leadName: string; ownerName: string }) {
+  const entries: TimelineEntry[] = [
+    ...(detail.followups || []).map((item: any) => ({ id: `followup-${item.id}`, date: item.created_at || item.due_at, title: item.status === "done" ? "Follow-up completed" : "Follow-up scheduled", subtitle: item.due_at ? new Date(item.due_at).toLocaleString() : "Follow-up", body: item.note || "No follow-up note.", kind: "followup" as const, badge: item.status === "done" ? "Completed" : "Upcoming" })),
+    ...(detail.notes || []).map((item: any) => ({ id: `note-${item.id}`, date: item.created_at, title: `Note added by ${item.author_name || ownerName}`, subtitle: item.created_at ? new Date(item.created_at).toLocaleString() : "Note", body: item.body || "No note body.", kind: "note" as const })),
+    ...(detail.calls || []).map((item: any) => ({ id: `call-${item.id}`, date: item.happened_at, title: `${item.caller_name || ownerName} called ${leadName}`, subtitle: `${item.happened_at ? new Date(item.happened_at).toLocaleString() : "Call"}${item.duration_seconds != null ? ` · ${Math.floor(Number(item.duration_seconds) / 60)}:${String(Number(item.duration_seconds) % 60).padStart(2, "0")} min` : ""}`, body: [item.resolution ? `Outcome: ${item.resolution}` : "", item.note || ""].filter(Boolean).join(" · ") || "Call activity recorded.", kind: "call" as const, badge: item.resolution === "Connected" ? "Connected" : undefined })),
+    ...(detail.messages || []).map((item: any) => ({ id: `message-${item.id}`, date: item.sent_at, title: `${item.channel || "Message"} message sent`, subtitle: item.sent_at ? new Date(item.sent_at).toLocaleString() : "Message", body: item.body || "Message activity recorded.", kind: "message" as const })),
+    ...(detail.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action))).map((item: any) => ({ id: `history-${item.id}`, date: item.occurred_at, title: item.action === "lead.round_robin_assigned" ? (item.note || `Lead round-robined to ${item.to_value || "an owner"}.`) : `Lead manually assigned to ${item.to_value || "an owner"}`, subtitle: item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "Assignment recorded", body: "", kind: "assignment" as const, badge: "Assigned" })),
+  ].sort((left, right) => new Date(String(right.date || 0)).getTime() - new Date(String(left.date || 0)).getTime());
+  return <div className="lead-timeline-container" aria-label="Lead timeline"><div className="lead-timeline-rail" />{entries.length === 0 ? <p className="lead-activity-empty">No activity recorded for this lead yet.</p> : entries.map((item, index) => <div className="lead-timeline-item" key={item.id}><div className={`lead-timeline-node ${item.kind === "message" ? "green-node" : "red-node"}`} aria-hidden="true">{item.kind === "followup" ? <CalendarIcon /> : item.kind === "note" ? <NoteIcon /> : item.kind === "message" ? <WhatsAppIcon /> : item.kind === "call" ? <CallIcon /> : <UserIcon />}</div><div className={`lead-timeline-card ${index === 0 ? "card-highlight" : ""}`}><div className="lead-timeline-card-main"><h4 className="lead-timeline-title">{item.title}</h4><span className="lead-timeline-subtitle">{item.subtitle}</span>{item.body && <p className="lead-timeline-desc">{item.body}</p>}</div>{item.badge && <span className={`lead-timeline-pill ${item.badge === "Upcoming" ? "badge-upcoming" : item.badge === "Connected" ? "badge-connected" : item.badge === "Assigned" ? "badge-assigned" : "badge-latest"}`}>{item.badge}</span>}</div></div>)}</div>;
 }
 
 export function LeadsPage() {
@@ -332,14 +389,14 @@ export function LeadsPage() {
   const [noteText, setNoteText] = useState(
     "Nikhil wants a 30-minute product walkthrough next week.\nKey interest: team productivity reporting and follow-up tracking.\nShare proposal before the demo."
   );
-  const [relatedActivity, setRelatedActivity] = useState("Call - 10 Oct 2026, 10:18 AM");
+  const [relatedActivity, setRelatedActivity] = useState("");
   const [noteTags, setNoteTags] = useState<string[]>(["Warm lead", "Demo requested"]);
-  const [noteVisibility, setNoteVisibility] = useState("Team");
+  const [noteVisibility, setNoteVisibility] = useState("");
   const [pinToLead, setPinToLead] = useState(true);
   const [setReminder, setSetReminder] = useState(true);
   const [reminderDate, setReminderDate] = useState("2026-10-13");
   const [reminderTime, setReminderTime] = useState("10:00");
-  const [reminderNotify, setReminderNotify] = useState("Aarav Mehta");
+  const [reminderNotify, setReminderNotify] = useState("");
   const [showInHistory, setShowInHistory] = useState(true);
   const [noteAttachments, setNoteAttachments] = useState<string[]>(["Productivity-Shastra-overview.pdf"]);
   const [showNoteForm, setShowNoteForm] = useState(false);
@@ -371,6 +428,30 @@ export function LeadsPage() {
   const [activityType, setActivityType] = useState("Phone call");
   const [activityTypeSearch, setActivityTypeSearch] = useState("");
   const [activityTypeDropdownOpen, setActivityTypeDropdownOpen] = useState(false);
+  const activityTypePickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!activityTypeDropdownOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!activityTypePickerRef.current?.contains(event.target as Node)) {
+        setActivityTypeDropdownOpen(false);
+        setActivityTypeSearch("");
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActivityTypeDropdownOpen(false);
+        setActivityTypeSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [activityTypeDropdownOpen]);
+
   const [activityDetailsText, setActivityDetailsText] = useState(
     "Interested in a product walkthrough next week. Asked to share the proposal before the demo."
   );
@@ -379,11 +460,19 @@ export function LeadsPage() {
   const [followUpTitle, setFollowUpTitle] = useState("Send proposal and confirm demo time");
   const [followUpDueDate, setFollowUpDueDate] = useState("2026-10-13");
   const [followUpDueTime, setFollowUpDueTime] = useState("11:00");
-  const [followUpAssignee, setFollowUpAssignee] = useState("Aarav Mehta");
+  const [followUpAssignee, setFollowUpAssignee] = useState("");
   const [sendNotification, setSendNotification] = useState(true);
   const [notifyMe, setNotifyMe] = useState(true);
-  const [notifyBefore, setNotifyBefore] = useState("15 minutes before");
-  const [notifyVia, setNotifyVia] = useState<"desktop" | "email">("desktop");
+  const [notifyBefore, setNotifyBefore] = useState("");
+  useEffect(() => {
+    if (!relatedActivity && screen.dropdownOptions.relatedActivity[0]) setRelatedActivity(screen.dropdownOptions.relatedActivity[0].value);
+    if (!noteVisibility && screen.dropdownOptions.noteVisibility[0]) setNoteVisibility(screen.dropdownOptions.noteVisibility[0].value);
+    if (!reminderNotify && screen.userOptions[0]) setReminderNotify(screen.userOptions[0].value);
+    if (!followUpAssignee && screen.userOptions[0]) setFollowUpAssignee(screen.userOptions[0].value);
+    if (!notifyBefore && screen.dropdownOptions.notifyBefore[0]) setNotifyBefore(screen.dropdownOptions.notifyBefore[0].value);
+  }, [followUpAssignee, noteVisibility, notifyBefore, relatedActivity, reminderNotify, screen.dropdownOptions, screen.userOptions]);
+  const [notifyViaApp, setNotifyViaApp] = useState(true);
+  const [notifyViaEmail, setNotifyViaEmail] = useState(false);
 
   // Dedicated Follow-up tab state
   const [showFollowUpForm, setShowFollowUpForm] = useState(false);
@@ -416,6 +505,8 @@ export function LeadsPage() {
     },
   ]);
   const [followUpSavedFeedback, setFollowUpSavedFeedback] = useState(false);
+  const [detailsMoreOpen, setDetailsMoreOpen] = useState(false);
+  const [additionalFieldsOpen, setAdditionalFieldsOpen] = useState(false);
 
   const detailTabRefs = useRef<Partial<Record<LeadDetailTab, HTMLButtonElement | null>>>({});
   useEffect(() => {
@@ -432,30 +523,67 @@ export function LeadsPage() {
     detailTabRefs.current[nextTab]?.focus();
   }
   const fields = VIEW_FIELDS[screen.view] || VIEW_FIELDS.new_leads;
+  const visibleLeadIds = (screen.data?.items || []).map((lead) => lead.id);
+  const selectedLeadIdSet = new Set(screen.selectedLeadIds);
+  const allVisibleSelected = visibleLeadIds.length > 0 && visibleLeadIds.every((id) => selectedLeadIdSet.has(id));
+  const isAllSelected = screen.selectAllView || (visibleLeadIds.length > 0 && allVisibleSelected);
+  const isSomeSelected = !isAllSelected && screen.selectedLeadIds.length > 0;
   const selectedLead = screen.detail?.lead;
   const leadName = String(selectedLead?.name || "Nikhil Shah");
+  const leadFullName = leadName.trim();
+  const nameParts = leadFullName.split(/\s+/);
+  const derivedFirstName = nameParts[0] || "";
+  const derivedLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+  const leadFirstName = String(
+    (selectedLead as any)?.first_name ||
+      (selectedLead ? fieldValue(selectedLead, "first_name") : null) ||
+      derivedFirstName
+  );
+  const leadLastName = String(
+    (selectedLead as any)?.last_name ||
+      (selectedLead ? fieldValue(selectedLead, "last_name") : null) ||
+      derivedLastName
+  );
   const leadStatus = String(selectedLead?.lead_status || selectedLead?.stage || "New Lead");
   const leadSource = String(selectedLead?.lead_source || "Website enquiry");
   const ownerName = String(selectedLead?.owner_name || selectedLead?.owner_user_id || "Aarav Mehta");
+  const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
   return <div className="leads-page">
     <div className="bulk-upload-toolbar"><button className="leads-button secondary" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button></div>
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
     <header className="leads-header manage-header"><div className="manage-heading"><h1>Manage Leads</h1><button className="manage-refresh" type="button" onClick={() => void screen.load()} aria-label="Refresh leads" title="Refresh leads">↻</button></div><div className="manage-actions"><button className="leads-button manage-quick-add" type="button" onClick={() => navigate("/leads?new=1")}>Quick Add Lead</button><button className="leads-button manage-add" type="button" onClick={() => navigate("/leads?new=1")}>＋ Add New Lead</button><div className="manage-overflow-wrap"><button className="leads-button manage-overflow" type="button" aria-label="More lead actions" aria-expanded={overflowOpen} onClick={() => setOverflowOpen((value) => !value)}>⋯</button>{overflowOpen && <div className="manage-overflow-menu" role="menu"><button type="button" role="menuitem" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) { setOverflowOpen(false); screen.openBulkUpload(); } }}>Bulk upload leads</button><button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); void screen.load(); }}>Refresh</button>{screen.filtersActive && <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); screen.clearFilters(); }}>Clear filters</button>}</div>}</div></div></header>
-    {screen.newLeadOpen && <form className="lead-create-form" onSubmit={(event) => void screen.createNewLead(event)}><div className="drawer-head"><h2>New lead</h2><button className="icon-button" type="button" onClick={screen.closeNewLead} aria-label="Close new lead form"><CloseIcon /></button></div><label>Name<input required value={screen.newLeadForm.name} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" value={screen.newLeadForm.email} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input value={screen.newLeadForm.phone} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input value={screen.newLeadForm.company} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Lead type<select value={screen.newLeadForm.lead_type} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, lead_type: event.target.value }))}>{["DL", "L", "QDL", "QL", "R"].map((type) => <option key={type}>{type}</option>)}</select></label><label>Permission To Call<select value={screen.newLeadForm.permission} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, permission: event.target.value }))}><option>Pending</option>{screen.canChangePermission && <><option>Yes</option><option>No</option></>}</select></label><label>Product<select value={screen.newLeadForm.product} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, product: event.target.value }))}><option value="">Select product</option>{screen.products.map((product) => <option key={product.id} value={product.code}>{product.label}</option>)}</select></label><button className="leads-button" type="submit">Create lead</button></form>}
+    {screen.newLeadOpen && <form className="lead-create-form" onSubmit={(event) => void screen.createNewLead(event)}><div className="drawer-head"><h2>New lead</h2><button className="icon-button" type="button" onClick={screen.closeNewLead} aria-label="Close new lead form"><CloseIcon /></button></div><label>Name<input required value={screen.newLeadForm.name} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" value={screen.newLeadForm.email} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input value={screen.newLeadForm.phone} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input value={screen.newLeadForm.company} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Team<input value={screen.newLeadForm.team} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, team: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} value={screen.newLeadForm.lead_type} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, lead_type: value }))} /></label><label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} value={screen.newLeadForm.permission} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, permission: value }))} /></label><label>Products<input placeholder="Product codes, comma-separated" value={screen.newLeadForm.products} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, products: event.target.value }))} /></label><button className="leads-button" type="submit">Create lead</button></form>}
     {screen.detail && !screen.detailLoading && <section className="lead-edit-panel" aria-label="Lead actions">
       <div className="drawer-head"><div><p className="eyebrow">Selected lead</p><h2>{screen.detail.lead.name}</h2></div><button className="leads-button secondary" type="button" onClick={screen.closeDetail}>Close</button></div>
-      {!screen.editing && <div className="lead-action-row"><button className="leads-button" type="button" onClick={() => screen.setEditing(true)}>Edit lead</button>{screen.canConvertAccount && <button className="leads-button secondary" type="button" onClick={() => void screen.convertLead()}>Convert to account</button>}<label>Stage<select className="lead-control" value={String(screen.detail.lead.stage || "")} onChange={(event) => void screen.updateStage(event.target.value)}><option value="">Unstaged</option>{LEAD_STAGE_OPTIONS.map((stage) => <option key={stage.value} value={stage.value}>{stage.label}</option>)}</select></label>{screen.canChangePermission && <label>Permission To Call<select className="lead-control" value={String(screen.detail.lead.permission || "Pending")} onChange={(event) => void screen.updatePermission(event.target.value)}><option>Pending</option><option>Yes</option><option>No</option></select></label>}</div>}
-      {screen.editing && <form className="lead-edit-form" onSubmit={(event) => void screen.saveLeadEdit(event)}><label>Name<input required className="lead-control" value={screen.editForm.name} onChange={(event) => screen.setEditForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" className="lead-control" value={screen.editForm.email} onChange={(event) => screen.setEditForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input className="lead-control" value={screen.editForm.phone} onChange={(event) => screen.setEditForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input className="lead-control" value={screen.editForm.company} onChange={(event) => screen.setEditForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Lead type<select className="lead-control" value={screen.editForm.lead_type} onChange={(event) => screen.setEditForm((form) => ({ ...form, lead_type: event.target.value }))}>{["DL", "L", "QDL", "QL", "R"].map((type) => <option key={type}>{type}</option>)}</select></label><div className="lead-action-row"><button className="leads-button" type="submit">Save lead</button><button className="leads-button secondary" type="button" onClick={() => screen.setEditing(false)}>Cancel</button></div></form>}
+      {!screen.editing && <div className="lead-action-row"><button className="leads-button" type="button" onClick={() => screen.setEditing(true)}>Edit lead</button>{screen.canAssign && <button className="leads-button secondary" type="button" onClick={() => void screen.reassignByRoundRobin()}>Reassign by round-robin</button>}{screen.canConvertAccount && <button className="leads-button secondary" type="button" onClick={() => void screen.convertLead()}>Convert to account</button>}<label>Stage<DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="Unstaged" value={String(screen.detail.lead.stage || "")} onValueChange={(value) => void screen.updateStage(value)} /></label>{screen.canChangePermission && <label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" value={String(screen.detail.lead.permission || screen.dropdownDefaults.permission)} onValueChange={(value) => void screen.updatePermission(value)} /></label>}</div>}
+      {screen.editing && <form className="lead-edit-form" onSubmit={(event) => void screen.saveLeadEdit(event)}><label>Name<input required className="lead-control" value={screen.editForm.name} onChange={(event) => screen.setEditForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" className="lead-control" value={screen.editForm.email} onChange={(event) => screen.setEditForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input className="lead-control" value={screen.editForm.phone} onChange={(event) => screen.setEditForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input className="lead-control" value={screen.editForm.company} onChange={(event) => screen.setEditForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} className="lead-control" value={screen.editForm.lead_type} onValueChange={(value) => screen.setEditForm((form) => ({ ...form, lead_type: value }))} /></label><div className="lead-action-row"><button className="leads-button" type="submit">Save lead</button><button className="leads-button secondary" type="button" onClick={() => screen.setEditing(false)}>Cancel</button></div></form>}
     </section>}
     <section className={filtersOpen ? "lead-filters filters-open" : "lead-filters filters-collapsed"} aria-label="Lead filters">
       <button className="leads-button filter-toggle" type="button" aria-expanded={screen.advancedOpen} onClick={() => screen.openAdvancedFilter()}>+ Filter</button>
       <SavedFiltersPicker screen={screen} />
       <div className="lead-filter-primary"><div className="lead-view-picker" ref={screen.viewMenuRef}><span>View</span><button ref={screen.viewButtonRef} className="lead-view-button" type="button" aria-haspopup="listbox" aria-expanded={screen.viewMenuOpen} onClick={() => screen.viewMenuOpen ? screen.closeViewMenu() : screen.openViewMenu()} onKeyDown={screen.handleViewButtonKeyDown}>{screen.currentViewLabel}<span aria-hidden="true">v</span></button>{screen.viewMenuOpen && <div className="lead-view-menu" role="listbox" aria-label="Lead views">{screen.viewGroups.map((group) => <div className="lead-view-group" key={group.label}><div className="lead-view-group-label">{group.label}</div>{group.views.map(([key, label]) => { const index = screen.viewOptions.findIndex(([groupKey]) => groupKey === key); return <button key={key} ref={(element) => { screen.viewOptionRefs.current[index] = element; }} className={screen.view === key ? "lead-view-option selected" : "lead-view-option"} type="button" role="option" aria-selected={screen.view === key} onClick={() => screen.chooseView(key)} onKeyDown={(event) => screen.handleViewOptionKeyDown(event, index)}>{label}<span>{screen.viewCounts[key] ?? "…"}</span></button>; })}</div>)}</div>}</div>
-        <label className="lead-search"><span>Search</span><input className="lead-control" value={screen.filters.q} onChange={(event) => screen.updateFilter("q", event.target.value)} placeholder="Name, company, email or lead number" /></label><label><span>Stage</span><select className="lead-control" value={screen.filters.stage} onChange={(event) => screen.updateFilter("stage", event.target.value)}><option value="">All stages</option>{LEAD_STAGE_OPTIONS.map((stage) => <option key={stage.value} value={stage.value}>{stage.label}</option>)}</select></label><label><span>Permission</span><select className="lead-control" value={screen.filters.permission} onChange={(event) => screen.updateFilter("permission", event.target.value)}><option value="">All</option><option value="Yes">Yes</option><option value="No">No</option><option value="Pending">Pending</option></select></label>
-      </div><div className="lead-filter-secondary"><label><span>Owner</span><input className="lead-control" value={screen.filters.owner} onChange={(event) => screen.updateFilter("owner", event.target.value)} placeholder="Owner" /></label><label><span>Lead status</span><input className="lead-control" value={screen.filters.lead_status} onChange={(event) => screen.updateFilter("lead_status", event.target.value)} placeholder="Any status" /></label><label><span>PSO from</span><input className="lead-control" type="date" value={screen.filters.pso_date_from} onChange={(event) => screen.updateFilter("pso_date_from", event.target.value)} /></label><label><span>PSO to</span><input className="lead-control" type="date" value={screen.filters.pso_date_to} onChange={(event) => screen.updateFilter("pso_date_to", event.target.value)} /></label><label><span>Follow-up</span><select className="lead-control" value={screen.filters.next_follow_up} onChange={(event) => screen.updateFilter("next_follow_up", event.target.value)}><option value="">Any</option><option value="overdue">Overdue</option><option value="today">Today</option><option value="upcoming">Upcoming</option></select></label>{screen.filtersActive && <button className="leads-button clear-filters" type="button" onClick={screen.clearFilters}>Clear filters</button>}</div>
+        <label className="lead-search"><span>Search</span><input className="lead-control" value={screen.filters.q} onChange={(event) => screen.updateFilter("q", event.target.value)} placeholder="Name, company, email or lead number" /></label><label><span>Stage</span><DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="All stages" value={screen.filters.stage} onValueChange={(value) => screen.updateFilter("stage", value)} /></label><label><span>Permission</span><DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" includeEmpty emptyLabel="All" value={screen.filters.permission} onValueChange={(value) => screen.updateFilter("permission", value)} /></label>
+      </div><div className="lead-filter-secondary"><label><span>Owner</span><input className="lead-control" value={screen.filters.owner} onChange={(event) => screen.updateFilter("owner", event.target.value)} placeholder="Owner" /></label><label><span>Lead status</span><input className="lead-control" value={screen.filters.lead_status} onChange={(event) => screen.updateFilter("lead_status", event.target.value)} placeholder="Any status" /></label><label><span>PSO from</span><input className="lead-control" type="date" value={screen.filters.pso_date_from} onChange={(event) => screen.updateFilter("pso_date_from", event.target.value)} /></label><label><span>PSO to</span><input className="lead-control" type="date" value={screen.filters.pso_date_to} onChange={(event) => screen.updateFilter("pso_date_to", event.target.value)} /></label><label><span>Follow-up</span><DropdownSelect dropdownKey="follow_up_filter" className="lead-control" includeEmpty emptyLabel="Any" value={screen.filters.next_follow_up} onValueChange={(value) => screen.updateFilter("next_follow_up", value)} /></label>{screen.filtersActive && <button className="leads-button clear-filters" type="button" onClick={screen.clearFilters}>Clear filters</button>}</div>
     </section>
     {screen.error && <div className="lead-state error" role="alert"><span>{screen.error}</span><button className="leads-button secondary" onClick={() => void screen.load()}>Retry</button></div>}{screen.loading && <div className="lead-state">Loading leads…</div>}{!screen.loading && !screen.error && screen.data?.items.length === 0 && <div className="lead-state"><strong>No leads in this view.</strong><span>Try another view or clear a filter.</span></div>}
-    {!screen.loading && !screen.error && !!screen.data?.items.length && <><div className="lead-table-wrap"><table className="lead-table"><thead><tr>{fields.map((field) => <th key={field.key}>{field.label}</th>)}</tr></thead><tbody>{screen.data.items.map((lead) => <tr key={lead.id} tabIndex={0} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : field.key === "permission" || field.key === "stage" ? <span className="lead-pill">{displayField(fieldValue(lead, field.key))}</span> : displayField(fieldValue(lead, field.key))}</td>)}</tr>)}</tbody></table></div><footer className="lead-pagination"><span>{screen.data.total} leads</span><div><button className="leads-button secondary" disabled={screen.page <= 1} onClick={screen.previousPage}>Previous</button><span>Page {screen.page} of {screen.totalPages}</span><button className="leads-button secondary" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>Next</button></div></footer></>}
+    {!screen.loading && !screen.error && !!screen.data?.items.length && <>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
+      <div className="lead-selection-bar" role="status" aria-live="polite">
+        <span className="lead-selection-count">
+          {screen.selectAllView ? (
+            <>All <strong>{screen.data.total}</strong> leads selected</>
+          ) : (
+            <><strong>{screen.selectedLeadIds.length}</strong> {screen.selectedLeadIds.length === 1 ? "lead" : "leads"} selected</>
+          )}
+        </span>
+        <button
+          type="button"
+          className="leads-button secondary lead-selection-clear-btn"
+          onClick={screen.clearSelection}
+        >
+          Deselect all
+        </button>
+      </div>
+    )}<div className="lead-table-wrap"><table className="lead-table"><thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" /></label></th>{fields.map((field) => <th key={field.key} scope="col">{field.label}</th>)}</tr></thead><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); return <tr key={lead.id} tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} onClick={(event) => event.stopPropagation()} /></td>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : field.key === "permission" || field.key === "stage" ? <span className="lead-pill">{displayField(fieldValue(lead, field.key))}</span> : displayField(fieldValue(lead, field.key))}</td>)}</tr>; })}</tbody></table></div><footer className="lead-pagination"><span>{screen.data.total} leads</span><div className="lead-pagination-controls"><label className="lead-page-size"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><button className="leads-button secondary" disabled={screen.page <= 1} onClick={screen.previousPage}>Previous</button><span>Page {screen.page} of {screen.totalPages}</span><button className="leads-button secondary" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>Next</button></div></footer></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
@@ -981,7 +1109,7 @@ export function LeadsPage() {
                   )}
                 </div>
               ) : (
-                /* Primary Timeline Feed matching Reference Image */
+                <><LeadTimeline detail={screen.detail} leadName={leadName} ownerName={ownerName} />{false && <>
                 <div className="lead-timeline-container" aria-label="Lead timeline">
                   <div className="lead-timeline-rail" />
 
@@ -994,12 +1122,12 @@ export function LeadsPage() {
                       <div className="lead-timeline-card-main">
                         <h4 className="lead-timeline-title">Follow-up scheduled</h4>
                         <span className="lead-timeline-subtitle">
-                          {screen.detail.lead.next_follow_up_at
-                            ? new Date(screen.detail.lead.next_follow_up_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+                          {screen.detail?.lead.next_follow_up_at
+                            ? new Date(screen.detail?.lead.next_follow_up_at as string).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
                             : "Oct 13, 2026 • 11:00 AM"}
                         </span>
                         <p className="lead-timeline-desc">
-                          {(screen.detail.followups[0]?.note as string) || "Send proposal and confirm a demo time."}
+                          {(screen.detail?.followups[0]?.note as string) || "Send proposal and confirm a demo time."}
                         </p>
                       </div>
                       <span className="lead-timeline-pill badge-upcoming">Upcoming</span>
@@ -1077,22 +1205,17 @@ export function LeadsPage() {
                     </div>
                   </div>
 
-                  {/* 6. Lead round-robined to Aarav Mehta */}
-                  <div className="lead-timeline-item">
-                    <div className="lead-timeline-node red-node" aria-hidden="true">
-                      <UserIcon />
-                    </div>
+                  {assignmentHistory.map((item: any) => <div className="lead-timeline-item" key={String(item.id)}>
+                    <div className="lead-timeline-node red-node" aria-hidden="true"><UserIcon /></div>
                     <div className="lead-timeline-card">
                       <div className="lead-timeline-card-main">
-                        <h4 className="lead-timeline-title">
-                          Lead round-robined to {ownerName}
-                        </h4>
-                        <span className="lead-timeline-subtitle">Today, 10:02 AM</span>
+                        <h4 className="lead-timeline-title">{item.action === "lead.round_robin_assigned" ? (item.note || `Lead round-robined to ${item.to_value || "an owner"}.`) : `Lead manually assigned to ${item.to_value || "an owner"}`}</h4>
+                        <span className="lead-timeline-subtitle">{item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "Assignment recorded"}</span>
                       </div>
                       <span className="lead-timeline-pill badge-assigned">Assigned</span>
                     </div>
-                  </div>
-                </div>
+                  </div>)}
+                </div></>}</>
               )}
             </section>
           )}
@@ -1100,51 +1223,337 @@ export function LeadsPage() {
           {/* Details tab */}
           {detailTab === "details" && (
             <section
-              className="lead-detail-tab-panel"
+              className="lead-detail-tab-panel lead-details-tab-panel"
               id="lead-detail-panel-details"
               role="tabpanel"
               aria-label="Lead details"
             >
-              <div className="lead-detail-actions-bar">
-                <button
-                  className="leads-button"
-                  type="button"
-                  onClick={() => screen.setEditing(true)}
-                >
-                  Edit lead info
-                </button>
-                {screen.canConvertAccount && (
+              {/* Header Row: Title, Edit details & More menu */}
+              <div className="lead-details-header-row">
+                <h3 className="lead-details-title">Lead details</h3>
+                <div className="lead-details-header-actions">
                   <button
-                    className="leads-button secondary"
+                    className="lead-details-edit-btn"
                     type="button"
-                    onClick={() => void screen.convertLead()}
+                    onClick={() => screen.setEditing(true)}
                   >
-                    Convert to account
+                    <EditPencilIcon />
+                    <span>Edit details</span>
                   </button>
+                  <div className="lead-details-more-wrap">
+                    <button
+                      className="lead-details-more-btn"
+                      type="button"
+                      aria-label="More details options"
+                      onClick={() => setDetailsMoreOpen((v) => !v)}
+                    >
+                      <VerticalDotsIcon />
+                    </button>
+                    {detailsMoreOpen && (
+                      <div className="lead-activity-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setDetailsMoreOpen(false);
+                            screen.setEditing(true);
+                          }}
+                        >
+                          Edit lead info
+                        </button>
+                        {screen.canConvertAccount && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setDetailsMoreOpen(false);
+                              void screen.convertLead();
+                            }}
+                          >
+                            Convert to account
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Hero Summary Banner */}
+              <div className="lead-details-hero-card">
+                <div className="lead-details-hero-identity">
+                  <div className="lead-details-hero-avatar" aria-hidden="true">
+                    <span>
+                      {leadName
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .slice(0, 2)
+                        .join("")
+                        .toUpperCase() || "NS"}
+                    </span>
+                  </div>
+                  <div className="lead-details-hero-name-wrap">
+                    <strong className="lead-details-hero-name">{leadName}</strong>
+                    <span className="lead-details-hero-stage-pill">
+                      {fieldOrFallback(selectedLead?.stage || selectedLead?.lead_status, "Fresh lead")}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="lead-details-hero-divider" aria-hidden="true" />
+
+                <div className="lead-details-hero-stat">
+                  <span className="lead-details-hero-label">Owner</span>
+                  <strong className="lead-details-hero-val">{ownerName}</strong>
+                </div>
+
+                <div className="lead-details-hero-divider" aria-hidden="true" />
+
+                <div className="lead-details-hero-stat">
+                  <span className="lead-details-hero-label">Lead score</span>
+                  <strong className="lead-details-hero-val">42</strong>
+                </div>
+
+                <div className="lead-details-hero-divider" aria-hidden="true" />
+
+                <div className="lead-details-hero-stat">
+                  <span className="lead-details-hero-label">Source</span>
+                  <strong className="lead-details-hero-val">{leadSource}</strong>
+                </div>
+              </div>
+
+              {/* 1. Contact information */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Contact information</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">First name</span>
+                    <span className="lead-details-value">{displayField(leadFirstName)}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Last name</span>
+                    <span className="lead-details-value">{displayField(leadLastName)}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Mobile</span>
+                    <span className="lead-details-value">
+                      {selectedLead?.phone || "+91 86594 16729"}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Email</span>
+                    <span className="lead-details-value">
+                      {selectedLead?.email || "nikhil.shah@email.com"}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Preferred contact</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.preferred_contact ||
+                          fieldValue(selectedLead!, "preferred_contact"),
+                        "WhatsApp"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Professional information */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Professional information</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Company</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "company"),
+                        "Fresh Nutrition"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Designation</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "designation"),
+                        "Employee"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Location</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "city"),
+                        "Mumbai, Maharashtra"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Industry</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.industry ||
+                          fieldValue(selectedLead!, "industry"),
+                        "Health & wellness"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Lead qualification */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Lead qualification</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead stage</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "stage"),
+                        "New"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead temperature</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.temperature ||
+                          fieldValue(selectedLead!, "temperature"),
+                        "Warm"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Interest</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.interest ||
+                          fieldValue(selectedLead!, "interest"),
+                        "Productivity Shastra Orientation"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Expected decision date</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        fieldValue(selectedLead!, "psoDate"),
+                        "31 Oct 2026"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Attribution & ownership */}
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Attribution & ownership</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead source</span>
+                    <span className="lead-details-value">{leadSource}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Campaign</span>
+                    <span className="lead-details-value">
+                      {fieldOrFallback(
+                        (selectedLead as any)?.campaign ||
+                          fieldValue(selectedLead!, "campaign"),
+                        "Productivity Shastra - October"
+                      )}
+                    </span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Assigned to</span>
+                    <span className="lead-details-value">{ownerName}</span>
+                  </div>
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Created on</span>
+                    <span className="lead-details-value">
+                      {selectedLead?.created_at
+                        ? new Date(String(selectedLead.created_at)).toLocaleString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "10 Oct 2026, 9:58 AM"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Additional fields (6) collapsible */}
+              <div className="lead-details-accordion">
+                <button
+                  type="button"
+                  className="lead-details-accordion-btn"
+                  onClick={() => setAdditionalFieldsOpen((v) => !v)}
+                  aria-expanded={additionalFieldsOpen}
+                >
+                  <span
+                    className={
+                      additionalFieldsOpen
+                        ? "lead-details-accordion-chevron open"
+                        : "lead-details-accordion-chevron"
+                    }
+                    aria-hidden="true"
+                  >
+                    <ChevronDownIcon />
+                  </span>
+                  <span>Additional fields (6)</span>
+                </button>
+                {additionalFieldsOpen && (
+                  <div className="lead-details-accordion-content">
+                    <div className="lead-details-grid">
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Permission To Call</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "permission"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">PSO Date</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "psoDate"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Pre-PS Done</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "isPrePsDone"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Last called on</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "lastCalledOn"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Next follow-up</span>
+                        <span className="lead-details-value">
+                          {displayField(fieldValue(selectedLead!, "nextFollowUpAt"))}
+                        </span>
+                      </div>
+                      <div className="lead-details-item">
+                        <span className="lead-details-label">Products</span>
+                        <span className="lead-details-value">
+                          {displayField(
+                            (screen.detail?.products && screen.detail.products.length > 0)
+                              ? screen.detail.products.map((p: any) => p.code || p.name).join(", ")
+                              : fieldValue(selectedLead!, "products")
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-              <dl className="lead-facts">
-                {[
-                  "company",
-                  "stage",
-                  "permission",
-                  "owner",
-                  "psoDate",
-                  "isPrePsDone",
-                  "email",
-                  "phone",
-                  "designation",
-                  "city",
-                  "leadSource",
-                  "lastCalledOn",
-                  "nextFollowUpAt",
-                ].map((key) => (
-                  <div className="lead-fact-row" key={key}>
-                    <dt>{key.replaceAll("_", " ")}</dt>
-                    <dd>{displayField(fieldValue(screen.detail!.lead, key))}</dd>
-                  </div>
-                ))}
-              </dl>
             </section>
           )}
 
@@ -1329,17 +1738,7 @@ export function LeadsPage() {
                         Related activity
                       </label>
                       <div className="lead-note-select-wrap">
-                        <select
-                          id="lead-note-related-activity"
-                          className="lead-note-select"
-                          value={relatedActivity}
-                          onChange={(e) => setRelatedActivity(e.target.value)}
-                        >
-                          <option value="Call - 10 Oct 2026, 10:18 AM">Call - 10 Oct 2026, 10:18 AM</option>
-                          <option value="Email - 09 Oct 2026, 04:30 PM">Email - 09 Oct 2026, 04:30 PM</option>
-                          <option value="Meeting - 08 Oct 2026, 02:00 PM">Meeting - 08 Oct 2026, 02:00 PM</option>
-                          <option value="None">None</option>
-                        </select>
+                        <DropdownSelect dropdownKey="related_activity" options={screen.dropdownOptions.relatedActivity} id="lead-note-related-activity" className="lead-note-select" value={relatedActivity} onValueChange={setRelatedActivity} />
                         <ChevronDownIcon />
                       </div>
                     </div>
@@ -1383,16 +1782,7 @@ export function LeadsPage() {
                         Visibility
                       </label>
                       <div className="lead-note-select-wrap">
-                        <select
-                          id="lead-note-visibility"
-                          className="lead-note-select"
-                          value={noteVisibility}
-                          onChange={(e) => setNoteVisibility(e.target.value)}
-                        >
-                          <option value="Team">Team</option>
-                          <option value="Private">Private</option>
-                          <option value="Everyone">Everyone</option>
-                        </select>
+                        <DropdownSelect dropdownKey="note_visibility" options={screen.dropdownOptions.noteVisibility} id="lead-note-visibility" className="lead-note-select" value={noteVisibility} onValueChange={setNoteVisibility} />
                         <ChevronDownIcon />
                       </div>
                     </div>
@@ -1467,15 +1857,7 @@ export function LeadsPage() {
                             <span className="lead-note-sublabel">Notify</span>
                             <div className="lead-note-input-with-icon">
                               <UserIcon />
-                              <select
-                                className="lead-note-clean-select"
-                                value={reminderNotify}
-                                onChange={(e) => setReminderNotify(e.target.value)}
-                              >
-                                <option value="Aarav Mehta">Aarav Mehta</option>
-                                <option value="Nikhil Shah">Nikhil Shah</option>
-                                <option value="Self">Assignee</option>
-                              </select>
+                              <DropdownSelect dropdownKey="reminder_recipient" options={screen.userOptions} className="lead-note-clean-select" value={reminderNotify} onValueChange={setReminderNotify} />
                               <ChevronDownIcon />
                             </div>
                           </div>
@@ -1946,7 +2328,7 @@ export function LeadsPage() {
               <label className="lead-add-activity-label" htmlFor="lead-activity-type-picker">
                 Activity type <span className="req">*</span>
               </label>
-              <div className="lead-add-activity-dropdown-container">
+              <div className="lead-add-activity-dropdown-container" ref={activityTypePickerRef}>
                 <button
                   type="button"
                   id="lead-activity-type-picker"
@@ -2121,15 +2503,7 @@ export function LeadsPage() {
                     <div className="lead-add-activity-task-col">
                       <span className="lead-add-activity-sublabel">Assign to <span className="req">*</span></span>
                       <div className="lead-add-activity-select-wrap">
-                        <select
-                          className="lead-add-activity-select"
-                          value={followUpAssignee}
-                          onChange={(e) => setFollowUpAssignee(e.target.value)}
-                        >
-                          <option value="Aarav Mehta">Aarav Mehta</option>
-                          <option value="Nikhil Shah">Nikhil Shah</option>
-                          <option value="Assignee">Assignee</option>
-                        </select>
+                        <DropdownSelect dropdownKey="assignee" options={screen.userOptions} className="lead-add-activity-select" value={followUpAssignee} onValueChange={setFollowUpAssignee} />
                         <ChevronDownIcon />
                       </div>
                     </div>
@@ -2168,17 +2542,7 @@ export function LeadsPage() {
                         <div className="notify-before-box">
                           <span className="lead-add-activity-sublabel">Notify before</span>
                           <div className="lead-add-activity-select-wrap">
-                            <select
-                              className="lead-add-activity-select"
-                              value={notifyBefore}
-                              onChange={(e) => setNotifyBefore(e.target.value)}
-                            >
-                              {NOTIFY_BEFORE_OPTIONS.map((opt) => (
-                                <option key={opt} value={opt}>
-                                  {opt}
-                                </option>
-                              ))}
-                            </select>
+                            <DropdownSelect dropdownKey="notify_before" options={screen.dropdownOptions.notifyBefore} className="lead-add-activity-select" value={notifyBefore} onValueChange={setNotifyBefore} />
                             <ChevronDownIcon />
                           </div>
                         </div>
@@ -2189,25 +2553,33 @@ export function LeadsPage() {
                           <div className="lead-add-activity-choice-cards">
                             <button
                               type="button"
-                              className={`lead-add-activity-choice-card ${notifyVia === "desktop" ? "selected" : ""}`}
-                              onClick={() => setNotifyVia("desktop")}
+                              className={`lead-add-activity-choice-card ${notifyViaApp ? "selected" : ""}`}
+                              onClick={() => setNotifyViaApp((v) => !v)}
+                              aria-checked={notifyViaApp}
+                              role="checkbox"
                             >
                               <div className="choice-head">
-                                <span className={`choice-radio ${notifyVia === "desktop" ? "active" : ""}`} />
-                                <DesktopIcon color={notifyVia === "desktop" ? "var(--red)" : "var(--ink-2)"} />
-                                <strong>Desktop</strong>
+                                <span className={`choice-checkbox ${notifyViaApp ? "checked" : ""}`}>
+                                  {notifyViaApp ? "✓" : ""}
+                                </span>
+                                <DesktopIcon color={notifyViaApp ? "var(--red)" : "var(--ink-2)"} />
+                                <strong>App</strong>
                               </div>
-                              <span className="choice-helper">Chrome desktop pop-up</span>
+                              <span className="choice-helper">In-app pop-up</span>
                             </button>
 
                             <button
                               type="button"
-                              className={`lead-add-activity-choice-card ${notifyVia === "email" ? "selected" : ""}`}
-                              onClick={() => setNotifyVia("email")}
+                              className={`lead-add-activity-choice-card ${notifyViaEmail ? "selected" : ""}`}
+                              onClick={() => setNotifyViaEmail((v) => !v)}
+                              aria-checked={notifyViaEmail}
+                              role="checkbox"
                             >
                               <div className="choice-head">
-                                <span className={`choice-radio ${notifyVia === "email" ? "active" : ""}`} />
-                                <EmailIcon color={notifyVia === "email" ? "var(--red)" : "var(--ink-2)"} />
+                                <span className={`choice-checkbox ${notifyViaEmail ? "checked" : ""}`}>
+                                  {notifyViaEmail ? "✓" : ""}
+                                </span>
+                                <EmailIcon color={notifyViaEmail ? "var(--red)" : "var(--ink-2)"} />
                                 <strong>Email</strong>
                               </div>
                               <span className="choice-helper">Send by email</span>

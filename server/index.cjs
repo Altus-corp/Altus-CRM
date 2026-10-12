@@ -177,14 +177,15 @@ async function leadsList(req, res, db, url) {
 async function leadDetail(req, res, db, id) {
   const lead = (await db.query("SELECT * FROM leads WHERE id = $1", [id])).rows[0];
   if (!lead) return json(res, 404, { error: "Lead not found." });
-  const [calls, followups, history, messages, products] = await Promise.all([
+  const [calls, followups, history, messages, notes, products] = await Promise.all([
     db.query("SELECT * FROM lead_calls WHERE lead_id = $1 ORDER BY happened_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_followups WHERE lead_id = $1 ORDER BY due_at ASC NULLS LAST, id ASC", [id]),
     db.query("SELECT * FROM lead_history WHERE lead_id = $1 ORDER BY occurred_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_messages WHERE lead_id = $1 ORDER BY sent_at DESC NULLS LAST, id DESC", [id]),
+    db.query("SELECT n.*, u.name AS author_name FROM lead_notes n LEFT JOIN users u ON u.id = n.created_by WHERE n.lead_id = $1 ORDER BY n.created_at DESC NULLS LAST, n.id DESC", [id]),
     db.query("SELECT * FROM lead_products WHERE lead_id = $1 ORDER BY product_code ASC, id ASC", [id]),
   ]);
-  return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, products: products.rows });
+  return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, notes: notes.rows, products: products.rows });
 }
 
 function activityPage(url) {

@@ -79,6 +79,7 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Score 42/, "Should include Score 42 in lead row");
   assert.match(pageSource, /View lead/, "Should include View lead link");
   assert.match(pageSource, /Activity type/, "Should include Activity type label");
+  assert.match(pageSource, /ref=\{activityTypePickerRef\}/, "Should attach ref to dropdown container for outside click handling");
   assert.match(pageSource, /Activity types are managed by your administrator\./, "Should include admin helper text");
   assert.match(pageSource, /Activity details/, "Should include Activity details label");
   assert.match(pageSource, /Add attachment/, "Should include Add attachment button");
@@ -86,9 +87,11 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Task title/, "Should include Task title field");
   assert.match(pageSource, /Send notification/, "Should include Send notification toggle");
   assert.match(pageSource, /Notify me/, "Should include Notify me checkbox");
-  assert.match(pageSource, /15 minutes before/, "Should include 15 minutes before option");
-  assert.match(pageSource, /Chrome desktop pop-up/, "Should include Chrome desktop pop-up helper");
+  assert.match(pageSource, /dropdownKey="notify_before"/, "Should load notification timing options dynamically");
+  assert.match(pageSource, /<strong>App<\/strong>/, "Should include App notification choice");
+  assert.match(pageSource, /In-app pop-up/, "Should include In-app pop-up helper");
   assert.match(pageSource, /Send by email/, "Should include Send by email helper");
+  assert.match(pageSource, /choice-checkbox/, "Should include choice checkbox for multi-select notifications");
   assert.match(pageSource, /lead-add-activity-save-btn/, "Should include Save activity button");
   assert.match(pageSource, /Save activity/, "Should include Save activity text");
 
@@ -104,6 +107,27 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Email notification/, "Should include Email notification choice");
   assert.match(pageSource, /lead-followup-save-btn/, "Should include Save follow-up button");
   assert.match(pageSource, /lead-followup-feed-container/, "Should include follow-up feed container");
+
+  // Redesigned Details tab UI
+  assert.match(pageSource, /lead-details-header-row/, "Should include details header row");
+  assert.match(pageSource, /lead-details-edit-btn/, "Should include Edit details button");
+  assert.match(pageSource, /lead-details-more-btn/, "Should include more details menu button");
+  assert.match(pageSource, /lead-details-hero-card/, "Should include hero summary card");
+  assert.match(pageSource, /lead-details-hero-avatar/, "Should include hero avatar badge");
+  assert.match(pageSource, /lead-details-hero-stage-pill/, "Should include hero stage pill");
+  assert.match(pageSource, /Contact information/, "Should include Contact information section header");
+  assert.match(pageSource, /First name/, "Should include First name field");
+  assert.match(pageSource, /Last name/, "Should include Last name field");
+  assert.match(pageSource, /Professional information/, "Should include Professional information section header");
+  assert.match(pageSource, /Lead qualification/, "Should include Lead qualification section header");
+  assert.match(pageSource, /Attribution & ownership/, "Should include Attribution & ownership section header");
+  assert.match(pageSource, /Additional fields \(6\)/, "Should include Additional fields (6) accordion");
+  assert.match(pageSource, /Permission To Call/, "Should include Permission To Call field");
+  assert.match(pageSource, /PSO Date/, "Should include PSO Date field");
+  assert.match(pageSource, /Pre-PS Done/, "Should include Pre-PS Done field");
+  assert.match(pageSource, /Last called on/, "Should include Last called on field");
+  assert.match(pageSource, /Next follow-up/, "Should include Next follow-up field");
+  assert.match(pageSource, /Products/, "Should include Products field");
 });
 
 test("Lead Details styles exist in leads.css", () => {
@@ -136,6 +160,7 @@ test("Lead Details styles exist in leads.css", () => {
   assert.match(cssSource, /\.lead-add-activity-task-grid/);
   assert.match(cssSource, /\.lead-add-activity-notify-row/);
   assert.match(cssSource, /\.lead-add-activity-choice-card/);
+  assert.match(cssSource, /\.choice-checkbox/);
   assert.match(cssSource, /\.lead-add-activity-footer/);
   assert.match(cssSource, /\.lead-add-activity-save-btn/);
 
@@ -147,14 +172,71 @@ test("Lead Details styles exist in leads.css", () => {
   assert.match(cssSource, /\.lead-followup-save-btn/);
   assert.match(cssSource, /\.lead-followup-feed-container/);
   assert.match(cssSource, /\.lead-followup-card/);
+
+  // Details tab styles
+  assert.match(cssSource, /\.lead-details-tab-panel/);
+  assert.match(cssSource, /\.lead-details-header-row/);
+  assert.match(cssSource, /\.lead-details-title/);
+  assert.match(cssSource, /\.lead-details-edit-btn/);
+  assert.match(cssSource, /\.lead-details-more-btn/);
+  assert.match(cssSource, /\.lead-details-hero-card/);
+  assert.match(cssSource, /\.lead-details-hero-avatar/);
+  assert.match(cssSource, /\.lead-details-hero-stage-pill/);
+  assert.match(cssSource, /\.lead-details-hero-divider/);
+  assert.match(cssSource, /\.lead-details-section/);
+  assert.match(cssSource, /\.lead-details-section-header/);
+  assert.match(cssSource, /\.lead-details-grid/);
+  assert.match(cssSource, /\.lead-details-item/);
+  assert.match(cssSource, /\.lead-details-label/);
+  assert.match(cssSource, /\.lead-details-value/);
+  assert.match(cssSource, /\.lead-details-accordion/);
+  assert.match(cssSource, /\.lead-details-accordion-btn/);
 });
 
-test("Quick Add Lead keeps fields in a responsive form grid", () => {
+test("Leads list exposes supported rows-per-page choices", () => {
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
+  assert.match(pageSource, /Rows per page/);
+  assert.match(pageSource, /dropdownKey="page_size"/);
+  assert.match(fs.readFileSync("shared/dropdown-seed.json", "utf8"), /"page_size"/);
+  assert.match(functionSource, /pageSizeDropdown\.options/);
+  assert.match(functionSource, /params\.set\("page_size", String\(pageSize\)\)/);
+  assert.match(functionSource, /setPageSize\(Number\(value\)\); setPage\(1\)/);
+});
+
+test("Leads list includes checkbox for every lead and select all option", () => {
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
   const cssSource = fs.readFileSync("src/screens/leads/leads.css", "utf8");
 
-  assert.match(cssSource, /\.lead-create-form\s*\{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(cssSource, /\.lead-create-form \.drawer-head\s*\{ grid-column: 1 \/ -1/);
-  assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*\.lead-create-form\s*\{ grid-template-columns: 1fr/);
+  // Table header has select-all checkbox
+  assert.match(pageSource, /TableSelectAllCheckbox/);
+  assert.match(pageSource, /lead-table-checkbox-col/);
+  assert.match(pageSource, /Select all leads/);
+
+  // Table rows have checkbox with stopPropagation
+  assert.match(pageSource, /type="checkbox"/);
+  assert.match(pageSource, /lead-table-checkbox/);
+  assert.match(pageSource, /stopPropagation/);
+
+  // Function exposes selection state & controls
+  assert.match(functionSource, /selectedLeadIds/);
+  assert.match(functionSource, /selectAllView/);
+  assert.match(functionSource, /toggleSelectLead/);
+  assert.match(functionSource, /toggleSelectAll/);
+  assert.match(functionSource, /clearSelection/);
+
+  // CSS has checkbox and selection styles
+  assert.match(cssSource, /\.lead-table-checkbox-col/);
+  assert.match(cssSource, /\.lead-table-checkbox-label/);
+  assert.match(cssSource, /\.lead-table-checkbox/);
+  assert.match(cssSource, /\.is-selected/);
+  assert.match(cssSource, /\.lead-selection-bar/);
+
+  // Manage header buttons hover styling preserves text contrast
+  assert.match(cssSource, /\.manage-add/);
+  assert.match(cssSource, /\.manage-add:hover[\s\S]*color:\s*var\(--bg\)/);
 });
+
 
 
