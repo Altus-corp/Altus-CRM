@@ -18,6 +18,7 @@ const { isSupabaseUrl } = require("./write-guard.cjs");
 const Dropdowns = require("./dropdowns.cjs");
 const LeadImport = require("./lead-import.cjs");
 const { assignLeadRoundRobin, writeAssignmentHistory } = require("./lead-assignment.cjs");
+const PasswordReset = require("./password-reset.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -503,6 +504,14 @@ async function route(req, res, db) {
   if (req.method === "POST" && !S.csrfValid(req)) return json(res, 403, { error: "Missing request header." });
   if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { ok: true, app: "altus-crm", singleTenant: true });
   if (url.pathname === "/api/login" && req.method === "POST") return login(req, res, db);
+  if (url.pathname === "/api/password-reset/request" && req.method === "POST") {
+    let body; try { body = await readJson(req); } catch { return json(res, 200, { message: PasswordReset.GENERIC_MESSAGE }); }
+    return PasswordReset.requestPasswordReset({ body, req, res, db });
+  }
+  if (url.pathname === "/api/password-reset/complete" && req.method === "POST") {
+    let body; try { body = await readJson(req); } catch { return json(res, 400, { error: "Enter a valid token and matching password of at least 12 characters." }); }
+    return PasswordReset.completePasswordReset({ body, req, res, db });
+  }
   if (!url.pathname.startsWith("/api/") && req.method === "GET" && staticFile(req, res)) return;
   const token = S.sessionToken(req); const id = await db.sessionUser(token); const user = id ? await db.userById(id) : null;
   if (user && typeof db.query === "function") { try { user.capability_overrides = (await db.query("SELECT capability FROM user_capability_overrides WHERE user_id=$1", [user.id])).rows.map((row) => row.capability); } catch { user.capability_overrides = []; } }

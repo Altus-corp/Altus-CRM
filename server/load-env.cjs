@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const KEYS = new Set(["CRM_PG_URL", "CRM_OWNER_EMAIL", "CRM_OWNER_PASSWORD", "CRM_PORT", "CRM_HOST", "CRM_STATIC", "CRM_BEHIND_PROXY", "CRM_PUBLIC_URL", "CRM_TRUSTED_PROXIES"]);
+const KEYS = new Set(["CRM_PG_URL", "CRM_OWNER_EMAIL", "CRM_OWNER_PASSWORD", "CRM_PORT", "CRM_HOST", "CRM_STATIC", "CRM_BEHIND_PROXY", "CRM_PUBLIC_URL", "CRM_TRUSTED_PROXIES", "RESEND_API_KEY", "RESEND_FROM_EMAIL", "APP_BASE_URL", "PASSWORD_RESET_TOKEN_TTL_MINUTES"]);
 
 function loadEnv() {
   const file = path.resolve(__dirname, "..", ".env");
@@ -18,7 +18,7 @@ function loadEnv() {
   source = source.replace(/^\uFEFF/, "");
   for (const rawLine of source.split(/\n/)) {
     const line = rawLine.replace(/\r$/, "").trim();
-    const match = line.match(/^(?:export\s+)?(CRM_PG_URL|CRM_OWNER_EMAIL|CRM_OWNER_PASSWORD|CRM_PORT|CRM_HOST|CRM_STATIC|CRM_BEHIND_PROXY|CRM_PUBLIC_URL|CRM_TRUSTED_PROXIES)\s*=\s*(.*?)\s*$/);
+    const match = line.match(/^(?:export\s+)?(CRM_PG_URL|CRM_OWNER_EMAIL|CRM_OWNER_PASSWORD|CRM_PORT|CRM_HOST|CRM_STATIC|CRM_BEHIND_PROXY|CRM_PUBLIC_URL|CRM_TRUSTED_PROXIES|RESEND_API_KEY|RESEND_FROM_EMAIL|APP_BASE_URL|PASSWORD_RESET_TOKEN_TTL_MINUTES)\s*=\s*(.*?)\s*$/);
     if (!match || !KEYS.has(match[1]) || process.env[match[1]] !== undefined) continue;
     let value = match[2];
     if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
