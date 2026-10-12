@@ -15,6 +15,7 @@ const A = require("./accounts.cjs");
 const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
 const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
 const { isSupabaseUrl } = require("./write-guard.cjs");
+const Dropdowns = require("./dropdowns.cjs");
 const LeadImport = require("./lead-import.cjs");
 const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
 const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
@@ -159,12 +160,16 @@ async function leadsList(req, res, db, url) {
     "asc", "desc",
   ].includes(directionParam)) return invalidLeadsQuery(res);
   const direction = directionParam === "asc" ? "ASC" : "DESC";
-  const pageSize = integerParam(url.searchParams.get("page_size"), 50, 100); const page = integerParam(url.searchParams.get("page"), 1, 1000000); const offset = (page - 1) * pageSize;
+  const isAll = url.searchParams.get("page_size") === "all";
   const filterSql = where.length ? "WHERE " + where.join(" AND ") : "";
   const count = await db.query(`SELECT count(*)::int AS total FROM leads l ${filterSql}`, params);
+  const total = count.rows[0]?.total || 0;
+  const pageSize = isAll ? Math.max(1, total) : integerParam(url.searchParams.get("page_size"), 50, 100);
+  const page = isAll ? 1 : integerParam(url.searchParams.get("page"), 1, 1000000);
+  const offset = isAll ? 0 : (page - 1) * pageSize;
   const listParams = params.slice(); listParams.push(pageSize, offset);
   const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
-  return json(res, 200, { items: rows.rows, page, page_size: pageSize, total: count.rows[0].total, sort, direction: direction.toLowerCase(), view: view || null });
+  return json(res, 200, { items: rows.rows, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
 async function leadDetail(req, res, db, id) {
@@ -460,6 +465,20 @@ async function route(req, res, db) {
   if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: publicUser(user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
   if (url.pathname === "/api/change-password" && req.method === "POST") return changePassword(req, res, db, user);
+  if (url.pathname === "/api/dropdowns" && req.method === "GET") return safeUserOperation(res, () => Dropdowns.dropdownsList(req, res, db, user));
+  if (url.pathname === "/api/dropdowns" && req.method === "POST") return safeUserOperation(res, () => Dropdowns.createDefinition(req, res, db, user));
+  const dropdownOptionReorderMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)\/options\/reorder$/);
+  if (dropdownOptionReorderMatch && req.method === "POST") return safeUserOperation(res, () => Dropdowns.reorderOptions(req, res, db, user, decodeURIComponent(dropdownOptionReorderMatch[1])));
+  const dropdownOptionActionMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)\/options\/([^/]+)\/(deactivate)$/);
+  if (dropdownOptionActionMatch && req.method === "POST") return safeUserOperation(res, () => Dropdowns.deactivateOption(req, res, db, user, decodeURIComponent(dropdownOptionActionMatch[1]), decodeURIComponent(dropdownOptionActionMatch[2])));
+  const dropdownOptionMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)\/options\/([^/]+)$/);
+  if (dropdownOptionMatch && req.method === "POST") return safeUserOperation(res, () => Dropdowns.updateOption(req, res, db, user, decodeURIComponent(dropdownOptionMatch[1]), decodeURIComponent(dropdownOptionMatch[2])));
+  const dropdownOptionsMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)\/options$/);
+  if (dropdownOptionsMatch && req.method === "POST") return safeUserOperation(res, () => Dropdowns.createOption(req, res, db, user, decodeURIComponent(dropdownOptionsMatch[1])));
+  const dropdownDeactivateMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)\/deactivate$/);
+  if (dropdownDeactivateMatch && req.method === "POST") return safeUserOperation(res, () => Dropdowns.deactivateDefinition(req, res, db, user, decodeURIComponent(dropdownDeactivateMatch[1])));
+  const dropdownMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)$/);
+  if (dropdownMatch && req.method === "POST") return safeUserOperation(res, () => Dropdowns.updateDefinition(req, res, db, user, decodeURIComponent(dropdownMatch[1])));
   const adminMatch = url.pathname.match(/^\/api\/admin\/([^/]+)$/);
   if (adminMatch && req.method === "GET") {
     if (!requireCapability("nav.admin", user)) return json(res, 403, { error: "You do not have permission to access this resource." });

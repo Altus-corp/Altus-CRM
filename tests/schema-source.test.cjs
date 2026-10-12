@@ -10,6 +10,20 @@ test("importer does not own application table definitions", () => {
   assert.match(fs.readFileSync("migrations/001_phase0_foundation.sql", "utf8"), /CREATE TABLE IF NOT EXISTS leads/);
 });
 
+test("dropdown migration has source types, immutable values, ordering, and master backfill", () => {
+  const source = fs.readFileSync("migrations/009_dropdown_configuration.sql", "utf8");
+  assert.match(source, /CREATE TABLE IF NOT EXISTS dropdown_definitions/);
+  assert.match(source, /source_type TEXT NOT NULL DEFAULT 'managed'/);
+  assert.match(source, /CHECK \(source_type IN \('managed', 'system_locked', 'api_backed'\)\)/);
+  assert.match(source, /CREATE TABLE IF NOT EXISTS dropdown_options/);
+  assert.match(source, /prevent_dropdown_option_value_change/);
+  assert.match(source, /UNIQUE \(dropdown_id, value\)/);
+  assert.match(source, /FROM master_values mv/);
+  assert.match(source, /semantic_key/);
+  assert.match(source, /ON CONFLICT \(dropdown_id, value\) DO NOTHING/);
+  assert.doesNotMatch(source, /ON CONFLICT \(dropdown_id, value\) DO UPDATE/);
+});
+
 test("accounts migration keeps the simplified link model", () => {
   const source = fs.readFileSync("migrations/004_accounts_contacts.sql", "utf8");
   assert.match(source, /CREATE TABLE IF NOT EXISTS accounts/);

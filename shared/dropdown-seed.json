@@ -1,0 +1,127 @@
+{
+  "lead_type": [
+    { "value": "DL", "label": "DL", "sort_order": 10 },
+    { "value": "L", "label": "L", "sort_order": 20 },
+    { "value": "QDL", "label": "QDL", "sort_order": 30 },
+    { "value": "QL", "label": "QL", "sort_order": 40 },
+    { "value": "R", "label": "R", "sort_order": 50 }
+  ],
+  "lead_stage": [
+    { "value": "database", "label": "Database", "semantic_key": "database", "sort_order": 10 },
+    { "value": "lead", "label": "Lead", "semantic_key": "lead", "sort_order": 20 },
+    { "value": "qualified", "label": "Qualified", "semantic_key": "qualified", "sort_order": 30 },
+    { "value": "reference", "label": "Reference", "semantic_key": "reference", "sort_order": 40 },
+    { "value": "assigned", "label": "Assigned", "semantic_key": "assigned", "sort_order": 50 },
+    { "value": "calling", "label": "Calling", "semantic_key": "calling", "sort_order": 60 },
+    { "value": "registered", "label": "Registered", "semantic_key": "registered", "sort_order": 70 },
+    { "value": "prepso", "label": "Pre PSO", "semantic_key": "prepso", "sort_order": 80 },
+    { "value": "duringpso", "label": "During PSO", "semantic_key": "duringpso", "sort_order": 90 },
+    { "value": "attended", "label": "Attended", "semantic_key": "attended", "sort_order": 100 },
+    { "value": "notattended", "label": "Not Attended", "semantic_key": "notattended", "sort_order": 110 },
+    { "value": "psreg", "label": "Sale / Registration", "semantic_key": "psreg", "sort_order": 120 },
+    { "value": "preps", "label": "Pre PS", "semantic_key": "preps", "sort_order": 130 },
+    { "value": "billed", "label": "Billed", "semantic_key": "billed", "sort_order": 140 },
+    { "value": "pool", "label": "Pool", "semantic_key": "pool", "sort_order": 150 },
+    { "value": "completed", "label": "Completed", "semantic_key": "completed", "sort_order": 160 }
+  ],
+  "permission": [
+    { "value": "Pending", "label": "Pending", "sort_order": 10 },
+    { "value": "Yes", "label": "Yes", "sort_order": 20 },
+    { "value": "No", "label": "No", "sort_order": 30 }
+  ],
+  "related_activity": [
+    { "value": "Call - 10 Oct 2026, 10:18 AM", "label": "Call - 10 Oct 2026, 10:18 AM", "sort_order": 10 },
+    { "value": "Email - 09 Oct 2026, 04:30 PM", "label": "Email - 09 Oct 2026, 04:30 PM", "sort_order": 20 },
+    { "value": "Meeting - 08 Oct 2026, 02:00 PM", "label": "Meeting - 08 Oct 2026, 02:00 PM", "sort_order": 30 },
+    { "value": "None", "label": "None", "sort_order": 40 }
+  ],
+  "note_visibility": [
+    { "value": "Team", "label": "Team", "sort_order": 10 },
+    { "value": "Private", "label": "Private", "sort_order": 20 },
+    { "value": "Everyone", "label": "Everyone", "sort_order": 30 }
+  ],
+  "notify_before": [
+    { "value": "5 minutes before", "label": "5 minutes before", "sort_order": 10 },
+    { "value": "10 minutes before", "label": "10 minutes before", "sort_order": 20 },
+    { "value": "15 minutes before", "label": "15 minutes before", "sort_order": 30 },
+    { "value": "20 minutes before", "label": "20 minutes before", "sort_order": 40 },
+    { "value": "30 minutes before", "label": "30 minutes before", "sort_order": 50 },
+    { "value": "1 hour before", "label": "1 hour before", "sort_order": 60 },
+    { "value": "1 day before", "label": "1 day before", "sort_order": 70 }
+  ],
+  "filter_join_operator": [
+    { "value": "AND", "label": "AND", "sort_order": 10 },
+    { "value": "OR", "label": "OR", "sort_order": 20 }
+  ],
+  "filter_field": [
+    { "value": "name", "label": "Name", "sort_order": 10 },
+    { "value": "email", "label": "Email", "sort_order": 20 },
+    { "value": "phone", "label": "Phone", "sort_order": 30 },
+    { "value": "company", "label": "Company", "sort_order": 40 },
+    { "value": "stage", "label": "Stage", "sort_order": 50 },
+    { "value": "permission", "label": "Permission", "sort_order": 60 },
+    { "value": "lead_status", "label": "Lead status", "sort_order": 70 },
+    { "value": "owner", "label": "Owner", "sort_order": 80 },
+    { "value": "lead_no", "label": "Lead number", "sort_order": 90 },
+    { "value": "lead_type", "label": "Lead type", "sort_order": 100 },
+    { "value": "lead_source", "label": "Lead source", "sort_order": 110 },
+    { "value": "city", "label": "City", "sort_order": 120 },
+    { "value": "designation", "label": "Designation", "sort_order": 130 },
+    { "value": "pso_date", "label": "PSO date", "sort_order": 140 },
+    { "value": "next_follow_up_at", "label": "Next follow-up", "sort_order": 150 }
+  ],
+  "filter_operator": [
+    { "value": "equals", "label": "Equals", "sort_order": 10 },
+    { "value": "contains", "label": "Contains", "sort_order": 20 },
+    { "value": "starts_with", "label": "Starts with", "sort_order": 30 },
+    { "value": "not_equals", "label": "Does not equal", "sort_order": 40 },
+    { "value": "is_empty", "label": "Is empty", "sort_order": 50 },
+    { "value": "is_not_empty", "label": "Is not empty", "sort_order": 60 },
+    { "value": "gt", "label": "Greater than", "sort_order": 70 },
+    { "value": "gte", "label": "At least", "sort_order": 80 },
+    { "value": "lt", "label": "Less than", "sort_order": 90 },
+    { "value": "lte", "label": "At most", "sort_order": 100 }
+  ],
+  "page_size": [
+    { "value": "10", "label": "10", "sort_order": 10 },
+    { "value": "25", "label": "25", "sort_order": 20 },
+    { "value": "50", "label": "50", "sort_order": 30 },
+    { "value": "100", "label": "100", "sort_order": 40 }
+  ],
+  "follow_up_filter": [
+    { "value": "overdue", "label": "Overdue", "sort_order": 10 },
+    { "value": "today", "label": "Today", "sort_order": 20 },
+    { "value": "upcoming", "label": "Upcoming", "sort_order": 30 }
+  ],
+  "role": [
+    { "value": "Sales", "label": "Sales", "sort_order": 10 },
+    { "value": "Viewer", "label": "Viewer", "sort_order": 20 },
+    { "value": "Admin", "label": "Admin", "sort_order": 30 }
+  ],
+  "master_type": [
+    { "value": "resolution", "label": "Resolution", "sort_order": 10 },
+    { "value": "engagement_type", "label": "Engagement type", "sort_order": 20 },
+    { "value": "product", "label": "Product", "sort_order": 30 },
+    { "value": "lead_type", "label": "Lead type", "sort_order": 40 },
+    { "value": "lead_source", "label": "Lead source", "sort_order": 50 }
+  ],
+  "weekday": [
+    { "value": "1", "label": "Monday", "sort_order": 10 },
+    { "value": "2", "label": "Tuesday", "sort_order": 20 },
+    { "value": "3", "label": "Wednesday", "sort_order": 30 },
+    { "value": "4", "label": "Thursday", "sort_order": 40 },
+    { "value": "5", "label": "Friday", "sort_order": 50 },
+    { "value": "6", "label": "Saturday", "sort_order": 60 },
+    { "value": "7", "label": "Sunday", "sort_order": 70 }
+  ],
+  "workspace_setting_key": [
+    { "value": "back_to_back_no_answer_threshold", "label": "back_to_back_no_answer_threshold", "sort_order": 10 },
+    { "value": "ringing_attempts_threshold", "label": "ringing_attempts_threshold", "sort_order": 20 },
+    { "value": "back_to_back_dnd_threshold", "label": "back_to_back_dnd_threshold", "sort_order": 30 },
+    { "value": "keep_alive_frequencies_days", "label": "keep_alive_frequencies_days", "sort_order": 40 },
+    { "value": "max_videos_per_call", "label": "max_videos_per_call", "sort_order": 50 },
+    { "value": "reconfirmation_days_before", "label": "reconfirmation_days_before", "sort_order": 60 },
+    { "value": "reconfirmation_minutes_before", "label": "reconfirmation_minutes_before", "sort_order": 70 },
+    { "value": "default_pull_size", "label": "default_pull_size", "sort_order": 80 }
+  ]
+}
