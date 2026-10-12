@@ -5,7 +5,7 @@ Altus CRM is a single-tenant CRM for one company. It is not a multi-tenant SaaS 
 The application is a client-side rendered React and TypeScript UI served by Vite during development, with a Node HTTP server in `server/` and PostgreSQL for persistence. React Router provides client-side routing. There is no Next.js, Tailwind, or UI component library.
 
 ## Source of truth
- 
+
 The current Git branch is the source of truth. Do not overwrite it with older material from another project or branch. The older project at `A:\office\Workflow\Altus-CRM` and its live database on port `5433` are read-only references and must never be touched by this project.
 
 The UI conventions are defined in [docs/conventions.md](docs/conventions.md). Screen code follows `src/screens/<name>/page.tsx` for rendering and `function.tsx` for screen state and API calls. Shared code is under `src/shared/`. Colors come from `src/shared/theme/tokens.css`.
