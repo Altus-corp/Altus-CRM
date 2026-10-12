@@ -1,0 +1,7 @@
+import { useWorkspaceData } from "./function";
+import "./workspace-data.css";
+
+export function WorkspaceDataPage({ title, note, view }: { title: string; note: string; view?: string }) {
+  const screen = useWorkspaceData(view);
+  return <main className="workspace-data-page"><p className="eyebrow">Altus CRM</p><h1>{title}</h1><p className="workspace-data-note">{note}</p>{screen.loading && <section className="workspace-data-state">Loading imported data…</section>}{screen.error && <section className="workspace-data-state error">Unable to load the imported data.<button type="button" onClick={() => void screen.reload()}>Retry</button></section>}{!screen.loading && !screen.error && screen.data && <section className="workspace-data-card"><div className="workspace-data-total">{screen.data.total} records</div>{screen.data.items.length ? <div className="workspace-data-table-wrap"><table className="workspace-data-table"><thead><tr><th>Name</th><th>Company</th><th>Stage</th><th>Permission</th><th>Owner</th><th>Status</th></tr></thead><tbody>{screen.data.items.map((row) => <tr key={row.id}><td>{row.name || "—"}</td><td>{row.company || "—"}</td><td>{row.stage || "—"}</td><td>{row.permission || "—"}</td><td>{row.owner_user_id || "Unassigned"}</td><td>{row.lead_status || "—"}</td></tr>)}</tbody></table></div> : <div className="workspace-data-state">No records in this workspace.</div>}</section>}</main>;
+}

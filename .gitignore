@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+*.url
+*.key
+*.dump
+node_modules
+dist
+import/
+login.txt
+Altus-CRM.zip
+docs.zip
+backups/
+
+*.log
+visual-check/

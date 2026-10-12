@@ -1,0 +1,31 @@
+.settings-page { min-width: 0; }
+.settings-page > h1 { letter-spacing: -.04em; }
+.settings-page > p:not(.members-error) { margin-top: 8px; }
+.members-section { margin-top: 30px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-1); }
+.members-section { border-radius: var(--radius-lg); box-shadow: none; }
+.members-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.members-head h2 { margin: 0; color: var(--ink); font-family: var(--display); font-size: 20px; }
+.members-head p, .members-error { margin: 6px 0 0; color: var(--ink-2); }
+.members-section button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink-1); cursor: pointer; font-size: 12px; font-weight: 700; }
+.members-section button:hover, .members-section button:focus-visible { border-color: var(--red); color: var(--red); outline: none; box-shadow: 0 0 0 3px var(--red-tint); }
+.members-head > button, .member-form-actions button[type="submit"] { border-color: var(--red); background: var(--red); color: var(--bg); }
+.members-table { width: 100%; margin-top: 20px; border-collapse: collapse; font-size: 12px; }
+.members-table th, .members-table td { padding: 11px 8px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); text-align: left; }
+.members-table tbody tr:hover { background: var(--red-050); }
+.members-table th { color: var(--ink-2); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.members-table td:last-child { display: flex; flex-wrap: wrap; gap: 6px; }
+.member-form { display: grid; gap: 14px; max-width: 520px; margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-1); }
+.member-form h3 { margin: 0; color: var(--ink); font-family: var(--display); }
+.member-form label { display: grid; gap: 6px; color: var(--ink-1); font-size: 12px; font-weight: 700; }
+.member-form input, .member-form select { min-width: 0; min-height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); outline: none; }
+.member-form input:focus, .member-form select:focus { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
+.password-field { display: flex; min-width: 0; gap: 6px; }
+.password-field input { flex: 1; width: 100%; }
+.member-form-actions { display: flex; gap: 8px; }
+.temporary-password { display: grid; gap: 8px; margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--red-tint); color: var(--ink-1); }
+.temporary-password code { overflow-wrap: anywhere; color: var(--ink); font-family: var(--mono); }
+.master-flags { display: flex; flex-wrap: wrap; gap: 10px; color: var(--ink-1); font-size: 12px; }
+.master-flags label { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.focus-target-grid th, .focus-target-grid td { min-width: 72px; text-align: center; }
+.focus-target-grid th:first-child, .focus-target-grid td:first-child { min-width: 150px; text-align: left; }
+@media (max-width: 700px) { .members-section { padding: 16px; overflow-x: auto; } .members-head { align-items: flex-start; flex-direction: column; } .members-table { min-width: 620px; } }
