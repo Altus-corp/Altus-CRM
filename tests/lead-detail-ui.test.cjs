@@ -4,6 +4,9 @@ const fs = require("node:fs");
 
 test("Lead Details UI structure in page.tsx matches reference design", () => {
   const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  assert.match(pageSource, /<th scope="col">Status<\/th>/, "Leads table should show a status column");
+  assert.match(pageSource, /className="lead-status-select"/, "Lead status should use the table dropdown");
+  assert.match(pageSource, /updateLeadStatus/, "Lead status dropdown should save changes");
 
   // Header & eyebrow
   assert.match(pageSource, /LEAD DETAIL/, "Should include LEAD DETAIL eyebrow");

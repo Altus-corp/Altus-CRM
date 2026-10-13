@@ -133,6 +133,8 @@
 .lead-table td strong { color: var(--ink); font-size: 12px; }
 .lead-table small { color: var(--ink-2); }
 .lead-pill { min-width: 58px; justify-content: center; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--info) 18%, transparent); border-radius: 999px; background: var(--info-bg); color: var(--info); line-height: 1.1; }
+.lead-status-select { min-width: 92px; max-width: 140px; min-height: 30px; padding: 0 24px 0 10px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line)); border-radius: 999px; background: var(--panel); color: var(--red); font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.lead-status-select:disabled { cursor: wait; opacity: .65; }
 .lead-state { min-height: 152px; margin-top: 20px; border-radius: var(--radius-lg); }
 .lead-pagination { padding-top: 16px; }
 .lead-pagination > span { font-variant-numeric: tabular-nums; }
