@@ -5,6 +5,7 @@ import { useAuth } from "../../shared/auth/auth";
 import { displayRole, usePermission } from "../../shared/auth/permissions";
 import { useDropdown, type DropdownOption } from "../../shared/dropdowns/client";
 import leadColumnConfig from "../../../shared/lead-inline-columns.json";
+import { resolveLeadValue } from "../../shared/lead-field-resolver";
 
 const DEFAULT_PAGE_SIZE_OPTIONS: DropdownOption[] = [];
 export const LEAD_STATUS_OPTIONS = ["", "Pending", "New", "Contacted", "Qualified", "Converted", "Lost"] as const;
@@ -22,6 +23,47 @@ export type LeadsResponse = { items: Lead[]; page: number; page_size: number; to
 export type LeadFilters = { q: string; stage: string; permission: string; owner: string; lead_status: string; pso_date_from: string; pso_date_to: string; next_follow_up: string };
 export type QuickFilterCondition = { id: string; field: string; operator: string; value: string };
 export type SavedLeadFilter = { id: string; name: string; view: string; filters: LeadFilters; conditions?: QuickFilterCondition[]; join?: "AND" | "OR"; created_at?: string; updated_at?: string };
+const LEADS_CACHE_TTL_MS = 15_000;
+const VIEW_COUNTS_CACHE_TTL_MS = 30_000;
+const leadsCache = new Map<string, { data: LeadsResponse; savedAt: number }>();
+const leadsInFlight = new Map<string, Promise<LeadsResponse>>();
+const viewCountsCache = new Map<string, { total: number; savedAt: number }>();
+const viewCountsInFlight = new Map<string, Promise<LeadsResponse>>();
+
+function cachedLeadsRequest(query: string, force = false) {
+  const cached = leadsCache.get(query);
+  if (!force && cached && Date.now() - cached.savedAt < LEADS_CACHE_TTL_MS) return Promise.resolve(cached.data);
+  const pending = leadsInFlight.get(query);
+  if (pending) return pending;
+  const request = api<LeadsResponse>(`/api/leads?${query}`).then((data) => {
+    leadsCache.set(query, { data, savedAt: Date.now() });
+    leadsInFlight.delete(query);
+    return data;
+  }).catch((error) => {
+    leadsInFlight.delete(query);
+    throw error;
+  });
+  leadsInFlight.set(query, request);
+  return request;
+}
+
+function cachedViewCountRequest(query: string) {
+  const cached = viewCountsCache.get(query);
+  if (cached && Date.now() - cached.savedAt < VIEW_COUNTS_CACHE_TTL_MS) return Promise.resolve(cached.total);
+  const pending = viewCountsInFlight.get(query);
+  if (pending) return pending.then((response) => response.total);
+  const request = api<LeadsResponse>(`/api/leads?${query}`).then((response) => {
+    viewCountsCache.set(query, { total: response.total, savedAt: Date.now() });
+    viewCountsInFlight.delete(query);
+    return response;
+  }).catch((error) => {
+    viewCountsInFlight.delete(query);
+    throw error;
+  });
+  viewCountsInFlight.set(query, request);
+  return request.then((response) => response.total);
+}
+
 const DATE_FILTER_FIELDS = new Set(["pso_date", "next_follow_up_at", "lead_acquisition_date", "invite_date_sent", "introducer_call_date", "last_called_on", "next_call_on", "created_at", "updated_at", "last_opened_at"]);
 export function isQuickFilterDateField(key: string) { return DATE_FILTER_FIELDS.has(key); }
 export type QuickFiltersResponse = { items: SavedLeadFilter[] };
@@ -142,7 +184,7 @@ export function useLeadsScreen() {
   const queryParams = useMemo(() => { const params = new URLSearchParams({ sort: "updated_at", direction: "desc" }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); if (advancedConditions.length) params.set("advanced", JSON.stringify({ conditions: advancedConditions.map(({ id: _id, ...condition }) => condition), join: advancedJoin })); return params; }, [advancedConditions, advancedJoin, filters]);
   const query = useMemo(() => { const params = new URLSearchParams(queryParams); params.set("page", String(page)); params.set("page_size", String(pageSize)); if (view) params.set("view", view); return params.toString(); }, [page, pageSize, queryParams, view]);
   const countQueries = useMemo(() => LEAD_VIEWS.map(([key]) => { const params = new URLSearchParams(queryParams); params.set("page", "1"); params.set("page_size", "1"); if (key) params.set("view", key); return [key, params.toString()] as const; }), [queryParams]);
-  const load = useCallback(async () => { setLoading(true); setError(""); try { const [nextData, ...countResponses] = await Promise.all([api<LeadsResponse>(`/api/leads?${query}`), ...countQueries.map(([, countQuery]) => api<LeadsResponse>(`/api/leads?${countQuery}`))]); setData(nextData); setViewCounts(Object.fromEntries(countQueries.map(([key], index) => [key, countResponses[index].total]))); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to load leads."); } finally { setLoading(false); } }, [countQueries, query]);
+  const load = useCallback(async (force = false) => { setLoading(true); setError(""); try { const [nextData, ...countResponses] = await Promise.all([cachedLeadsRequest(query, force), ...countQueries.map(([, countQuery]) => cachedViewCountRequest(countQuery))]); setData(nextData); setViewCounts(Object.fromEntries(countQueries.map(([key], index) => [key, countResponses[index]]))); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to load leads."); } finally { setLoading(false); } }, [countQueries, query]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setView(LEAD_VIEWS.some(([key]) => key === requestedView) ? requestedView : ""); setPage(1); }, [requestedView]);
   useEffect(() => { if (!viewMenuOpen) return; const closeOnOutside = (event: MouseEvent) => { if (!viewMenuRef.current?.contains(event.target as Node)) setViewMenuOpen(false); }; document.addEventListener("mousedown", closeOnOutside); return () => document.removeEventListener("mousedown", closeOnOutside); }, [viewMenuOpen]);
@@ -184,9 +226,9 @@ export function useLeadsScreen() {
   async function deleteSavedFilter(id: string) { try { await api(`/api/lead-quick-filters/${encodeURIComponent(id)}`, { method: "DELETE" }); setSavedFilters((current) => current.filter((item) => item.id !== id)); if (editingQuickFilter === id) setEditingQuickFilter(null); showToast("Quick filter deleted"); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete quick filter."); } }
   function closeNewLead() { const next = new URLSearchParams(searchParams); next.delete("new"); setSearchParams(next); }
   function validateLeadForm(form: LeadFormState) { const next: Record<string, string> = {}; if (!form.first_name.trim() && !form.name.trim()) next.first_name = "First name is required."; if (!form.phone.trim()) next.phone = "Cell No is required."; else if (!/^[+\d][\d\s().-]{6,}$/.test(form.phone.trim())) next.phone = "Enter a valid phone number."; if (form.email && !/^\S+@\S+\.\S+$/.test(form.email.trim())) next.email = "Enter a valid email address."; setFormErrors(next); return Object.keys(next).length === 0; }
-  async function createNewLead(event: React.FormEvent) { event.preventDefault(); setError(""); if (!validateLeadForm(newLeadForm)) return; if (!newLeadForm.lead_type || !newLeadForm.permission || !leadTypeDropdown.options.length || !permissionDropdown.options.length) { setError("Lead options are still loading or unavailable. Choose valid values before saving."); return; } try { const { product, ...lead } = newLeadForm; await api("/api/leads", { method: "POST", body: JSON.stringify({ ...lead, name: lead.name || `${lead.first_name} ${lead.last_name}`.trim(), team: lead.team.trim(), products: product ? [{ product_code: product }] : [] }) }); setNewLeadForm({ ...EMPTY_LEAD_FORM, lead_type: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue }); setFormErrors({}); closeNewLead(); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
-  async function saveLeadEdit(event: React.FormEvent) { event.preventDefault(); if (!detail || !validateLeadForm(editForm)) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}`, { method: "PATCH", body: JSON.stringify({ ...editForm, name: editForm.name || `${editForm.first_name} ${editForm.last_name}`.trim() }) }); setEditing(false); await openDetail(detail.lead.id); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
-  async function updateLeadStatus(id: string, lead_status: string) { setStatusUpdatingId(id); setError(""); try { await api(`/api/leads/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ lead_status }) }); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to change lead status."); } finally { setStatusUpdatingId(null); } }
+  async function createNewLead(event: React.FormEvent) { event.preventDefault(); setError(""); if (!validateLeadForm(newLeadForm)) return; if (!newLeadForm.lead_type || !newLeadForm.permission || !leadTypeDropdown.options.length || !permissionDropdown.options.length) { setError("Lead options are still loading or unavailable. Choose valid values before saving."); return; } try { const { product, ...lead } = newLeadForm; await api("/api/leads", { method: "POST", body: JSON.stringify({ ...lead, name: lead.name || `${lead.first_name} ${lead.last_name}`.trim(), team: lead.team.trim(), products: product ? [{ product_code: product }] : [] }) }); setNewLeadForm({ ...EMPTY_LEAD_FORM, lead_type: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue }); setFormErrors({}); closeNewLead(); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
+  async function saveLeadEdit(event: React.FormEvent) { event.preventDefault(); if (!detail || !validateLeadForm(editForm)) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}`, { method: "PATCH", body: JSON.stringify({ ...editForm, name: editForm.name || `${editForm.first_name} ${editForm.last_name}`.trim() }) }); setEditing(false); await openDetail(detail.lead.id); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save lead."); } }
+  async function updateLeadStatus(id: string, lead_status: string) { setStatusUpdatingId(id); setError(""); try { await api(`/api/leads/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ lead_status }) }); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to change lead status."); } finally { setStatusUpdatingId(null); } }
   async function updateLeadField(id: string, field: string, value: unknown) {
     const column = LEAD_COLUMNS.find((candidate) => candidate.key === field);
     if (!column?.editable) throw new Error("This column is read-only.");
@@ -195,18 +237,18 @@ export function useLeadsScreen() {
     setDetail((current) => current?.lead.id === id ? { ...current, lead: { ...current.lead, ...response.lead } } : current);
     return response.lead;
   }
-  async function updateStage(stage: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/stage`, { method: "POST", body: JSON.stringify({ stage }) }); await openDetail(detail.lead.id); await load(); } catch { setError("Unable to change lead stage."); } }
-  async function updatePermission(permission: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/permission`, { method: "POST", body: JSON.stringify({ permission }) }); await openDetail(detail.lead.id); await load(); } catch { setError("Unable to change permission."); } }
-  async function reassignByRoundRobin() { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/round-robin`, { method: "POST", body: JSON.stringify({}) }); await openDetail(detail.lead.id); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to reassign lead."); } }
+  async function updateStage(stage: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/stage`, { method: "POST", body: JSON.stringify({ stage }) }); await openDetail(detail.lead.id); await load(true); } catch { setError("Unable to change lead stage."); } }
+  async function updatePermission(permission: string) { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/permission`, { method: "POST", body: JSON.stringify({ permission }) }); await openDetail(detail.lead.id); await load(true); } catch { setError("Unable to change permission."); } }
+  async function reassignByRoundRobin() { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/round-robin`, { method: "POST", body: JSON.stringify({}) }); await openDetail(detail.lead.id); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to reassign lead."); } }
   async function convertLead() { if (!detail) return; try { await api(`/api/leads/${encodeURIComponent(detail.lead.id)}/convert-account`, { method: "POST", body: JSON.stringify({}) }); setError("Lead converted to an account and contact."); await openDetail(detail.lead.id); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to convert lead."); } }
-  async function archiveLeads(ids: string[]) { try { const result = await api<{ archived: number }>("/api/leads/bulk-archive", { method: "POST", body: JSON.stringify({ ids }) }); clearSelection(); setDetail(null); showToast(`${result.archived} lead${result.archived === 1 ? "" : "s"} archived`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to archive leads."); } }
-  async function permanentlyDeleteLeads(ids: string[]) { try { const result = await api<{ deleted: number }>("/api/leads/bulk-delete", { method: "POST", body: JSON.stringify({ ids, confirmation: "DELETE" }) }); clearSelection(); setDetail(null); showToast(`${result.deleted} lead${result.deleted === 1 ? "" : "s"} permanently deleted`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete leads."); } }
+  async function archiveLeads(ids: string[]) { try { const result = await api<{ archived: number }>("/api/leads/bulk-archive", { method: "POST", body: JSON.stringify({ ids }) }); clearSelection(); setDetail(null); showToast(`${result.archived} lead${result.archived === 1 ? "" : "s"} archived`); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to archive leads."); } }
+  async function permanentlyDeleteLeads(ids: string[]) { try { const result = await api<{ deleted: number }>("/api/leads/bulk-delete", { method: "POST", body: JSON.stringify({ ids, confirmation: "DELETE" }) }); clearSelection(); setDetail(null); showToast(`${result.deleted} lead${result.deleted === 1 ? "" : "s"} permanently deleted`); await load(true); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to delete leads."); } }
   function openBulkUpload() { setBulkUploadOpen(true); setBulkError(""); setBulkResult(null); }
   function closeBulkUpload() { if (!bulkLoading) { setBulkUploadOpen(false); setBulkFile(null); setBulkPreview(null); setBulkResult(null); setBulkError(""); } }
   async function downloadBulkTemplate(format: "xlsx" | "csv" = "xlsx") { const response = await fetch(`/api/leads/import/template?format=${format}`, { credentials: "same-origin" }); if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || "Unable to download the sample file."); } const blob = await response.blob(); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `altus-leads-sample.${format}`; link.click(); URL.revokeObjectURL(link.href); }
   async function uploadRequest(path: string, file: File, hash?: string) { const headers: Record<string, string> = { "Content-Type": "application/octet-stream", "X-Altus": "1", "X-Altus-Filename": file.name, ...(bulkAllowDuplicates ? { "X-Altus-Allow-Duplicates": "1" } : {}) }; if (hash) headers["X-Altus-File-Hash"] = hash; const response = await fetch(path, { method: "POST", credentials: "same-origin", headers, body: await file.arrayBuffer() }); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || "Request failed."); return body; }
   async function previewBulkUpload(file: File) { setBulkFile(file); setBulkPreview(null); setBulkResult(null); setBulkError(""); setBulkLoading(true); try { setBulkPreview(await uploadRequest("/api/leads/import/preview", file)); } catch (cause) { setBulkError(cause instanceof Error ? cause.message : "Unable to preview the file."); } finally { setBulkLoading(false); } }
-  async function applyBulkUpload() { if (!bulkFile || !bulkPreview) return; setBulkLoading(true); setBulkError(""); try { setBulkResult(await uploadRequest("/api/leads/import/apply", bulkFile, bulkPreview.file_hash)); await load(); } catch (cause) { setBulkError(cause instanceof Error ? cause.message : "Unable to apply the file."); } finally { setBulkLoading(false); } }
+  async function applyBulkUpload() { if (!bulkFile || !bulkPreview) return; setBulkLoading(true); setBulkError(""); try { setBulkResult(await uploadRequest("/api/leads/import/apply", bulkFile, bulkPreview.file_hash)); await load(true); } catch (cause) { setBulkError(cause instanceof Error ? cause.message : "Unable to apply the file."); } finally { setBulkLoading(false); } }
   function openViewMenu() { setActiveViewIndex(Math.max(0, VIEW_OPTIONS.findIndex(([key]) => key === view))); setViewMenuOpen(true); }
   function closeViewMenu(restoreFocus = false) { setViewMenuOpen(false); if (restoreFocus) requestAnimationFrame(() => viewButtonRef.current?.focus()); }
   function chooseView(next: string) { setPage(1); setView(next); closeViewMenu(true); }
@@ -224,10 +266,5 @@ export function useLeadsScreen() {
 
 export function fieldValue(lead: Lead, key: string) {
   if (key === "businessCategory") key = "business_category";
-  if (key === "lastCalledOn" || key === "last_called_on") return lead.last_call_at ?? lead.custom_values?.last_called_on ?? null;
-  const direct: Record<string, unknown> = { leadNo: lead.lead_no, leadTypeCode: lead.lead_type, name: lead.name, firstName: lead.first_name, first_name: lead.first_name, lastName: lead.last_name, last_name: lead.last_name, company: lead.company, cellNo: lead.phone, email: lead.email, designation: lead.designation, city: lead.city, leadSource: lead.lead_source, sourceSystem: lead.source_system, permission: lead.permission, psoDate: lead.pso_date, lastCalledOn: lead.last_call_at, nextFollowUpAt: lead.next_follow_up_at, owner: lead.owner_user_id, isPrePsDone: lead.is_pre_ps_done };
-  if (direct[key] !== undefined) return key === "leadTypeCode" ? ({ DL: "Direct Lead", L: "Lead", QDL: "Qualified Direct Lead", QL: "Qualified Lead", R: "Referral" } as Record<string, string>)[String(direct[key])] || direct[key] : direct[key];
-  const configured = lead.custom_values?.lead_fields;
-  if (configured && typeof configured === "object" && !Array.isArray(configured) && key in configured) return (configured as Record<string, unknown>)[key];
-  return lead.custom_values?.[key] ?? lead.legacy_finance?.[key] ?? null;
+  return resolveLeadValue(lead, key);
 }

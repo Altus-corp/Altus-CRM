@@ -1,21 +1,26 @@
 "use strict";
 
+const { sqlExpression } = require("../shared/lead-field-resolver.cjs");
+
 const QUICK_FILTER_FIELDS = Object.freeze({
-  name: { label: "Name", sql: "l.name", kind: "text" },
-  email: { label: "Email", sql: "l.email", kind: "text" },
-  phone: { label: "Phone", sql: "l.phone", kind: "text" },
-  company: { label: "Company", sql: "l.company", kind: "text" },
-  stage: { label: "Stage", sql: "l.stage", kind: "text" },
-  permission: { label: "Permission", sql: "l.permission", kind: "text" },
-  lead_status: { label: "Lead status", sql: "l.lead_status", kind: "text" },
-  owner: { label: "Owner", sql: "l.owner_user_id", kind: "text" },
-  lead_no: { label: "Lead number", sql: "l.lead_no", kind: "text" },
-  lead_type: { label: "Lead type", sql: "l.lead_type", kind: "text" },
-  lead_source: { label: "Lead source", sql: "l.lead_source", kind: "text" },
-  city: { label: "City", sql: "l.city", kind: "text" },
-  designation: { label: "Designation", sql: "l.designation", kind: "text" },
-  pso_date: { label: "PSO date", sql: "l.pso_date", kind: "date" },
-  next_follow_up_at: { label: "Next follow-up", sql: "l.next_follow_up_at", kind: "date" },
+  name: { label: "Name", sql: sqlExpression("name"), kind: "text" },
+  email: { label: "Email", sql: sqlExpression("email"), kind: "text" },
+  phone: { label: "Phone", sql: sqlExpression("phone"), kind: "text" },
+  company: { label: "Company", sql: sqlExpression("company"), kind: "text" },
+  stage: { label: "Stage", sql: sqlExpression("stage"), kind: "text" },
+  permission: { label: "Permission", sql: sqlExpression("permission"), kind: "text" },
+  lead_status: { label: "Lead status", sql: sqlExpression("lead_status"), kind: "text" },
+  owner: { label: "Owner", sql: sqlExpression("owner"), kind: "text" },
+  lead_no: { label: "Lead number", sql: sqlExpression("leadNo"), kind: "text" },
+  lead_type: { label: "Lead type", sql: sqlExpression("leadTypeCode"), kind: "text" },
+  lead_source: { label: "Lead source", sql: sqlExpression("leadSource"), kind: "text" },
+  city: { label: "City", sql: sqlExpression("city"), kind: "text" },
+  designation: { label: "Designation", sql: sqlExpression("designation"), kind: "text" },
+  business_category: { label: "Business category", sql: sqlExpression("business_category"), kind: "text" },
+  industry: { label: "Industry", sql: sqlExpression("industry"), kind: "text" },
+  rating: { label: "Rating", sql: sqlExpression("rating"), kind: "text" },
+  pso_date: { label: "PSO date", sql: sqlExpression("psoDate"), kind: "date" },
+  next_follow_up_at: { label: "Next follow-up", sql: sqlExpression("nextFollowUpAt"), kind: "date" },
 });
 
 const QUICK_FILTER_OPERATORS = Object.freeze({

@@ -8,6 +8,7 @@ import { DropdownSelect } from "../../shared/dropdowns/component";
 import "./leads.css";
 
 const LEADS_COLUMN_PREFERENCE_KEY = "leads.columns.v1";
+const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 function columnStorageKey(userId: string) { return `${LEADS_COLUMN_PREFERENCE_KEY}:${userId}`; }
 function readStoredColumns(userId: string | undefined): unknown {
@@ -45,8 +46,8 @@ function formatSystemDate(value: unknown) {
 }
 
 function fieldOrFallback(value: unknown, fallback: string) {
-  const displayed = displayField(value);
-  return displayed === "—" || !displayed ? fallback : displayed;
+  void fallback;
+  return displayField(value);
 }
 
 function activityValue(value: unknown, _key?: string) { return value == null || value === "" ? "—" : String(value); }
@@ -521,19 +522,17 @@ export function LeadsPage() {
 
   // Add Note composer state matching reference design
   const [noteType, setNoteType] = useState<"general" | "call" | "meeting" | "handoff">("general");
-  const [noteText, setNoteText] = useState(
-    "Nikhil wants a 30-minute product walkthrough next week.\nKey interest: team productivity reporting and follow-up tracking.\nShare proposal before the demo."
-  );
+  const [noteText, setNoteText] = useState("");
   const [relatedActivity, setRelatedActivity] = useState("");
-  const [noteTags, setNoteTags] = useState<string[]>(["Warm lead", "Demo requested"]);
+  const [noteTags, setNoteTags] = useState<string[]>([]);
   const [noteVisibility, setNoteVisibility] = useState("");
   const [pinToLead, setPinToLead] = useState(true);
   const [setReminder, setSetReminder] = useState(true);
-  const [reminderDate, setReminderDate] = useState("2026-10-13");
-  const [reminderTime, setReminderTime] = useState("10:00");
+  const [reminderDate, setReminderDate] = useState("");
+  const [reminderTime, setReminderTime] = useState("");
   const [reminderNotify, setReminderNotify] = useState("");
   const [showInHistory, setShowInHistory] = useState(true);
-  const [noteAttachments, setNoteAttachments] = useState<string[]>(["Productivity-Shastra-overview.pdf"]);
+  const [noteAttachments, setNoteAttachments] = useState<string[]>([]);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [savedNotesList, setSavedNotesList] = useState<
     Array<{
@@ -545,17 +544,7 @@ export function LeadsPage() {
       createdAt: string;
       attachments: string[];
     }>
-  >([
-    {
-      id: "note-init-1",
-      type: "general",
-      text: "Nikhil wants a 30-minute product walkthrough next week.\nKey interest: team productivity reporting and follow-up tracking.\nShare proposal before the demo.",
-      tags: ["Warm lead", "Demo requested"],
-      pinned: true,
-      createdAt: "Today, 10:25 AM",
-      attachments: ["Productivity-Shastra-overview.pdf"],
-    },
-  ]);
+  >([]);
   const [noteSavedFeedback, setNoteSavedFeedback] = useState(false);
 
   // Redesigned Add Activity drawer state
@@ -587,14 +576,12 @@ export function LeadsPage() {
     };
   }, [activityTypeDropdownOpen]);
 
-  const [activityDetailsText, setActivityDetailsText] = useState(
-    "Interested in a product walkthrough next week. Asked to share the proposal before the demo."
-  );
+  const [activityDetailsText, setActivityDetailsText] = useState("");
   const [activityAttachments, setActivityAttachments] = useState<string[]>([]);
   const [addFollowUpTask, setAddFollowUpTask] = useState(true);
-  const [followUpTitle, setFollowUpTitle] = useState("Send proposal and confirm demo time");
-  const [followUpDueDate, setFollowUpDueDate] = useState("2026-10-13");
-  const [followUpDueTime, setFollowUpDueTime] = useState("11:00");
+  const [followUpTitle, setFollowUpTitle] = useState("");
+  const [followUpDueDate, setFollowUpDueDate] = useState("");
+  const [followUpDueTime, setFollowUpDueTime] = useState("");
   const [followUpAssignee, setFollowUpAssignee] = useState("");
   const [sendNotification, setSendNotification] = useState(true);
   const [notifyMe, setNotifyMe] = useState(true);
@@ -611,9 +598,9 @@ export function LeadsPage() {
 
   // Dedicated Follow-up tab state
   const [showFollowUpForm, setShowFollowUpForm] = useState(false);
-  const [followUpDate, setFollowUpDate] = useState("2026-10-10");
-  const [followUpTime, setFollowUpTime] = useState("11:00");
-  const [followUpNote, setFollowUpNote] = useState("Discuss demo feedback, proposal, and next steps.");
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpTime, setFollowUpTime] = useState("");
+  const [followUpNote, setFollowUpNote] = useState("");
   const [followUpNotifyApp, setFollowUpNotifyApp] = useState(true);
   const [followUpNotifyEmail, setFollowUpNotifyEmail] = useState(false);
   const [savedFollowUpsList, setSavedFollowUpsList] = useState<
@@ -627,18 +614,7 @@ export function LeadsPage() {
       notifyEmail: boolean;
       createdAt: string;
     }>
-  >([
-    {
-      id: "fu-init-1",
-      dueDate: "13 Oct 2026",
-      dueTime: "11:00 AM",
-      status: "Upcoming",
-      note: "Send proposal and confirm walkthrough demo time with Nikhil Shah.",
-      notifyApp: true,
-      notifyEmail: false,
-      createdAt: "Today, 10:35 AM",
-    },
-  ]);
+  >([]);
   const [followUpSavedFeedback, setFollowUpSavedFeedback] = useState(false);
   const [detailsMoreOpen, setDetailsMoreOpen] = useState(false);
   const [additionalFieldsOpen, setAdditionalFieldsOpen] = useState(false);
@@ -723,7 +699,7 @@ export function LeadsPage() {
   function archiveSelectedLeads() { if (selectedIds.length && window.confirm(`Archive ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}? You can restore archived data later through an administrator.`)) void screen.archiveLeads(selectedIds); }
   function deleteSelectedLeads() { if (!selectedIds.length) return; const accepted = window.confirm(`Permanently delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}, including their linked activity? This cannot be undone.`); if (!accepted) return; if (window.prompt('Type DELETE to permanently remove the selected leads.') === "DELETE") void screen.permanentlyDeleteLeads(selectedIds); }
   const selectedLead = screen.detail?.lead;
-  const leadName = String(selectedLead?.name || "");
+  const leadName = String(fieldValue(selectedLead!, "name") || "");
   const leadFullName = leadName.trim();
   const placeholderLeadName = /^imported\s+lead$/i.test(leadFullName);
   const nameParts = placeholderLeadName ? [] : leadFullName.split(/\s+/).filter(Boolean);
@@ -734,14 +710,14 @@ export function LeadsPage() {
   const placeholderSplitName = placeholderLeadName && /^imported$/i.test(rawFirstName) && /^lead$/i.test(rawLastName);
   const leadFirstName = placeholderSplitName ? "" : rawFirstName || derivedFirstName;
   const leadLastName = placeholderSplitName ? "" : rawLastName || derivedLastName;
-  const leadStatus = String(selectedLead?.lead_status || selectedLead?.stage || "Not set");
-  const leadSource = String(selectedLead?.lead_source || "Not provided");
-  const ownerName = String(selectedLead?.owner_name || selectedLead?.owner_user_id || "Unassigned");
+  const leadStatus = displayField(fieldValue(selectedLead!, "lead_status"));
+  const leadSource = displayField(fieldValue(selectedLead!, "leadSource"));
+  const ownerName = displayField(fieldValue(selectedLead!, "owner"));
   const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
   return <div className="leads-page">
 
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
-    <header className="leads-header manage-header"><div className="manage-heading"><h1>Manage Leads</h1><button className="manage-refresh" type="button" onClick={() => void screen.load()} aria-label="Refresh leads" title="Refresh leads">↻</button></div><div className="manage-actions"><button className="leads-button secondary manage-bulk-upload" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button><button className="leads-button manage-quick-add" type="button" onClick={() => navigate("/leads?new=1")}>Quick Add Lead</button><button className="leads-button manage-add" type="button" onClick={() => navigate("/leads?new=1")}>＋ Add New Lead</button><div className="manage-overflow-wrap"><button className="leads-button manage-overflow" type="button" aria-label="More lead actions" aria-expanded={overflowOpen} onClick={() => setOverflowOpen((value) => !value)}>⋯</button>{overflowOpen && <div className="manage-overflow-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); void screen.load(); }}>Refresh</button>{screen.filtersActive && <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); screen.clearFilters(); }}>Clear filters</button>}</div>}</div></div></header>
+    <header className="leads-header manage-header"><div className="manage-heading"><h1>Manage Leads</h1><button className="manage-refresh" type="button" onClick={() => void screen.load(true)} aria-label="Refresh leads" title="Refresh leads">↻</button></div><div className="manage-actions"><button className="leads-button secondary manage-bulk-upload" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button><button className="leads-button manage-quick-add" type="button" onClick={() => navigate("/leads?new=1")}>Quick Add Lead</button><button className="leads-button manage-add" type="button" onClick={() => navigate("/leads?new=1")}>＋ Add New Lead</button><div className="manage-overflow-wrap"><button className="leads-button manage-overflow" type="button" aria-label="More lead actions" aria-expanded={overflowOpen} onClick={() => setOverflowOpen((value) => !value)}>⋯</button>{overflowOpen && <div className="manage-overflow-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); void screen.load(true); }}>Refresh</button>{screen.filtersActive && <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); screen.clearFilters(); }}>Clear filters</button>}</div>}</div></div></header>
     {screen.newLeadOpen && <form className="lead-create-form" onSubmit={(event) => void screen.createNewLead(event)}><div className="drawer-head"><h2>New lead</h2><button className="icon-button" type="button" onClick={screen.closeNewLead} aria-label="Close new lead form"><CloseIcon /></button></div><label>Name<input required value={screen.newLeadForm.name} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" value={screen.newLeadForm.email} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input value={screen.newLeadForm.phone} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input value={screen.newLeadForm.company} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Team<input value={screen.newLeadForm.team} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, team: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} value={screen.newLeadForm.lead_type} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, lead_type: value }))} /></label><label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} value={screen.newLeadForm.permission} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, permission: value }))} /></label><label>Product<select value={screen.newLeadForm.product} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, product: event.target.value }))}><option value="">Select product</option>{screen.products.map((product) => <option key={product.id} value={product.code}>{product.label}</option>)}</select></label><button className="leads-button" type="submit">Create lead</button></form>}
     {screen.newLeadOpen && <div className="quick-add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeNewLead(); }}><div className="quick-add-modal" aria-labelledby="quick-add-title">
       <div className="quick-add-header"><div className="quick-add-title-wrap"><div className="quick-add-icon"><UserIcon /></div><div><h2 id="quick-add-title">Quick Add Lead</h2><p>Add a new lead to your pipeline</p></div></div><button className="quick-add-close" type="button" onClick={screen.closeNewLead} aria-label="Close quick add lead"><CloseIcon /></button></div>
@@ -864,7 +840,7 @@ export function LeadsPage() {
         <label className="lead-search"><span>Search</span><input className="lead-control" value={screen.filters.q} onChange={(event) => screen.updateFilter("q", event.target.value)} placeholder="Name, company, email or lead number" /></label><label><span>Stage</span><DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="All stages" value={screen.filters.stage} onValueChange={(value) => screen.updateFilter("stage", value)} /></label><label><span>Permission</span><DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" includeEmpty emptyLabel="All" value={screen.filters.permission} onValueChange={(value) => screen.updateFilter("permission", value)} /></label>
       </div><div className="lead-filter-secondary"><label><span>Owner</span><input className="lead-control" value={screen.filters.owner} onChange={(event) => screen.updateFilter("owner", event.target.value)} placeholder="Owner" /></label><label><span>Lead status</span><input className="lead-control" value={screen.filters.lead_status} onChange={(event) => screen.updateFilter("lead_status", event.target.value)} placeholder="Any status" /></label><label><span>PSO from</span><input className="lead-control" type="date" value={screen.filters.pso_date_from} onChange={(event) => screen.updateFilter("pso_date_from", event.target.value)} /></label><label><span>PSO to</span><input className="lead-control" type="date" value={screen.filters.pso_date_to} onChange={(event) => screen.updateFilter("pso_date_to", event.target.value)} /></label><label><span>Follow-up</span><DropdownSelect dropdownKey="follow_up_filter" className="lead-control" includeEmpty emptyLabel="Any" value={screen.filters.next_follow_up} onValueChange={(value) => screen.updateFilter("next_follow_up", value)} /></label>{screen.filtersActive && <button className="leads-button clear-filters" type="button" onClick={screen.clearFilters}>Clear filters</button>}</div>
     </section>
-    {screen.error && <div className="lead-state error" role="alert"><span>{screen.error}</span><button className="leads-button secondary" onClick={() => void screen.load()}>Retry</button></div>}{screen.loading && <div className="lead-state">Loading leads…</div>}{!screen.loading && !screen.error && screen.data?.items.length === 0 && <div className="lead-state"><strong>No leads in this view.</strong><span>Try another view or clear a filter.</span></div>}
+    {screen.error && <div className="lead-state error" role="alert"><span>{screen.error}</span><button className="leads-button secondary" onClick={() => void screen.load(true)}>Retry</button></div>}{screen.loading && <div className="lead-state">Loading leads…</div>}{!screen.loading && !screen.error && screen.data?.items.length === 0 && <div className="lead-state"><strong>No leads in this view.</strong><span>Try another view or clear a filter.</span></div>}
     {!screen.loading && !screen.error && !!screen.data?.items.length && <><div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="menu" onClick={() => setColumnChooserOpen((open) => !open)}>☷ <span>Columns</span></button>{columnChooserOpen && <div className="lead-column-menu" role="menu" aria-label="Choose columns">
               <div className="col-menu-search-wrap">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -902,7 +878,7 @@ export function LeadsPage() {
         </span>
         <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
-    )}<div className="lead-table-wrap"><table className="lead-table"><thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" /></label></th>{fields.map((field) => <th key={field.key} scope="col">{field.label}</th>)}<th scope="col">Status</th></tr></thead><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; return <tr key={lead.id} tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} onClick={(event) => event.stopPropagation()} /></td>{fields.map((field) => <td key={field.key} onClick={(event) => event.stopPropagation()}>{field.key === "name" ? <><strong><InlineLeadCell lead={lead} column={field} canEdit={screen.canEdit} dropdownOptions={screen.dropdownOptions} onSave={(key, value) => screen.updateLeadField(lead.id, key, value)} /></strong><small>{displayField(lead.lead_status || lead.email)}</small></> : <InlineLeadCell lead={lead} column={field} canEdit={screen.canEdit} dropdownOptions={screen.dropdownOptions} onSave={(key, value) => screen.updateLeadField(lead.id, key, value)} />}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={screen.statusUpdatingId === lead.id} onChange={(event) => void screen.updateLeadStatus(lead.id, event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>; })}</tbody></table></div></>}
+    )}<div className="lead-table-wrap"><table className="lead-table"><thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" /></label></th>{fields.map((field) => <th key={field.key} scope="col">{field.label}</th>)}<th scope="col">Status</th></tr></thead><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; return <tr key={lead.id} tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} onClick={(event) => event.stopPropagation()} /></td>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : displayField(fieldValue(lead, field.key))}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={screen.statusUpdatingId === lead.id} onChange={(event) => void screen.updateLeadStatus(lead.id, event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>; })}</tbody></table></div></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
@@ -923,7 +899,7 @@ export function LeadsPage() {
             <div className="lead-detail-header">
               <div className="lead-detail-title-group">
                 <span className="lead-detail-eyebrow">LEAD DETAIL</span>
-                <h2 className="lead-detail-title">{screen.detail.lead.name || "Nikhil Shah"}</h2>
+                <h2 className="lead-detail-title">{displayField(fieldValue(selectedLead!, "name"))}</h2>
               </div>
               <button
                 className="lead-detail-close-btn"
@@ -1428,7 +1404,7 @@ export function LeadsPage() {
                   )}
                 </div>
               ) : (
-                <><LeadTimeline detail={screen.detail} leadName={leadName} ownerName={ownerName} />{false && <>
+                <><LeadTimeline detail={screen.detail} leadName={leadName} ownerName={ownerName} />{SHOW_DEMO_TIMELINE && <>
                 <div className="lead-timeline-container" aria-label="Lead timeline">
                   <div className="lead-timeline-rail" />
 
@@ -1505,7 +1481,7 @@ export function LeadsPage() {
                     </div>
                   </div>
 
-                  {/* 5. Aarav Mehta called Nikhil Shah */}
+                  {/* 5. Owner called the lead */}
                   <div className="lead-timeline-item">
                     <div className="lead-timeline-node red-node" aria-hidden="true">
                       <CallIcon />
@@ -1614,7 +1590,7 @@ export function LeadsPage() {
                   <div className="lead-details-hero-name-wrap">
                     <strong className="lead-details-hero-name">{leadName}</strong>
                     <span className="lead-details-hero-stage-pill">
-                      {fieldOrFallback(selectedLead?.stage || selectedLead?.lead_status, "Fresh lead")}
+                      {displayField(fieldValue(selectedLead!, "stage"))}
                     </span>
                   </div>
                 </div>
@@ -1656,23 +1632,19 @@ export function LeadsPage() {
                   <div className="lead-details-item">
                     <span className="lead-details-label">Mobile</span>
                     <span className="lead-details-value">
-                      {selectedLead?.phone || "+91 86594 16729"}
+                      {displayField(fieldValue(selectedLead!, "phone"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Email</span>
                     <span className="lead-details-value">
-                      {selectedLead?.email || "nikhil.shah@email.com"}
+                      {displayField(fieldValue(selectedLead!, "email"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Preferred contact</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        (selectedLead as any)?.preferred_contact ||
-                          fieldValue(selectedLead!, "preferred_contact"),
-                        "WhatsApp"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "preferred_contact"))}
                     </span>
                   </div>
                 </div>
@@ -1685,38 +1657,25 @@ export function LeadsPage() {
                   <div className="lead-details-item">
                     <span className="lead-details-label">Company</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        fieldValue(selectedLead!, "company"),
-                        "Fresh Nutrition"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "company"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Designation</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        fieldValue(selectedLead!, "designation"),
-                        "Employee"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "designation"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Location</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        fieldValue(selectedLead!, "city"),
-                        "Mumbai, Maharashtra"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "city"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Industry</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        (selectedLead as any)?.industry ||
-                          fieldValue(selectedLead!, "industry"),
-                        "Health & wellness"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "industry"))}
                     </span>
                   </div>
                 </div>
@@ -1729,39 +1688,25 @@ export function LeadsPage() {
                   <div className="lead-details-item">
                     <span className="lead-details-label">Lead stage</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        fieldValue(selectedLead!, "stage"),
-                        "New"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "stage"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Lead temperature</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        (selectedLead as any)?.temperature ||
-                          fieldValue(selectedLead!, "temperature"),
-                        "Warm"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "temperature"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Interest</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        (selectedLead as any)?.interest ||
-                          fieldValue(selectedLead!, "interest"),
-                        "Productivity Shastra Orientation"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "interest"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
                     <span className="lead-details-label">Expected decision date</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        fieldValue(selectedLead!, "psoDate"),
-                        "31 Oct 2026"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "psoDate"))}
                     </span>
                   </div>
                 </div>
@@ -1778,11 +1723,7 @@ export function LeadsPage() {
                   <div className="lead-details-item">
                     <span className="lead-details-label">Campaign</span>
                     <span className="lead-details-value">
-                      {fieldOrFallback(
-                        (selectedLead as any)?.campaign ||
-                          fieldValue(selectedLead!, "campaign"),
-                        "Productivity Shastra - October"
-                      )}
+                      {displayField(fieldValue(selectedLead!, "campaign"))}
                     </span>
                   </div>
                   <div className="lead-details-item">
@@ -1821,7 +1762,7 @@ export function LeadsPage() {
               </div>
 
               <div className="lead-details-section lead-system-info"><div className="lead-details-section-header">System info</div><div className="lead-details-grid">{SYSTEM_LEAD_FIELDS.map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{formatSystemDate(selectedLead?.[field.key])}</span></div>)}</div></div>
-              <div className="lead-details-section"><div className="lead-details-section-header">Lead relationship details</div><div className="lead-details-grid">{ADDITIONAL_LEAD_FIELDS.map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{displayField(selectedLead?.[field.key])}</span></div>)}</div><p className="lead-form-todo">TODO Phase 2: unsupported fields will become server-backed after migration/API approval.</p></div>
+              <div className="lead-details-section"><div className="lead-details-section-header">Lead relationship details</div><div className="lead-details-grid">{ADDITIONAL_LEAD_FIELDS.map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, field.key))}</span></div>)}</div><p className="lead-form-todo">TODO Phase 2: unsupported fields will become server-backed after migration/API approval.</p></div>
 
               {/* 5. Additional fields (6) collapsible */}
               <div className="lead-details-accordion">
