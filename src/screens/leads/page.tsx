@@ -1484,6 +1484,20 @@ export function LeadsPage() {
                 </div>
               </div>
 
+              <div className="lead-details-section">
+                <div className="lead-details-section-header">Acquisition &amp; relationship details</div>
+                <div className="lead-details-grid">
+                  <div className="lead-details-item">
+                    <span className="lead-details-label">Lead No</span>
+                    <span className="lead-details-value">{displayField(fieldValue(selectedLead!, "leadNo"))}</span>
+                  </div>
+                  {screen.leadFields.filter((field) => field.active && field.detail_visible).map((field) => <div className="lead-details-item" key={field.key}>
+                    <span className="lead-details-label">{field.label}</span>
+                    <span className="lead-details-value">{displayField(fieldValue(selectedLead!, field.key))}</span>
+                  </div>)}
+                </div>
+              </div>
+
               {/* 5. Additional fields (6) collapsible */}
               <div className="lead-details-accordion">
                 <button

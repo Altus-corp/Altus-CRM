@@ -20,6 +20,7 @@ const LeadImport = require("./lead-import.cjs");
 const { assignLeadRoundRobin, writeAssignmentHistory } = require("./lead-assignment.cjs");
 const PasswordReset = require("./password-reset.cjs");
 const Integrations = require("./integrations.cjs");
+const LeadFields = require("./lead-fields.cjs");
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -304,6 +305,12 @@ async function findLeadDuplicates(db, phone, email, excludeId = null) {
   const rows = await db.query("SELECT id FROM leads WHERE (($1::text IS NOT NULL AND phone = $1::text) OR ($2::text IS NOT NULL AND lower(email) = lower($2::text))) AND ($3::text IS NULL OR id <> $3::text) ORDER BY id ASC", [phone || null, email || null, excludeId]);
   return rows.rows;
 }
+async function leadFieldsList(res, db) { return json(res, 200, { fields: await LeadFields.getDefinitions(db) }); }
+async function leadFieldsWrite(req, res, db, actor) {
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid lead field settings."); }
+  try { return json(res, 200, { fields: await LeadFields.saveDefinitions(db, actor, body.fields, req.socket.remoteAddress) }); }
+  catch (error) { return userWriteError(res, error.status || 500, error.status ? error.message : "Unable to save lead fields."); }
+}
 function leadFields(body) {
   const type = leadTypeValue(body.lead_type); if (!type) return null;
   const name = String(body.name || "").trim(); if (!name) return null;
@@ -316,6 +323,7 @@ async function createLead(req, res, db, actor) {
   try { body = await readJson(req); } catch { return invalidLead(res); }
   if (body.permission && body.permission !== "Pending" && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
   const fields = leadFields(body); if (!fields || !(await validDropdownValue(db, "lead_type", fields.lead_type)) || !(await validDropdownValue(db, "lead_stage", fields.stage)) || !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res);
+  fields.custom_values = LeadFields.mergeLeadValues(fields.custom_values, body.lead_fields, await LeadFields.getDefinitions(db));
   const duplicates = await findLeadDuplicates(db, fields.phone, fields.email);
   if (duplicates.length && body.duplicate_action !== "merge") return duplicateLeadError(res);
   let products;
@@ -340,7 +348,7 @@ async function createLead(req, res, db, actor) {
   }
 }
 async function updateLead(req, res, db, actor, id) {
-  const body = await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); if (body.permission !== undefined && body.permission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields({ ...current, ...body }); if (!fields || !(await validDropdownValue(db, "lead_type", fields.lead_type)) || !(await validDropdownValue(db, "lead_stage", fields.stage)) || !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,team=$6,lead_type=$7,priority=$8,stage=$9,permission=$10,lead_status=$11,owner_user_id=$12,pso_date=$13,custom_values=$14,legacy_finance=$15,updated_at=now() WHERE id=$1", [id, fields.name, fields.email, fields.phone, fields.company, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
+  const body = await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); if (body.permission !== undefined && body.permission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields({ ...current, ...body, custom_values: body.custom_values ?? current.custom_values }); if (!fields || !(await validDropdownValue(db, "lead_type", fields.lead_type)) || !(await validDropdownValue(db, "lead_stage", fields.stage)) || !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,team=$6,lead_type=$7,priority=$8,stage=$9,permission=$10,lead_status=$11,owner_user_id=$12,pso_date=$13,custom_values=$14,legacy_finance=$15,updated_at=now() WHERE id=$1", [id, fields.name, fields.email, fields.phone, fields.company, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
 }
 async function reassignLeadRoundRobin(req, res, db, actor, id) {
   const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0];
@@ -606,6 +614,8 @@ async function route(req, res, db) {
   const targetMatch = url.pathname.match(/^\/api\/targets\/([^/]+)$/); if (targetMatch && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user, decodeURIComponent(targetMatch[1]))); }
   if (url.pathname === "/api/workspace-settings" && req.method === "GET") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to view workspace settings."); return safeUserOperation(res, () => settingsList(res, db)); }
   if (url.pathname === "/api/workspace-settings" && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to edit workspace settings."); return safeUserOperation(res, () => settingWrite(req, res, db, user)); }
+  if (url.pathname === "/api/lead-fields" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to view lead fields." }); return safeUserOperation(res, () => leadFieldsList(res, db)); }
+  if (url.pathname === "/api/lead-fields" && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage lead fields."); return leadFieldsWrite(req, res, db, user); }
   if (url.pathname === "/api/employees" && req.method === "GET") { if (!requireCapability("employees.manage", user)) return userWriteError(res, 403, "You do not have permission to view employees."); return safeUserOperation(res, () => employeesList(res, db)); }
   if (url.pathname === "/api/employees" && req.method === "POST") { if (!requireCapability("employees.manage", user)) return userWriteError(res, 403, "You do not have permission to edit employees."); return safeUserOperation(res, () => employeeWrite(req, res, db, user)); }
   const employeeOffboardMatch = url.pathname.match(/^\/api\/employees\/([^/]+)\/offboard$/); if (employeeOffboardMatch && req.method === "POST") { if (!requireCapability("employees.manage", user)) return userWriteError(res, 403, "You do not have permission to offboard employees."); return safeUserOperation(res, () => employeeOffboard(req, res, db, user, decodeURIComponent(employeeOffboardMatch[1]))); }

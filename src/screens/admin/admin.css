@@ -29,6 +29,9 @@
 .admin-product-form input { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); }
 .admin-product-list { display: grid; gap: 7px; }
 .admin-product-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); }
+.lead-field-list > div { grid-template-columns: minmax(180px, 1fr) 120px auto auto; gap: var(--space-2); }
+.lead-field-list input, .lead-field-list select { min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); }
+.lead-field-list label { display: flex; align-items: center; gap: var(--space-1); color: var(--ink-1); font-size: 12px; white-space: nowrap; }
 .admin-product-list span { overflow-wrap: anywhere; color: var(--ink-1); font-size: 13px; font-weight: 700; }
 .admin-product-list small { color: var(--ink-2); font-size: 11px; }
 .admin-product-list button { min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink-1); cursor: pointer; font-weight: 700; }

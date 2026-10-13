@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const { writeAudit } = require("./audit.cjs");
+const LeadFields = require("./lead-fields.cjs");
 const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
 const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
 
@@ -12,7 +13,7 @@ const MAX_COLUMNS = 50;
 const MAX_CELL_LENGTH = 2000;
 const MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([".csv", ".xlsx"]);
-const TEMPLATE_HEADERS = Object.freeze(["name", "email", "phone", "company", "lead_type", "stage", "permission", "lead_status", "owner", "pso_date", "next_follow_up", "city", "designation", "lead_number", "source_ref"]);
+const TEMPLATE_HEADERS = Object.freeze(["name", "email", "phone", "company", "lead_type", "stage", "permission", "lead_status", "owner", "pso_date", "next_follow_up", "city", "designation", "lead_number", "source_ref", "first_name", "last_name", ...LeadFields.DEFAULT_FIELDS.map((field) => field.key)]);
 const TEMPLATE_ROWS = Object.freeze([
   ["Sample Lead 1 (test row)", "sample1@example.test", "0000000001", "Sample Company", "DL", "lead", "Pending", "", "", "2026-01-15", "2026-01-20", "Sample City", "Sample Role", "SAMPLE-001", "SAMPLE-DELETE-ME"],
   ["Sample Lead 2 (test row)", "sample2@example.test", "0000000002", "Sample Company", "L", "qualified", "Pending", "", "", "2026-02-15", "2026-02-20", "Sample City", "Sample Role", "SAMPLE-002", "SAMPLE-DELETE-ME"],
@@ -22,7 +23,8 @@ const LEAD_TYPES = Object.freeze({ DL: "P3", L: "P3", QDL: "P3", QL: "P2", R: "P
 
 const HEADER_ALIASES = new Map([
   ["name", "name"], ["fullname", "name"], ["leadname", "name"],
-  ["email", "email"], ["emailaddress", "email"],
+  ["firstname", "first_name"], ["first", "first_name"], ["lastname", "last_name"], ["last", "last_name"],
+  ["email", "email"], ["emailaddress", "email"], ["emailid", "email"],
   ["phone", "phone"], ["phonenumber", "phone"], ["mobile", "phone"], ["cell", "phone"], ["cellno", "phone"],
   ["company", "company"], ["companyname", "company"], ["organisation", "company"], ["organization", "company"],
   ["leadtype", "lead_type"], ["leadtypecode", "lead_type"], ["type", "lead_type"],
@@ -174,7 +176,8 @@ async function loadReferenceData(db) {
   for (const row of masters.rows || []) { const key = text(row.master_type).toLowerCase().replace(/[\s_-]+/g, ""); if (!values.has(key)) values.set(key, new Set()); values.get(key).add(text(row.code || row.label).toLowerCase()); values.get(key).add(text(row.label).toLowerCase()); }
   const users = await db.query("SELECT id,email FROM users WHERE active=true AND offboarded=false", []);
   const leads = await db.query("SELECT id,source_id,email,phone FROM leads", []);
-  return { masters: values, users: new Map((users.rows || []).map((row) => [normalizeEmail(row.email), row])), leads: leads.rows || [] };
+  const leadFields = await LeadFields.getDefinitions(db);
+  return { masters: values, users: new Map((users.rows || []).map((row) => [normalizeEmail(row.email), row])), leads: leads.rows || [], leadFields };
 }
 
 function masterHas(data, keys, value) {
@@ -182,18 +185,19 @@ function masterHas(data, keys, value) {
   return !sets.length || sets.some((set) => set.has(text(value).toLowerCase()));
 }
 
-function mapHeaders(values) {
+function mapHeaders(values, leadFields = []) {
   if (values.length > MAX_COLUMNS) throw new ImportError(`The file exceeds the ${MAX_COLUMNS}-column limit.`);
-  const columns = []; const ignored = []; const seen = new Set();
-  values.forEach((value, index) => { const raw = text(value); const canonical = HEADER_ALIASES.get(normalizeHeader(raw)); if (!canonical || seen.has(canonical)) { if (raw) ignored.push(raw); columns[index] = null; } else { columns[index] = canonical; seen.add(canonical); } });
-  if (!seen.has("name")) throw new ImportError("The file must contain a name column.");
+  const columns = []; const ignored = []; const seen = new Set(); const customHeaders = new Map();
+  for (const field of leadFields) { customHeaders.set(normalizeHeader(field.key), `custom:${field.key}`); customHeaders.set(normalizeHeader(field.label), `custom:${field.key}`); }
+  values.forEach((value, index) => { const raw = text(value); const canonical = HEADER_ALIASES.get(normalizeHeader(raw)) || customHeaders.get(normalizeHeader(raw)); if (!canonical || seen.has(canonical)) { if (raw) ignored.push(raw); columns[index] = null; } else { columns[index] = canonical; seen.add(canonical); } });
+  if (!seen.has("name") && !seen.has("first_name")) throw new ImportError("The file must contain a name or first name column.");
   return { columns, ignored };
 }
 
 function rowValues(row, columns, reference, rowNumber) {
   const values = Object.create(null); const errors = [...(row.errors || [])];
   columns.forEach((column, index) => { if (column) values[column] = row.values[index] instanceof Date ? row.values[index] : text(row.values[index]); });
-  const name = text(values.name); if (!name) errors.push("name: value is required.");
+  const firstName = text(values.first_name); const lastName = text(values.last_name); const name = text(values.name) || [firstName, lastName].filter(Boolean).join(" "); if (!name) errors.push("name: value is required.");
   const email = normalizeEmail(values.email); if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("email: invalid email address.");
   const phone = values.phone == null ? "" : text(values.phone); const normalizedPhone = normalizePhone(phone);
   if (phone && !normalizedPhone) errors.push("phone: must contain digits.");
@@ -204,11 +208,14 @@ function rowValues(row, columns, reference, rowNumber) {
   const psoDate = parseDate(values.pso_date, "pso_date"); if (values.pso_date && !psoDate) errors.push("pso_date: invalid date; use YYYY-MM-DD or DD/MM/YYYY.");
   const nextFollowup = parseDate(values.next_follow_up_at, "next_follow_up_at"); if (values.next_follow_up_at && !nextFollowup) errors.push("next_follow_up_at: invalid date; use YYYY-MM-DD or DD/MM/YYYY.");
   let ownerId = null; const owner = normalizeEmail(values.owner); if (owner) { ownerId = reference.users.get(owner)?.id || null; if (!ownerId) errors.push("owner: no active user matches that email."); }
-  return { rowNumber, errors, values: { name, email, phone: phone || null, normalizedPhone, company: text(values.company) || null, lead_type: leadType, priority: LEAD_TYPES[leadType], stage, permission, lead_status: status || null, owner_user_id: ownerId, pso_date: psoDate, next_follow_up_at: nextFollowup, city: text(values.city) || null, designation: text(values.designation) || null, lead_no: text(values.lead_no) || null, source_ref: text(values.source_ref) || null } };
+  const rawCustom = Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("custom:")).map(([key, value]) => [key.slice(7), value]));
+  for (const field of reference.leadFields || []) if (field.type === "date" && rawCustom[field.key] && !parseDate(rawCustom[field.key], field.key)) errors.push(`${field.label}: invalid date; use YYYY-MM-DD or DD/MM/YYYY.`);
+  const custom_fields = LeadFields.normalizeValues(Object.fromEntries(Object.entries(rawCustom).map(([key, value]) => [key, (reference.leadFields || []).find((field) => field.key === key)?.type === "date" ? parseDate(value, key) || value : value])), reference.leadFields || []);
+  return { rowNumber, errors, values: { name, first_name: firstName || null, last_name: lastName || null, email, phone: phone || null, normalizedPhone, company: text(values.company) || null, lead_type: leadType, priority: LEAD_TYPES[leadType], stage, permission, lead_status: status || null, owner_user_id: ownerId, pso_date: psoDate, next_follow_up_at: nextFollowup, city: text(values.city) || null, designation: text(values.designation) || null, lead_no: text(values.lead_no) || null, source_ref: text(values.source_ref) || null, custom_fields } };
 }
 
 function classifyRows(rows, reference, fileHash, allowDuplicates) {
-  const { columns, ignored } = mapHeaders(rows[0].values);
+  const { columns, ignored } = mapHeaders(rows[0].values, reference.leadFields);
   const mapped = rows.slice(1).map((row) => rowValues(row, columns, reference, row.rowNumber));
   const phoneRows = new Map(), emailRows = new Map();
   for (const row of mapped) {
@@ -239,16 +246,17 @@ function publicAnalysis(analysis) {
   return { file_hash: analysis.fileHash, extension: analysis.extension, sheet_note: analysis.extension === ".xlsx" ? "The Leads sheet was read; Instructions was ignored." : null, total_rows: analysis.mapped.length, valid: analysis.valid.length, errors: analysis.errors.length, possible_duplicates: duplicateRows.length, duplicate_rows: duplicateRows, ignored_columns: analysis.ignored, preview_rows: analysis.preview, error_rows: analysis.errors.map((row) => ({ row: row.rowNumber, errors: row.errors })), can_apply: analysis.errors.length === 0 && analysis.valid.length > 0 }; }
 
 function csvCell(value) { const cell = String(value ?? ""); return /[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell; }
-async function template(format) {
-  if (format === "csv") return { body: Buffer.from([TEMPLATE_HEADERS, ...TEMPLATE_ROWS].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n", "utf8"), contentType: "text/csv; charset=utf-8", filename: "altus-leads-sample.csv" };
+async function template(format, leadFields = LeadFields.DEFAULT_FIELDS) {
+  const headers = [...TEMPLATE_HEADERS.filter((header) => !LeadFields.DEFAULT_FIELDS.some((field) => field.key === header)), ...leadFields.map((field) => field.key)];
+  if (format === "csv") return { body: Buffer.from([headers, ...TEMPLATE_ROWS].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n", "utf8"), contentType: "text/csv; charset=utf-8", filename: "altus-leads-sample.csv" };
   if (format !== "xlsx") throw new ImportError("Template format must be xlsx or csv.");
   const workbook = new ExcelJS.Workbook();
   const leads = workbook.addWorksheet("Leads");
-  leads.addRow(TEMPLATE_HEADERS);
+  leads.addRow(headers);
   for (const values of TEMPLATE_ROWS) {
     const row = leads.addRow(values);
-    row.getCell(TEMPLATE_HEADERS.indexOf("phone") + 1).numFmt = "@";
-    row.getCell(TEMPLATE_HEADERS.indexOf("phone") + 1).value = String(values[TEMPLATE_HEADERS.indexOf("phone")]);
+    row.getCell(headers.indexOf("phone") + 1).numFmt = "@";
+    row.getCell(headers.indexOf("phone") + 1).value = String(values[TEMPLATE_HEADERS.indexOf("phone")]);
   }
   const instructions = workbook.addWorksheet("Instructions");
   ["Replace the example rows with your own leads (or keep them to test).", "Only name is required.", "Accepted lead type, stage, and status values come from the active Masters in the CRM.", "Use YYYY-MM-DD dates (and YYYY-MM-DD HH:mm for date-time values).", "Maximum 5000 rows and 5 MB."] .forEach((line) => instructions.addRow([line]));
@@ -286,8 +294,8 @@ async function apply(req, db, actor) {
       for (const row of analysis.ready) {
         if (row.duplicate && req.headers["x-altus-allow-duplicates"] !== "1") continue;
         const leadId = `lead-upload-${analysis.fileHash}-${row.rowNumber}`;
-        const customValues = row.values.source_ref ? { source_ref: row.values.source_ref } : {};
-        const inserted = await tx.query("INSERT INTO leads(id,source_id,name,email,phone,company,designation,city,lead_no,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,next_follow_up_at,custom_values,legacy_finance,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'{}'::jsonb,now()) ON CONFLICT(source_id) DO NOTHING RETURNING id", [leadId, row.sourceId, row.values.name, row.values.email, row.values.phone, row.values.company, row.values.designation, row.values.city, row.values.lead_no, row.values.lead_type, row.values.priority, row.values.stage, row.values.permission, row.values.lead_status, row.values.owner_user_id, row.values.pso_date, row.values.next_follow_up_at, JSON.stringify(customValues)]);
+        const customValues = { ...(row.values.source_ref ? { source_ref: row.values.source_ref } : {}), ...(Object.keys(row.values.custom_fields || {}).length ? { lead_fields: row.values.custom_fields } : {}) };
+        const inserted = await tx.query("INSERT INTO leads(id,source_id,name,first_name,last_name,email,phone,company,designation,city,lead_no,lead_type,priority,stage,permission,lead_status,owner_user_id,pso_date,next_follow_up_at,custom_values,legacy_finance,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,'{}'::jsonb,now()) ON CONFLICT(source_id) DO NOTHING RETURNING id", [leadId, row.sourceId, row.values.name, row.values.first_name, row.values.last_name, row.values.email, row.values.phone, row.values.company, row.values.designation, row.values.city, row.values.lead_no, row.values.lead_type, row.values.priority, row.values.stage, row.values.permission, row.values.lead_status, row.values.owner_user_id, row.values.pso_date, row.values.next_follow_up_at, JSON.stringify(customValues)]);
         if (!inserted.rows[0]) { counts.skipped_duplicates += 1; continue; }
         counts.created += 1;
         await tx.query("INSERT INTO lead_history(id,source_id,lead_id,occurred_at,actor_id,action,entity,entity_id,note,custom_values,source_checksum,import_run_id) VALUES($1,$2,$3,now(),$4,'lead.imported','lead',$3,NULL,'{}'::jsonb,$5,$6)", [`upload-history-${analysis.fileHash}-${row.rowNumber}`, `upload-history:${analysis.fileHash}:${row.rowNumber}`, leadId, actor.id, analysis.fileHash, runId]);
