@@ -16,6 +16,7 @@ const A = require("./accounts.cjs");
 const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
 const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
 const { isSupabaseUrl } = require("./write-guard.cjs");
+const { sqlExpression } = require("../shared/lead-field-resolver.cjs");
 const Dropdowns = require("./dropdowns.cjs");
 const LeadImport = require("./lead-import.cjs");
 const { assignLeadRoundRobin, writeAssignmentHistory } = require("./lead-assignment.cjs");
@@ -30,8 +31,9 @@ const PG_URL = databaseConnectionString();
 const PROXY_CONFIG = { behindProxy: process.env.CRM_BEHIND_PROXY === "1", publicIsHttps: String(process.env.CRM_PUBLIC_URL || "").startsWith("https:"), trustedProxies: new Set(String(process.env.CRM_TRUSTED_PROXIES || "").split(",").map((v) => v.trim()).filter(Boolean)) };
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, capability_overrides: Array.isArray(u.capability_overrides) ? u.capability_overrides : [], must_change_password: Boolean(u.must_change_password) });
 const LEAD_SORTS = {
-  name: "name", stage: "stage", lead_status: "lead_status", permission: "permission",
-  pso_date: "pso_date", next_follow_up_at: "next_follow_up_at", last_call_at: "last_call_at", updated_at: "updated_at",
+  name: sqlExpression("name"), stage: sqlExpression("stage"), lead_status: sqlExpression("lead_status"), permission: sqlExpression("permission"),
+  pso_date: sqlExpression("psoDate"), next_follow_up_at: sqlExpression("nextFollowUpAt"), last_call_at: sqlExpression("lastCalledOn"), updated_at: sqlExpression("updated_at"),
+  company: sqlExpression("company"), designation: sqlExpression("designation"), lead_source: sqlExpression("leadSource"), business_category: sqlExpression("business_category"), rating: sqlExpression("rating"),
 };
 const LEAD_STAGE_SEMANTIC = "(SELECT o.semantic_key FROM dropdown_options o JOIN dropdown_definitions d ON d.id=o.dropdown_id WHERE d.key='lead_stage' AND o.value=l.stage AND o.is_active=true LIMIT 1)";
 
@@ -124,18 +126,23 @@ function validateUserPreferenceValue(value) {
   return { value: keys };
 }
 async function userPreferenceGet(res, db, actor, key) {
-  const row = (await db.query("SELECT value FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key])).rows[0];
+  let result;
+  try { result = await db.query("SELECT value FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key]); }
+  catch (error) { if (error?.code === "42P01") return json(res, 200, { value: null }); throw error; }
+  const row = result.rows[0];
   return json(res, 200, { value: row?.value ?? null });
 }
 async function userPreferenceWrite(req, res, db, actor, key) {
   let body; try { body = await readJson(req); } catch { return json(res, 400, { error: "Invalid preference value." }); }
   const checked = validateUserPreferenceValue(body?.value);
   if (checked.error) return json(res, 400, { error: checked.error });
-  await db.query("INSERT INTO user_preferences(user_id,preference_key,value,updated_at) VALUES($1,$2,$3::jsonb,now()) ON CONFLICT(user_id,preference_key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()", [actor.id, key, JSON.stringify(checked.value)]);
+  try { await db.query("INSERT INTO user_preferences(user_id,preference_key,value,updated_at) VALUES($1,$2,$3::jsonb,now()) ON CONFLICT(user_id,preference_key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()", [actor.id, key, JSON.stringify(checked.value)]); }
+  catch (error) { if (error?.code !== "42P01") throw error; }
   return json(res, 200, { value: checked.value });
 }
 async function userPreferenceDelete(res, db, actor, key) {
-  await db.query("DELETE FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key]);
+  try { await db.query("DELETE FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key]); }
+  catch (error) { if (error?.code !== "42P01") throw error; }
   return json(res, 200, { value: null });
 }
 
@@ -199,7 +206,7 @@ async function leadsList(req, res, db, url) {
   const listParams = params.slice(); listParams.push(pageSize, offset);
   // Keep the list endpoint usable while an older preview database is waiting for
   // migration 018. The field is optional in the client until that migration runs.
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY ${LEAD_SORTS[sort]} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   return json(res, 200, { items: rows.rows, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
