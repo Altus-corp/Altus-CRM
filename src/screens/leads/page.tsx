@@ -561,9 +561,9 @@ export function LeadsPage() {
   const ownerName = String(selectedLead?.owner_name || selectedLead?.owner_user_id || "Unassigned");
   const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
   return <div className="leads-page">
-    <div className="bulk-upload-toolbar"><button className="leads-button secondary" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button></div>
+
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
-    <header className="leads-header manage-header"><div className="manage-heading"><h1>Manage Leads</h1><button className="manage-refresh" type="button" onClick={() => void screen.load()} aria-label="Refresh leads" title="Refresh leads">↻</button></div><div className="manage-actions"><button className="leads-button manage-quick-add" type="button" onClick={() => navigate("/leads?new=1")}>Quick Add Lead</button><button className="leads-button manage-add" type="button" onClick={() => navigate("/leads?new=1")}>＋ Add New Lead</button><div className="manage-overflow-wrap"><button className="leads-button manage-overflow" type="button" aria-label="More lead actions" aria-expanded={overflowOpen} onClick={() => setOverflowOpen((value) => !value)}>⋯</button>{overflowOpen && <div className="manage-overflow-menu" role="menu"><button type="button" role="menuitem" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) { setOverflowOpen(false); screen.openBulkUpload(); } }}>Bulk upload leads</button><button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); void screen.load(); }}>Refresh</button>{screen.filtersActive && <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); screen.clearFilters(); }}>Clear filters</button>}</div>}</div></div></header>
+    <header className="leads-header manage-header"><div className="manage-heading"><h1>Manage Leads</h1><button className="manage-refresh" type="button" onClick={() => void screen.load()} aria-label="Refresh leads" title="Refresh leads">↻</button></div><div className="manage-actions"><button className="leads-button secondary manage-bulk-upload" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button><button className="leads-button manage-quick-add" type="button" onClick={() => navigate("/leads?new=1")}>Quick Add Lead</button><button className="leads-button manage-add" type="button" onClick={() => navigate("/leads?new=1")}>＋ Add New Lead</button><div className="manage-overflow-wrap"><button className="leads-button manage-overflow" type="button" aria-label="More lead actions" aria-expanded={overflowOpen} onClick={() => setOverflowOpen((value) => !value)}>⋯</button>{overflowOpen && <div className="manage-overflow-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); void screen.load(); }}>Refresh</button>{screen.filtersActive && <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); screen.clearFilters(); }}>Clear filters</button>}</div>}</div></div></header>
     {screen.newLeadOpen && <form className="lead-create-form" onSubmit={(event) => void screen.createNewLead(event)}><div className="drawer-head"><h2>New lead</h2><button className="icon-button" type="button" onClick={screen.closeNewLead} aria-label="Close new lead form"><CloseIcon /></button></div><label>Name<input required value={screen.newLeadForm.name} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" value={screen.newLeadForm.email} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input value={screen.newLeadForm.phone} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input value={screen.newLeadForm.company} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Team<input value={screen.newLeadForm.team} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, team: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} value={screen.newLeadForm.lead_type} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, lead_type: value }))} /></label><label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} value={screen.newLeadForm.permission} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, permission: value }))} /></label><label>Product<select value={screen.newLeadForm.product} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, product: event.target.value }))}><option value="">Select product</option>{screen.products.map((product) => <option key={product.id} value={product.code}>{product.label}</option>)}</select></label><button className="leads-button" type="submit">Create lead</button></form>}
     {screen.newLeadOpen && <div className="quick-add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeNewLead(); }}><form className="quick-add-modal" onSubmit={(event) => void screen.createNewLead(event)} aria-labelledby="quick-add-title">
       <div className="quick-add-header"><div className="quick-add-title-wrap"><div className="quick-add-icon"><UserIcon /></div><div><h2 id="quick-add-title">Quick Add Lead</h2><p>Add a new lead to your pipeline</p></div></div><button className="quick-add-close" type="button" onClick={screen.closeNewLead} aria-label="Close quick add lead"><CloseIcon /></button></div>
@@ -579,24 +579,100 @@ export function LeadsPage() {
       </div>
       <div className="quick-add-actions"><button className="leads-button secondary" type="button" onClick={screen.closeNewLead}>Cancel</button><button className="leads-button quick-add-save" type="submit">Save Lead</button></div>
     </form></div>}
-    <div className="lead-quick-chip-bar restored" role="toolbar" aria-label="Quick filters">
-      <button className="lead-chip lead-chip-date" type="button"><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="1" y="2" width="14" height="13" rx="2" /><path d="M1 6h14M5 1v2M11 1v2" /></svg><span>Sep 13 – Oct 13</span><svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg></button>
-      <div className="lead-chip-wrap"><button className="lead-chip lead-chip-activity" type="button" aria-label="Activity type filter" onClick={() => { if (isAdmin) { setCallLogsOpen((open) => !open); setCallLogsSearch(""); } }}><svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM8 4v4l3 1.5" /></svg><span>Call Logs{callLogsMember && isAdmin ? ` · ${screen.userOptions.find((option) => option.value === callLogsMember)?.label || ""}` : ""}</span><svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg></button>{isAdmin && callLogsOpen && <div className="call-logs-dropdown" role="listbox" aria-label="Select member"><strong>Select Member</strong><input className="call-logs-search" autoFocus placeholder="Search member..." value={callLogsSearch} onChange={(event) => setCallLogsSearch(event.target.value)} /><button type="button" className="call-logs-member" onClick={() => { setCallLogsMember(""); setCallLogsOpen(false); }}>All Members</button>{screen.userOptions.filter((option) => !callLogsSearch || option.label.toLowerCase().includes(callLogsSearch.toLowerCase())).map((option) => <button key={option.value} type="button" className="call-logs-member" onClick={() => { setCallLogsMember(option.value); setCallLogsOpen(false); }}>{option.label}</button>)}</div>}</div>
-      <div className="lead-chip-divider" aria-hidden="true" />
-      <button className={`lead-chip lead-chip-filter${psoBarVisible ? " lead-chip-active" : ""}`} type="button" onClick={() => { setPsoBarVisible((visible) => !visible); setPsoStage("Pre PSO"); }}><svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><polygon points="13 1 1 1 5.5 6.5 5.5 12 8.5 13 8.5 6.5 13 1" /></svg><span>PSO</span><svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg></button>
-      {(["PS", "BSSO", "Altus OS", "Altus Concave", "Key note speech", "Consulting"] as const).map((label) => <button key={label} className="lead-chip lead-chip-filter" type="button"><svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><polygon points="13 1 1 1 5.5 6.5 5.5 12 8.5 13 8.5 6.5 13 1" /></svg><span>{label}</span><svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg></button>)}
-    </div>
-    <div className="lead-quick-chip-bar legacy-chip-bar" role="toolbar" aria-label="Quick filters">
-      <button className="lead-chip lead-chip-date" type="button" aria-label="Date range filter">▣ <span>Sep 13 – Oct 13</span><span>⌄</span></button>
+    {/* Quick-filter chip bar */}
+    <div className="lead-quick-chip-bar" role="toolbar" aria-label="Quick filters">
+      {/* Date chip */}
+      <button className="lead-chip lead-chip-date" type="button" aria-label="Date range filter">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="1" y="2" width="14" height="13" rx="2" /><path d="M1 6h14M5 1v2M11 1v2" /></svg>
+        <span>Sep 13 – Oct 13</span>
+        <svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg>
+      </button>
+      {/* Call Logs chip — admin only opens member picker */}
       <div className="lead-chip-wrap">
-        <button className="lead-chip lead-chip-activity" type="button" aria-label="Activity type filter" aria-expanded={isAdmin ? callLogsOpen : undefined} onClick={() => { if (isAdmin) { setCallLogsOpen((open) => !open); setCallLogsSearch(""); } }}>◷ <span>Call Logs{callLogsMember && isAdmin ? ` · ${screen.userOptions.find((option) => option.value === callLogsMember)?.label || ""}` : ""}</span><span>⌄</span></button>
-        {isAdmin && callLogsOpen && <div className="call-logs-dropdown" role="listbox" aria-label="Select member"><strong>Select Member</strong><input className="call-logs-search" autoFocus placeholder="Search member..." value={callLogsSearch} onChange={(event) => setCallLogsSearch(event.target.value)} /><button type="button" className={`call-logs-member${callLogsMember === "" ? " call-logs-member-active" : ""}`} onClick={() => { setCallLogsMember(""); setCallLogsOpen(false); }}>All Members</button>{screen.userOptions.filter((option) => !callLogsSearch || option.label.toLowerCase().includes(callLogsSearch.toLowerCase())).map((option) => <button key={option.value} type="button" className={`call-logs-member${callLogsMember === option.value ? " call-logs-member-active" : ""}`} onClick={() => { setCallLogsMember(option.value); setCallLogsOpen(false); }}>{option.label}</button>)}</div>}
+        <button
+          className={`lead-chip lead-chip-activity${callLogsOpen ? " lead-chip-active" : ""}`}
+          type="button"
+          aria-label="Activity type filter"
+          aria-expanded={isAdmin ? callLogsOpen : undefined}
+          onClick={() => { if (isAdmin) { setCallLogsOpen((o) => !o); setCallLogsSearch(""); } }}
+        >
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM8 4v4l3 1.5" /></svg>
+          <span>Call Logs{callLogsMember && isAdmin ? ` · ${screen.userOptions.find((o) => o.value === callLogsMember)?.label ?? ""}` : ""}</span>
+          <svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg>
+        </button>
+        {isAdmin && callLogsOpen && (
+          <div className="call-logs-dropdown" role="listbox" aria-label="Select member">
+            <p className="call-logs-dropdown-title">Select Member</p>
+            <div className="call-logs-search-wrap">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6.5" cy="6.5" r="5"/><path d="M11 11l3 3"/></svg>
+              <input className="call-logs-search" type="text" placeholder="Search member..." value={callLogsSearch} autoFocus onChange={(e) => setCallLogsSearch(e.target.value)} />
+            </div>
+            <ul className="call-logs-list">
+              <li>
+                <button type="button" className={`call-logs-member${callLogsMember === "" ? " call-logs-member-active" : ""}`} onClick={() => { setCallLogsMember(""); setCallLogsOpen(false); }}>
+                  <span className="call-logs-avatar call-logs-avatar-all" aria-hidden="true">
+                    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="10" cy="7" r="4"/><path d="M2 18c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                  </span>
+                  <span className="call-logs-member-name">All Members</span>
+                </button>
+              </li>
+              {screen.userOptions
+                .filter((u) => !callLogsSearch || u.label.toLowerCase().includes(callLogsSearch.toLowerCase()))
+                .map((u) => {
+                  const initials = u.label.split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase();
+                  return (
+                    <li key={u.value}>
+                      <button type="button" className={`call-logs-member${callLogsMember === u.value ? " call-logs-member-active" : ""}`} onClick={() => { setCallLogsMember(u.value); setCallLogsOpen(false); }}>
+                        <span className="call-logs-avatar" aria-hidden="true">{initials}</span>
+                        <span className="call-logs-member-name">{u.label}</span>
+                      </button>
+                    </li>
+                  );
+                })
+              }
+            </ul>
+          </div>
+        )}
       </div>
       <div className="lead-chip-divider" aria-hidden="true" />
-      <button className={`lead-chip lead-chip-filter${psoBarVisible ? " lead-chip-active" : ""}`} type="button" aria-label="Filter by PSO" onClick={() => { setPsoBarVisible((visible) => !visible); setPsoStage("Pre PSO"); }}>⚑ PSO ⌄</button>
-      {(["PS", "BSSO", "Altus OS", "Altus Concave", "Key note speech", "Consulting"] as const).map((label) => <button key={label} className="lead-chip lead-chip-filter" type="button" aria-label={`Filter by ${label}`}>⚑ {label} ⌄</button>)}
+      {/* PSO chip — toggles PSO stage bar */}
+      <button
+        className={`lead-chip lead-chip-filter${psoBarVisible ? " lead-chip-active" : ""}`}
+        type="button"
+        aria-label="Filter by PSO"
+        aria-expanded={psoBarVisible}
+        onClick={() => { setPsoBarVisible((v) => !v); if (!psoBarVisible) setPsoStage("Pre PSO"); }}
+      >
+        <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><polygon points="13 1 1 1 5.5 6.5 5.5 12 8.5 13 8.5 6.5 13 1" /></svg>
+        <span>PSO</span>
+        <svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg>
+      </button>
+      {/* Remaining filter chips */}
+      {(["PS", "BSSO", "Altus OS", "Altus Concave", "Key note speech", "Consulting"] as const).map((label) => (
+        <button key={label} className="lead-chip lead-chip-filter" type="button" aria-label={`Filter by ${label}`}>
+          <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><polygon points="13 1 1 1 5.5 6.5 5.5 12 8.5 13 8.5 6.5 13 1" /></svg>
+          <span>{label}</span>
+          <svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m2 3.5 3 3 3-3" /></svg>
+        </button>
+      ))}
     </div>
-    {psoBarVisible && <div className="lead-pso-stage-bar" role="group" aria-label="PSO stage filter"><strong>PSO Stage</strong>{(["Pre PSO", "During PSO", "Attend PSO", "Not Attend PSO"] as const).map((stage) => <label key={stage}><input type="radio" name="pso-stage" checked={psoStage === stage} onChange={() => setPsoStage(stage)} /> {stage}</label>)}<button type="button" onClick={() => setPsoBarVisible(false)}>Clear</button></div>}
+    {/* PSO Stage bar — toggled by PSO chip */}
+    {psoBarVisible && (
+      <div className="lead-pso-stage-bar" role="group" aria-label="PSO stage filter">
+        <span className="lead-pso-stage-label">PSO Stage</span>
+        <div className="lead-pso-stage-tabs">
+          {(["Pre PSO", "During PSO", "Attend PSO", "Not Attend PSO"] as const).map((stage) => (
+            <label key={stage} className="lead-pso-stage-tab">
+              <input type="radio" name="pso-stage" value={stage} checked={psoStage === stage} onChange={() => setPsoStage(stage)} />
+              <span>{stage}</span>
+            </label>
+          ))}
+        </div>
+        <button className="lead-pso-clear" type="button" aria-label="Clear PSO stage filter" onClick={() => { setPsoBarVisible(false); setPsoStage(""); }}>
+          <CloseIcon /> Clear
+        </button>
+      </div>
+    )}
     {screen.detail && !screen.detailLoading && <section className="lead-edit-panel" aria-label="Lead actions">
       <div className="drawer-head"><div><p className="eyebrow">Selected lead</p><h2>{screen.detail.lead.name}</h2></div><button className="leads-button secondary" type="button" onClick={screen.closeDetail}>Close</button></div>
       {!screen.editing && <div className="lead-action-row"><button className="leads-button" type="button" onClick={() => screen.setEditing(true)}>Edit lead</button>{screen.canAssign && <button className="leads-button secondary" type="button" onClick={() => void screen.reassignByRoundRobin()}>Reassign by round-robin</button>}{screen.canConvertAccount && <button className="leads-button secondary" type="button" onClick={() => void screen.convertLead()}>Convert to account</button>}<label>Stage<DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="Unstaged" value={String(screen.detail.lead.stage || "")} onValueChange={(value) => void screen.updateStage(value)} /></label>{screen.canChangePermission && <label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" value={String(screen.detail.lead.permission || screen.dropdownDefaults.permission)} onValueChange={(value) => void screen.updatePermission(value)} /></label>}</div>}
