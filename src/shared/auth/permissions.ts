@@ -8,6 +8,7 @@ export const CAPABILITIES = {
   "leads.assign": ["Owner", "Admin"],
   "leads.export": ["Owner", "Admin"],
   "leads.import": ["Owner", "Admin", "Sales"],
+  "leads.delete": ["Owner", "Admin"],
   "settings.view": ["Owner", "Admin"],
   "users.manage": ["Owner", "Admin"],
   "users.reset_password": ["Owner", "Admin"],

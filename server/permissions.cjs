@@ -8,6 +8,7 @@ const CAPABILITIES = Object.freeze({
   "leads.assign": Object.freeze(["Owner", "Admin"]),
   "leads.export": Object.freeze(["Owner", "Admin"]),
   "leads.import": Object.freeze(["Owner", "Admin", "Sales"]),
+  "leads.delete": Object.freeze(["Owner", "Admin"]),
   "settings.view": Object.freeze(["Owner", "Admin"]),
   "users.manage": Object.freeze(["Owner", "Admin"]),
   "users.reset_password": Object.freeze(["Owner", "Admin"]),

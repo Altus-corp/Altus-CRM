@@ -113,7 +113,7 @@ async function quickFilterDelete(res, db, actor, id) {
 }
 
 async function leadsCounts(res, db) {
-  const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE ${predicate})::int AS "${key}"`);
+  const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE COALESCE(l.custom_values->>'archived','false') <> 'true' AND ${predicate})::int AS "${key}"`);
   const result = await db.query(`SELECT ${expressions.join(", ")} FROM leads l`, []);
   const row = result.rows[0] || {};
   const counts = Object.fromEntries(Object.keys(LEAD_COUNT_VIEWS).map((key) => [key, Number.isFinite(Number(row[key])) ? Number(row[key]) : 0]));
@@ -122,7 +122,7 @@ async function leadsCounts(res, db) {
 
 async function leadsList(req, res, db, url) {
   const params = [];
-  const where = [];
+  const where = ["COALESCE(l.custom_values->>'archived','false') <> 'true'"];
   const bind = (value) => { params.push(value); return `$${params.length}`; };
   const q = String(url.searchParams.get("search") || url.searchParams.get("q") || "").trim();
   if (q) { const p = bind(`%${q}%`); where.push(`(l.name ILIKE ${p} OR l.email ILIKE ${p} OR l.company ILIKE ${p} OR l.phone ILIKE ${p} OR l.lead_no ILIKE ${p} OR l.external_id ILIKE ${p})`); }
@@ -175,7 +175,7 @@ async function leadsList(req, res, db, url) {
 }
 
 async function leadDetail(req, res, db, id) {
-  const lead = (await db.query("SELECT * FROM leads WHERE id = $1", [id])).rows[0];
+  const lead = (await db.query("SELECT * FROM leads WHERE id = $1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0];
   if (!lead) return json(res, 404, { error: "Lead not found." });
   const [calls, followups, history, messages, notes, products] = await Promise.all([
     db.query("SELECT * FROM lead_calls WHERE lead_id = $1 ORDER BY happened_at DESC NULLS LAST, id DESC", [id]),
@@ -354,6 +354,31 @@ async function reassignLeadRoundRobin(req, res, db, actor, id) {
 async function changeLeadStage(req, res, db, actor, id) { const body = await readJson(req); const stage = String(body.stage || ""); if (!(await validDropdownValue(db, "lead_stage", stage))) return invalidLead(res); try { await transaction(db, async (tx) => { const current = (await tx.query("SELECT stage FROM leads WHERE id=$1", [id])).rows[0]; if (!current) throw Object.assign(new Error("missing"), { status: 404 }); await tx.query("UPDATE leads SET stage=$2,updated_at=now() WHERE id=$1", [id, stage]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.stage_changed", entityType: "lead", entityId: id, field: "stage", oldValue: current.stage, newValue: stage, ip: req.socket.remoteAddress }); }); return json(res, 200, { id, stage }); } catch (error) { return json(res, error.status === 404 ? 404 : 500, { error: error.status === 404 ? "Lead not found." : "Unable to change lead stage." }); } }
 async function changeLeadPermission(req, res, db, actor, id) { const body = await readJson(req); const permission = String(body.permission || ""); if (!(await validDropdownValue(db, "permission", permission))) return invalidLead(res); try { await transaction(db, async (tx) => { const current = (await tx.query("SELECT permission FROM leads WHERE id=$1", [id])).rows[0]; if (!current) throw Object.assign(new Error("missing"), { status: 404 }); await tx.query("UPDATE leads SET permission=$2,updated_at=now() WHERE id=$1", [id, permission]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.permission_changed", entityType: "lead", entityId: id, field: "permission", oldValue: current.permission, newValue: permission, ip: req.socket.remoteAddress }); }); return json(res, 200, { id, permission }); } catch (error) { return json(res, error.status === 404 ? 404 : 500, { error: error.status === 404 ? "Lead not found." : "Unable to change lead permission." }); } }
 async function updateLeadProducts(req, res, db, actor, id) { const body = await readJson(req); if (!Array.isArray(body.products)) return invalidLead(res); const products = leadProductRows(id, body.products); try { await transaction(db, async (tx) => { for (const product of products) await tx.query("INSERT INTO lead_products (id,lead_id,product_code,stage,call_stage,funnel) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,call_stage=EXCLUDED.call_stage,funnel=EXCLUDED.funnel,updated_at=now()", [product.id, id, product.product_code, product.stage, product.call_stage, product.funnel]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.products_updated", entityType: "lead", entityId: id, newValue: "products", ip: req.socket.remoteAddress }); }); return json(res, 200, { id, product_count: products.length }); } catch { return json(res, 500, { error: "Unable to save lead products." }); }
+}
+function leadIds(value) { return [...new Set((Array.isArray(value) ? value : []).map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 500); }
+async function archiveLeads(req, res, db, actor) {
+  const body = await readJson(req); const ids = leadIds(body.ids);
+  if (!ids.length) return json(res, 400, { error: "Select at least one lead." });
+  const result = await transaction(db, async (tx) => {
+    const updated = await tx.query("UPDATE leads SET custom_values=COALESCE(custom_values,'{}'::jsonb) || jsonb_build_object('archived',true,'archived_at',now()::text,'archived_by',$2::text),updated_at=now() WHERE id=ANY($1::text[]) AND COALESCE(custom_values->>'archived','false') <> 'true' RETURNING id", [ids, actor.id]);
+    for (const row of updated.rows) await writeAudit(tx, { actorUserId: actor.id, action: "lead.archived", entityType: "lead", entityId: row.id, ip: req.socket.remoteAddress });
+    return updated.rows.map((row) => row.id);
+  });
+  return json(res, 200, { archived: result.length, ids: result });
+}
+async function permanentlyDeleteLeads(req, res, db, actor) {
+  const body = await readJson(req); const ids = leadIds(body.ids);
+  if (body.confirmation !== "DELETE") return json(res, 400, { error: "Type DELETE to permanently remove leads." });
+  if (!ids.length) return json(res, 400, { error: "Select at least one lead." });
+  const removed = await transaction(db, async (tx) => {
+    const existing = (await tx.query("SELECT id FROM leads WHERE id=ANY($1::text[]) FOR UPDATE", [ids])).rows.map((row) => row.id);
+    if (!existing.length) return [];
+    for (const table of ["lead_notes", "lead_product_events", "lead_products", "registration_records", "registrations", "payments"]) await tx.query(`DELETE FROM ${table} WHERE lead_id=ANY($1::text[])`, [existing]);
+    await tx.query("DELETE FROM leads WHERE id=ANY($1::text[])", [existing]);
+    for (const id of existing) await writeAudit(tx, { actorUserId: actor.id, action: "lead.permanently_deleted", entityType: "lead", entityId: id, ip: req.socket.remoteAddress });
+    return existing;
+  });
+  return json(res, 200, { deleted: removed.length, ids: removed });
 }
 
 function json(res, status, body, headers = {}) { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers }); res.end(JSON.stringify(body)); }
@@ -636,6 +661,8 @@ async function route(req, res, db) {
     try { return json(res, 200, await LeadImport.apply(req, db, user)); } catch (error) { return json(res, error.status || 500, error.analysis ? { error: error.message, ...error.analysis } : { error: error.status ? error.message : "Unable to apply the lead import." }); }
   }
   if (url.pathname === "/api/leads" && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return createLead(req, res, db, user); }
+  if (url.pathname === "/api/leads/bulk-archive" && req.method === "POST") { if (!requireCapability("leads.delete", user)) return json(res, 403, { error: "You do not have permission to archive leads." }); return archiveLeads(req, res, db, user); }
+  if (url.pathname === "/api/leads/bulk-delete" && req.method === "POST") { if (!requireCapability("leads.delete", user)) return json(res, 403, { error: "You do not have permission to permanently delete leads." }); return permanentlyDeleteLeads(req, res, db, user); }
   const roundRobinMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/round-robin$/);
   if (roundRobinMatch && req.method === "POST") { if (!requireCapability("leads.assign", user)) return json(res, 403, { error: "You do not have permission to assign leads." }); return reassignLeadRoundRobin(req, res, db, user, decodeURIComponent(roundRobinMatch[1])); }
   const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);

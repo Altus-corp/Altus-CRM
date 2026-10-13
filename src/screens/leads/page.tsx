@@ -528,6 +528,9 @@ export function LeadsPage() {
   const allVisibleSelected = visibleLeadIds.length > 0 && visibleLeadIds.every((id) => selectedLeadIdSet.has(id));
   const isAllSelected = screen.selectAllView || (visibleLeadIds.length > 0 && allVisibleSelected);
   const isSomeSelected = !isAllSelected && screen.selectedLeadIds.length > 0;
+  const selectedIds = screen.selectAllView ? visibleLeadIds : screen.selectedLeadIds;
+  function archiveSelectedLeads() { if (selectedIds.length && window.confirm(`Archive ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}? You can restore archived data later through an administrator.`)) void screen.archiveLeads(selectedIds); }
+  function deleteSelectedLeads() { if (!selectedIds.length) return; const accepted = window.confirm(`Permanently delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}, including their linked activity? This cannot be undone.`); if (!accepted) return; if (window.prompt('Type DELETE to permanently remove the selected leads.') === "DELETE") void screen.permanentlyDeleteLeads(selectedIds); }
   const selectedLead = screen.detail?.lead;
   const leadName = String(selectedLead?.name || "Nikhil Shah");
   const leadFullName = leadName.trim();
@@ -570,18 +573,12 @@ export function LeadsPage() {
       <div className="lead-selection-bar" role="status" aria-live="polite">
         <span className="lead-selection-count">
           {screen.selectAllView ? (
-            <>All <strong>{screen.data.total}</strong> leads selected</>
+            <>All <strong>{visibleLeadIds.length}</strong> visible leads selected</>
           ) : (
             <><strong>{screen.selectedLeadIds.length}</strong> {screen.selectedLeadIds.length === 1 ? "lead" : "leads"} selected</>
           )}
         </span>
-        <button
-          type="button"
-          className="leads-button secondary lead-selection-clear-btn"
-          onClick={screen.clearSelection}
-        >
-          Deselect all
-        </button>
+        <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
     )}<div className="lead-table-wrap"><table className="lead-table"><thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" /></label></th>{fields.map((field) => <th key={field.key} scope="col">{field.label}</th>)}</tr></thead><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); return <tr key={lead.id} tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} onClick={(event) => event.stopPropagation()} /></td>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : field.key === "permission" || field.key === "stage" ? <span className="lead-pill">{displayField(fieldValue(lead, field.key))}</span> : displayField(fieldValue(lead, field.key))}</td>)}</tr>; })}</tbody></table></div><footer className="lead-pagination"><span>{screen.data.total} leads</span><div className="lead-pagination-controls"><label className="lead-page-size"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><button className="leads-button secondary" disabled={screen.page <= 1} onClick={screen.previousPage}>Previous</button><span>Page {screen.page} of {screen.totalPages}</span><button className="leads-button secondary" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>Next</button></div></footer></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
