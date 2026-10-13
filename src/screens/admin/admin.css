@@ -27,6 +27,8 @@
 .admin-product-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .admin-product-form label { display: grid; flex: 1 1 260px; gap: 5px; color: var(--ink-1); font-size: 11px; font-weight: 700; }
 .admin-product-form input { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); }
+.admin-product-form .lead-field-type-picker { flex: 0 1 210px; }
+.lead-field-type-picker select { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); }
 .admin-product-list { display: grid; gap: 7px; }
 .admin-product-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 9px 10px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); }
 .lead-field-list > div { grid-template-columns: minmax(180px, 1fr) 120px auto auto; gap: var(--space-2); }

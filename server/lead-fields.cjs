@@ -3,7 +3,7 @@
 const { writeAudit } = require("./audit.cjs");
 
 const SETTING_KEY = "lead_field_definitions";
-const TYPES = new Set(["text", "date", "boolean"]);
+const TYPES = new Set(["text", "textarea", "number", "date", "email", "phone", "url", "boolean"]);
 const KEY_RE = /^[a-z][a-z0-9_]{1,63}$/;
 
 // These fields are stored inside leads.custom_values.lead_fields. Core lead columns
@@ -61,6 +61,10 @@ function normalizeValues(input, definitions) {
     }
     const value = text(raw); if (!value) continue;
     if (field.type === "date" && !validDate(value)) continue;
+    if (field.type === "number" && !Number.isFinite(Number(value.replace(/,/g, "")))) continue;
+    if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) continue;
+    if (field.type === "phone" && String(value).replace(/\D/g, "").length < 7) continue;
+    if (field.type === "url") { try { new URL(value); } catch { continue; } }
     values[key] = value.slice(0, 2000);
   }
   return values;

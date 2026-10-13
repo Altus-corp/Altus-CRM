@@ -8,7 +8,7 @@ import { useDropdown, type DropdownOption } from "../../shared/dropdowns/client"
 const DEFAULT_PAGE_SIZE_OPTIONS: DropdownOption[] = [];
 
 export type Lead = { id: string; source_id: string; name: string; first_name?: string | null; last_name?: string | null; email: string | null; company: string | null; phone: string | null; stage: string | null; permission: string | null; lead_status: string | null; owner_user_id: string | null; pso_date: string | null; next_follow_up_at: string | null; last_call_at: string | null; updated_at: string | null; is_pre_ps_done: boolean | null; lead_no: string | null; lead_type: string | null; lead_source: string | null; source_system: string | null; designation: string | null; city: string | null; custom_values?: Record<string, unknown>; legacy_finance?: Record<string, unknown> };
-export type ConfiguredLeadField = { key: string; label: string; type: "text" | "date" | "boolean"; active: boolean; detail_visible: boolean; order: number };
+export type ConfiguredLeadField = { key: string; label: string; type: "text" | "textarea" | "number" | "date" | "email" | "phone" | "url" | "boolean"; active: boolean; detail_visible: boolean; order: number };
 export type LeadDetailResponse = { lead: Lead & Record<string, unknown>; calls: Record<string, unknown>[]; followups: Record<string, unknown>[]; history: Record<string, unknown>[]; messages: Record<string, unknown>[]; products: Record<string, unknown>[] };
 export type ActivityKind = "history" | "calls" | "followups" | "messages" | "notes";
 export type ActivityResponse = { items: Record<string, unknown>[]; page: number; page_size: number; total: number };

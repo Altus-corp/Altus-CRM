@@ -532,24 +532,20 @@ export function LeadsPage() {
   function archiveSelectedLeads() { if (selectedIds.length && window.confirm(`Archive ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}? You can restore archived data later through an administrator.`)) void screen.archiveLeads(selectedIds); }
   function deleteSelectedLeads() { if (!selectedIds.length) return; const accepted = window.confirm(`Permanently delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}, including their linked activity? This cannot be undone.`); if (!accepted) return; if (window.prompt('Type DELETE to permanently remove the selected leads.') === "DELETE") void screen.permanentlyDeleteLeads(selectedIds); }
   const selectedLead = screen.detail?.lead;
-  const leadName = String(selectedLead?.name || "Nikhil Shah");
+  const leadName = String(selectedLead?.name || "");
   const leadFullName = leadName.trim();
-  const nameParts = leadFullName.split(/\s+/);
+  const placeholderLeadName = /^imported\s+lead$/i.test(leadFullName);
+  const nameParts = placeholderLeadName ? [] : leadFullName.split(/\s+/).filter(Boolean);
   const derivedFirstName = nameParts[0] || "";
   const derivedLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
-  const leadFirstName = String(
-    (selectedLead as any)?.first_name ||
-      (selectedLead ? fieldValue(selectedLead, "first_name") : null) ||
-      derivedFirstName
-  );
-  const leadLastName = String(
-    (selectedLead as any)?.last_name ||
-      (selectedLead ? fieldValue(selectedLead, "last_name") : null) ||
-      derivedLastName
-  );
-  const leadStatus = String(selectedLead?.lead_status || selectedLead?.stage || "New Lead");
-  const leadSource = String(selectedLead?.lead_source || "Website enquiry");
-  const ownerName = String(selectedLead?.owner_name || selectedLead?.owner_user_id || "Aarav Mehta");
+  const rawFirstName = String((selectedLead as any)?.first_name || (selectedLead ? fieldValue(selectedLead, "first_name") : null) || "").trim();
+  const rawLastName = String((selectedLead as any)?.last_name || (selectedLead ? fieldValue(selectedLead, "last_name") : null) || "").trim();
+  const placeholderSplitName = placeholderLeadName && /^imported$/i.test(rawFirstName) && /^lead$/i.test(rawLastName);
+  const leadFirstName = placeholderSplitName ? "" : rawFirstName || derivedFirstName;
+  const leadLastName = placeholderSplitName ? "" : rawLastName || derivedLastName;
+  const leadStatus = String(selectedLead?.lead_status || selectedLead?.stage || "Not set");
+  const leadSource = String(selectedLead?.lead_source || "Not provided");
+  const ownerName = String(selectedLead?.owner_name || selectedLead?.owner_user_id || "Unassigned");
   const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
   return <div className="leads-page">
     <div className="bulk-upload-toolbar"><button className="leads-button secondary" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button></div>
