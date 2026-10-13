@@ -197,12 +197,22 @@ async function leadsList(req, res, db, url) {
   const page = isAll ? 1 : integerParam(url.searchParams.get("page"), 1, 1000000);
   const offset = isAll ? 0 : (page - 1) * pageSize;
   const listParams = params.slice(); listParams.push(pageSize, offset);
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,l.last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  // Keep the list endpoint usable while an older preview database is waiting for
+  // migration 018. The field is optional in the client until that migration runs.
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   return json(res, 200, { items: rows.rows, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
 async function leadDetail(req, res, db, id, actor = null) {
-  if (actor?.id) await db.query("UPDATE leads SET last_opened_at=now(),last_opened_by=$2 WHERE id=$1 AND (last_opened_at IS NULL OR last_opened_at < now() - interval '5 minutes')", [id, actor.id]);
+  if (actor?.id) {
+    try {
+      await db.query("UPDATE leads SET last_opened_at=now(),last_opened_by=$2 WHERE id=$1 AND (last_opened_at IS NULL OR last_opened_at < now() - interval '5 minutes')", [id, actor.id]);
+    } catch (error) {
+      // Preview can briefly run against the pre-018 schema. Do not make read-only
+      // lead details unavailable while the optional last-opened columns are absent.
+      if (error?.code !== "42703") throw error;
+    }
+  }
   const lead = (await db.query("SELECT * FROM leads WHERE id = $1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0];
   if (!lead) return json(res, 404, { error: "Lead not found." });
   const [calls, followups, history, messages, notes, products] = await Promise.all([
