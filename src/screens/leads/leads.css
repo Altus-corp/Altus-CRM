@@ -168,6 +168,10 @@
 .lead-quick-chip-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; padding: 4px 0; }
 .lead-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink-1); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .lead-chip:hover, .lead-chip-active { border-color: var(--red); background: var(--red-050); color: var(--red); }
+.legacy-chip-bar { display: none !important; }
+.restored .lead-chip { gap: 6px; }
+.restored .lead-chip-date { background: var(--panel); }
+.restored .lead-chip-activity { background: var(--red-050); }
 .lead-chip-date { border-color: color-mix(in srgb, #f97316 45%, var(--line)); color: #c2410c; background: #fff7ed; }
 .lead-chip-activity, .lead-chip-filter { border-color: color-mix(in srgb, var(--red) 35%, var(--line)); color: var(--red); background: var(--red-050); }
 .lead-chip-divider { width: 1px; height: 20px; margin: 0 2px; background: var(--line); }
