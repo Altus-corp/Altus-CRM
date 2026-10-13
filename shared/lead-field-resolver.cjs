@@ -74,7 +74,23 @@ const FIELD_MAP = Object.freeze({
 
 function normalizeValue(value) {
   if (typeof value === "string" && EMPTY_STRINGS.has(value.trim().toLowerCase())) return null;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const key of ["value", "text", "display", "raw", "date", "label"]) {
+      if (Object.prototype.hasOwnProperty.call(value, key) && (typeof value[key] !== "object" || value[key] === null)) return normalizeValue(value[key]);
+    }
+    return null;
+  }
   return value === "" ? null : value;
+}
+
+function nestedObjectSources(value, output = []) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return output;
+  const entries = Object.entries(value);
+  if (entries.some(([, child]) => child && typeof child === "object" && !Array.isArray(child))) {
+    output.push(value);
+    for (const [, child] of entries) nestedObjectSources(child, output);
+  }
+  return output;
 }
 
 function resolveLeadValue(lead, key) {
@@ -92,8 +108,7 @@ function resolveLeadValue(lead, key) {
     const value = normalizeValue(lead[column]);
     if (value !== null && value !== undefined) return value;
   }
-  const workbook = lead.custom_values?.mishtie_workbook;
-  const workbookSources = workbook && typeof workbook === "object" ? Object.values(workbook).filter((source) => source && typeof source === "object" && !Array.isArray(source)) : [];
+  const workbookSources = nestedObjectSources(lead.custom_values?.mishtie_workbook);
   const sources = [lead.custom_values?.lead_fields, lead.custom_values, lead.legacy_finance, ...workbookSources];
   const keys = [definition.custom || key, ...(definition.aliases || [])];
   for (const source of sources) {

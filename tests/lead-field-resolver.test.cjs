@@ -37,6 +37,12 @@ test("contact and location fields fall back to alternate lead columns", () => {
   assert.equal(resolveLeadValue(lead, "leadSource"), "Referral");
 });
 
+test("resolver searches nested workbook sheets and unwraps object values", () => {
+  const lead = { custom_values: { mishtie_workbook: { "1-calling-sheet": { "Lead Acquisition Date": "2026-10-13", "Email ID": { value: "lead@example.test" } } } } };
+  assert.equal(resolveLeadValue(lead, "lead_acquisition_date"), "2026-10-13");
+  assert.equal(resolveLeadValue(lead, "email"), "lead@example.test");
+});
+
 test("resolved SQL expressions use the same source order", () => {
   const sql = sqlExpression("business_category");
   assert.match(sql, /lead_fields/);

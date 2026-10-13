@@ -65,7 +65,24 @@ const directFallbacks: Record<string, string[]> = {
 
 function clean(value: unknown) {
   if (typeof value === "string" && value.trim().toLowerCase() === "not provided") return null;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const key of ["value", "text", "display", "raw", "date", "label"]) {
+      const candidate = (value as Record<string, unknown>)[key];
+      if (candidate === null || typeof candidate !== "object") return clean(candidate);
+    }
+    return null;
+  }
   return value === "" ? null : value;
+}
+
+function nestedObjectSources(value: unknown, output: Record<string, unknown>[] = []) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return output;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.some(([, child]) => child && typeof child === "object" && !Array.isArray(child))) {
+    output.push(value as Record<string, unknown>);
+    for (const [, child] of entries) nestedObjectSources(child, output);
+  }
+  return output;
 }
 
 export function resolveLeadValue(lead: ResolverLead, key: string): unknown {
@@ -83,8 +100,7 @@ export function resolveLeadValue(lead: ResolverLead, key: string): unknown {
   }
   if (key in lead && clean(lead[key]) != null) return clean(lead[key]);
   const candidates = [key, ...(aliases[key] || [])];
-  const workbook = lead.custom_values?.mishtie_workbook;
-  const workbookSources = workbook && typeof workbook === "object" ? Object.values(workbook).filter((source) => source && typeof source === "object" && !Array.isArray(source)) : [];
+  const workbookSources = nestedObjectSources(lead.custom_values?.mishtie_workbook);
   for (const source of [lead.custom_values?.lead_fields, lead.custom_values, lead.legacy_finance, ...workbookSources]) {
     if (!source || typeof source !== "object" || Array.isArray(source)) continue;
     for (const candidate of candidates) {
