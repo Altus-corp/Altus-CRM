@@ -7,6 +7,12 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /<th scope="col">Status<\/th>/, "Leads table should show a status column");
   assert.match(pageSource, /className="lead-status-select"/, "Lead status should use the table dropdown");
   assert.match(pageSource, /updateLeadStatus/, "Lead status dropdown should save changes");
+  assert.match(pageSource, /Basic details/, "Lead form should include grouped basic details");
+  assert.match(pageSource, /Introducer details/, "Lead form should include grouped introducer details");
+  assert.match(pageSource, /Calling details/, "Lead form should include grouped calling details");
+  assert.match(pageSource, /Outreach tracking/, "Lead form should include grouped outreach fields");
+  assert.match(pageSource, /System info/, "Lead detail should include system info");
+  assert.match(pageSource, /Choose columns/, "Lead list should include a column chooser");
   assert.match(pageSource, /quick-add-modal/, "Leads page should include the Quick Add modal");
   assert.match(pageSource, /lead-quick-chip-bar/, "Leads page should include the quick-filter chip bar");
   assert.match(pageSource, /Call Logs/, "Leads page should include the Call Logs filter");
@@ -243,6 +249,25 @@ test("Leads list includes checkbox for every lead and select all option", () => 
   // Manage header buttons hover styling preserves text contrast
   assert.match(cssSource, /\.manage-add/);
   assert.match(cssSource, /\.manage-add:hover[\s\S]*color:\s*var\(--bg\)/);
+});
+
+test("Leads list Columns control renders the column chooser", () => {
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  const cssSource = fs.readFileSync("src/screens/leads/leads.css", "utf8");
+  assert.match(pageSource, /aria-label="Choose columns"/);
+  assert.match(pageSource, /checked=\{(?:visibleColumnKeys|pendingColumnKeys)\.includes\(field\.key\)\}/);
+  assert.match(pageSource, /(?:setVisibleColumnKeys|togglePendingColumn|applyColumnSelection)/);
+  assert.match(cssSource, /\.lead-column-menu/);
+});
+
+test("Leads list column selection persists by user, restores, applies order, and resets", () => {
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  assert.match(pageSource, /leads\.columns\.v1/);
+  assert.match(pageSource, /window\.localStorage\.getItem/);
+  assert.match(pageSource, /\/api\/user-preferences/);
+  assert.match(pageSource, /method: "DELETE"/);
+  assert.match(pageSource, /normalizeColumnKeys/);
+  assert.match(pageSource, /visibleColumnKeys\.map\(\(key\) => allChooserFields\.find/);
 });
 
 

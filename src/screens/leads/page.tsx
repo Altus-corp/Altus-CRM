@@ -1,14 +1,47 @@
-import { ActivityKind, fieldValue, isQuickFilterDateField, useLeadsScreen, VIEW_FIELDS } from "./function";
+import { ADDITIONAL_LEAD_FIELDS, ActivityKind, fieldValue, isQuickFilterDateField, LEAD_COLUMNS, SYSTEM_LEAD_FIELDS, useLeadsScreen, VIEW_FIELDS, type LeadFormState, type LeadColumn, type Lead } from "./function";
+import { useAuth } from "../../shared/auth/auth";
 import { usePermission } from "../../shared/auth/permissions";
+import { api } from "../../shared/api/client";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { DropdownSelect } from "../../shared/dropdowns/component";
 import "./leads.css";
 
+const LEADS_COLUMN_PREFERENCE_KEY = "leads.columns.v1";
+const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
+function columnStorageKey(userId: string) { return `${LEADS_COLUMN_PREFERENCE_KEY}:${userId}`; }
+function readStoredColumns(userId: string | undefined): unknown {
+  if (!userId) return null;
+  try { const value = JSON.parse(window.localStorage.getItem(columnStorageKey(userId)) || "null"); return Array.isArray(value) ? value : null; } catch { return null; }
+}
+function writeStoredColumns(userId: string | undefined, keys: string[]) {
+  if (!userId) return;
+  try { window.localStorage.setItem(columnStorageKey(userId), JSON.stringify(keys)); } catch { /* localStorage is optional */ }
+}
+function clearStoredColumns(userId: string | undefined) {
+  if (!userId) return;
+  try { window.localStorage.removeItem(columnStorageKey(userId)); } catch { /* localStorage is optional */ }
+}
+function normalizeColumnKeys(value: unknown, fields: readonly { key: string }[], defaults: readonly string[]) {
+  const valid = new Set(fields.map((field) => field.key));
+  const seen = new Set<string>();
+  const saved = Array.isArray(value) ? value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key) && valid.has(key) && !seen.has(key) && (seen.add(key), true)) : [];
+  const fallback = saved.length ? saved : defaults.filter((key) => valid.has(key));
+  if (valid.has("leadNo") && !fallback.includes("leadNo")) return ["leadNo", ...fallback];
+  return [...new Set(fallback)];
+}
+
 function displayField(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
+}
+
+function formatSystemDate(value: unknown) {
+  if (!value) return "—";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date).replace(" ", " ");
 }
 
 function fieldOrFallback(value: unknown, fallback: string) {
@@ -378,8 +411,97 @@ function LeadTimeline({ detail, leadName, ownerName }: { detail: any; leadName: 
   return <div className="lead-timeline-container" aria-label="Lead timeline"><div className="lead-timeline-rail" />{entries.length === 0 ? <p className="lead-activity-empty">No activity recorded for this lead yet.</p> : entries.map((item, index) => <div className="lead-timeline-item" key={item.id}><div className={`lead-timeline-node ${item.kind === "message" ? "green-node" : "red-node"}`} aria-hidden="true">{item.kind === "followup" ? <CalendarIcon /> : item.kind === "note" ? <NoteIcon /> : item.kind === "message" ? <WhatsAppIcon /> : item.kind === "call" ? <CallIcon /> : <UserIcon />}</div><div className={`lead-timeline-card ${index === 0 ? "card-highlight" : ""}`}><div className="lead-timeline-card-main"><h4 className="lead-timeline-title">{item.title}</h4><span className="lead-timeline-subtitle">{item.subtitle}</span>{item.body && <p className="lead-timeline-desc">{item.body}</p>}</div>{item.badge && <span className={`lead-timeline-pill ${item.badge === "Upcoming" ? "badge-upcoming" : item.badge === "Connected" ? "badge-connected" : item.badge === "Assigned" ? "badge-assigned" : "badge-latest"}`}>{item.badge}</span>}</div></div>)}</div>;
 }
 
+function LeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel }: { form: LeadFormState; setForm: React.Dispatch<React.SetStateAction<LeadFormState>>; errors: Record<string, string>; onSubmit: (event: React.FormEvent) => void; onCancel?: () => void; submitLabel: string }) {
+  const update = (key: keyof LeadFormState, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const text = (key: keyof LeadFormState, label: string, required = false, type = "text", placeholder?: string) => <label className="lead-form-field"><span>{label}{required && <b> *</b>}</span><input className="lead-control" required={required} type={type} value={form[key]} placeholder={placeholder} onChange={(event) => update(key, event.target.value)} />{errors[String(key)] && <small className="lead-form-error">{errors[String(key)]}</small>}</label>;
+  const area = (key: keyof LeadFormState, label: string) => <label className="lead-form-field lead-form-wide"><span>{label}</span><textarea className="lead-control" value={form[key]} onChange={(event) => update(key, event.target.value)} /></label>;
+  const yesNo = (key: keyof LeadFormState, label: string) => <label className="lead-form-field"><span>{label}</span><select className="lead-control" value={form[key]} onChange={(event) => update(key, event.target.value)}><option value="No">No</option><option value="Yes">Yes</option></select></label>;
+  const date = (key: keyof LeadFormState, label: string) => text(key, label, false, "date");
+  const dateTime = (key: keyof LeadFormState, label: string) => text(key, label, false, "datetime-local");
+  return <form className="lead-structured-form" onSubmit={onSubmit}>
+    <section className="lead-form-section"><h3>Basic details</h3><div className="lead-form-grid">{text("lead_no", "Lead No")} {date("lead_acquisition_date", "Lead Acquisition Date")} {text("first_name", "First Name", true)} {text("last_name", "Last Name")} {text("company", "Company Name")} {text("phone", "Cell No", true, "tel")} {text("email", "Email ID", false, "email")} {text("designation", "Designation")} {text("business_category", "Business Category")} {text("nature_of_business", "Nature of Business")} {text("proposed_solution", "Proposed Solution")}</div></section>
+    <section className="lead-form-section"><h3>Introducer details</h3><div className="lead-form-grid">{yesNo("invite_sent_by_introducer", "Invite Sent by Introducer")} {form.invite_sent_by_introducer === "Yes" && date("invite_date_sent", "Invite Date Sent")} {yesNo("introducer_call_done", "Introducer Call Done")} {form.introducer_call_done === "Yes" && date("introducer_call_date", "Introducer Call Date")} {area("introducer_feedback", "Introducer Feedback")} {text("introducer_name", "Introducer Name")} {text("employee_name", "Employee Name")} {text("association_network_name", "Association / Network Name")} {text("chapter_name", "Chapter Name")}</div></section>
+    <section className="lead-form-section"><h3>Calling details</h3><div className="lead-form-grid">{dateTime("last_called_on", "Last Called On")}<label className="lead-form-field"><span>Calling Resolution</span><select className="lead-control" value={form.calling_resolution} onChange={(event) => update("calling_resolution", event.target.value)}><option value="">Select resolution</option><option>Connected</option><option>Not reachable</option><option>Follow-up required</option><option>Wrong number</option></select></label>{dateTime("next_call_on", "Next Call On")}{area("calling_remarks", "Calling Remarks")}</div></section>
+    <section className="lead-form-section"><h3>Outreach tracking</h3><div className="lead-form-grid">{yesNo("intro_video_sent", "2 Mins Intro Video Sent")} {yesNo("email_sent", "Email Sent")} {yesNo("whatsapp_message_sent", "Msg Sent on WhatsApp")}</div></section>
+    <section className="lead-form-section"><h3>Other</h3><div className="lead-form-grid">{area("extra_notes", "Extra Notes")}</div></section>
+    <p className="lead-form-todo">TODO Phase 2: these new fields are sent with the existing lead payload; server/database support is intentionally unchanged in Phase 1.</p>
+    <div className="lead-form-actions"><button className="leads-button" type="submit">{submitLabel}</button>{onCancel && <button className="leads-button secondary" type="button" onClick={onCancel}>Cancel</button>}</div>
+  </form>;
+}
+
+function InlineLeadCell({ lead, column, canEdit, dropdownOptions, onSave }: { lead: Lead; column: LeadColumn; canEdit: boolean; dropdownOptions: Record<string, Array<{ value: string; label: string }>>; onSave: (field: string, value: unknown) => Promise<unknown> }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(fieldValue(lead, column.key) ?? ""));
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const inputRef = useRef<any>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => { if (!editing) setValue(String(fieldValue(lead, column.key) ?? "")); }, [lead, column.key, editing]);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  /* highlight the parent <tr> while editing */
+  useEffect(() => {
+    const tr = wrapRef.current?.closest("tr");
+    if (editing) tr?.classList.add("is-inline-editing");
+    return () => { tr?.classList.remove("is-inline-editing"); };
+  }, [editing]);
+
+  if (!column.editable || !canEdit) return <span>{displayField(fieldValue(lead, column.key))}</span>;
+
+  const begin = (event: React.MouseEvent | React.KeyboardEvent) => { event.stopPropagation(); setValue(String(fieldValue(lead, column.key) ?? "")); setState("idle"); setEditing(true); };
+  const cancel = (event?: React.SyntheticEvent) => { event?.stopPropagation(); setEditing(false); setState("idle"); };
+  async function save(event?: React.SyntheticEvent) {
+    event?.stopPropagation();
+    const next: unknown = column.input === "boolean" ? value === "true" || value === "Yes" : value.trim() || null;
+    if (column.required && !next) { setState("error"); return; }
+    setState("saving");
+    try { await onSave(column.key, next); setState("saved"); setEditing(false); window.setTimeout(() => setState("idle"), 900); } catch { setState("error"); }
+  }
+
+  const inputProps = {
+    ref: inputRef,
+    value,
+    className: "inline-edit-input",
+    onClick: (event: React.MouseEvent) => event.stopPropagation(),
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setValue(event.target.value),
+    onKeyDown: (event: React.KeyboardEvent) => { event.stopPropagation(); if (event.key === "Escape") cancel(event); if (event.key === "Enter" && column.input !== "textarea") { event.preventDefault(); void save(event); } },
+    "aria-label": `Edit ${column.label} for ${lead.name}`,
+  };
+
+  if (editing) {
+    let control: React.ReactNode;
+    if (column.input === "textarea") {
+      control = <textarea {...inputProps} rows={2} />;
+    } else if (column.input === "dropdown" || column.input === "boolean") {
+      const options = column.input === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(dropdownOptions[column.dropdown || ""] || [])];
+      control = <select {...inputProps}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+    } else {
+      control = <input {...inputProps} type={column.input === "phone" || column.input === "email" ? column.input : column.input === "date" ? "date" : column.input === "datetime" ? "datetime-local" : "text"} />;
+    }
+    return (
+      <span className="inline-edit-wrap" ref={wrapRef}>
+        {control}
+        <button type="button" className="inline-edit-save" aria-label="Save" disabled={state === "saving"} onClick={(e) => { e.stopPropagation(); void save(e); }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+        <button type="button" className="inline-edit-cancel" aria-label="Cancel" onClick={(e) => { e.stopPropagation(); cancel(e); }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span ref={wrapRef}>
+      <button type="button" className={`inline-lead-cell${state === "error" ? " has-error" : ""}`} title="Click to edit" onClick={begin} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") begin(event); }}>
+        {displayField(fieldValue(lead, column.key))}{state === "saving" ? " …" : state === "saved" ? " ✓" : state === "error" ? " !" : ""}
+      </button>
+    </span>
+  );
+}
+
 export function LeadsPage() {
   const screen = useLeadsScreen();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -535,7 +657,63 @@ export function LeadsPage() {
     setDetailTab(nextTab);
     detailTabRefs.current[nextTab]?.focus();
   }
-  const fields = VIEW_FIELDS[screen.view] || VIEW_FIELDS.new_leads;
+  const baseFields = VIEW_FIELDS[screen.view] || VIEW_FIELDS.new_leads;
+  const chooserFields = LEAD_COLUMNS.filter((field) => !field.aliasOf);
+  const canonicalKey = (key: string) => LEAD_COLUMNS.find((field) => field.key === key)?.aliasOf || key;
+  const allChooserFields = [...baseFields.map((field) => LEAD_COLUMNS.find((candidate) => candidate.key === canonicalKey(field.key)) || { key: field.key, label: field.label, input: "text" as const, editable: false, storage: { kind: "column" as const, key: field.key } }), ...chooserFields.filter((field) => !baseFields.some((b) => canonicalKey(b.key) === field.key))];
+  const defaultColumnKeys = baseFields.map((field) => canonicalKey(field.key));
+  const [columnChooserOpen, setColumnChooserOpen] = useState(false);
+  const [groupByOpen, setGroupByOpen] = useState(false);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys));
+  useEffect(() => { setVisibleColumnKeys((current) => normalizeColumnKeys(current, allChooserFields, defaultColumnKeys)); }, [screen.view]);
+
+  /* Enhanced column chooser state */
+  const [columnSearch, setColumnSearch] = useState("");
+  const [pendingColumnKeys, setPendingColumnKeys] = useState<string[]>([]);
+  const [dragColumnIdx, setDragColumnIdx] = useState<number | null>(null);
+  const columnPreferenceRevision = useRef(0);
+  const filteredChooserFields = columnSearch ? allChooserFields.filter((f) => f.label.toLowerCase().includes(columnSearch.toLowerCase())) : allChooserFields;
+  const filteredColumnKeys = filteredChooserFields.map((field) => field.key);
+  const pendingAllSelected = filteredColumnKeys.length > 0 && filteredColumnKeys.every((key) => pendingColumnKeys.includes(key));
+  const pendingSelectedCount = pendingColumnKeys.length;
+  useEffect(() => { if (columnChooserOpen) { setPendingColumnKeys([...visibleColumnKeys]); setColumnSearch(""); } }, [columnChooserOpen]);
+  useEffect(() => {
+    if (!user?.id) return;
+    let live = true;
+    const requestRevision = columnPreferenceRevision.current;
+    void api<{ value: unknown }>(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`).then((response) => {
+      if (!live || columnPreferenceRevision.current !== requestRevision || !Array.isArray(response.value)) return;
+      const next = normalizeColumnKeys(response.value, allChooserFields, defaultColumnKeys);
+      setVisibleColumnKeys(next);
+      writeStoredColumns(user.id, next);
+    }).catch(() => { /* localStorage remains the offline fallback */ });
+    return () => { live = false; };
+  }, [user?.id, screen.view]);
+  function applyColumnSelection() {
+    columnPreferenceRevision.current += 1;
+    const next = normalizeColumnKeys(pendingColumnKeys, allChooserFields, defaultColumnKeys);
+    setVisibleColumnKeys(next);
+    writeStoredColumns(user?.id, next);
+    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: next }) }).catch(() => {});
+    setColumnChooserOpen(false);
+  }
+  function resetColumnSelection() {
+    columnPreferenceRevision.current += 1;
+    const defaults = normalizeColumnKeys(defaultColumnKeys, allChooserFields, defaultColumnKeys);
+    setPendingColumnKeys(defaults);
+    setVisibleColumnKeys(defaults);
+    clearStoredColumns(user?.id);
+    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
+    setColumnChooserOpen(false);
+  }
+  function toggleAllColumns() {
+    setPendingColumnKeys((current) => pendingAllSelected ? current.filter((key) => !filteredColumnKeys.includes(key)) : [...current, ...filteredColumnKeys.filter((key) => !current.includes(key))]);
+  }
+  function togglePendingColumn(key: string) { setPendingColumnKeys((current) => current.includes(key) ? current.filter((k) => k !== key) : [...current, key]); }
+  function handleColumnDragStart(key: string) { const index = pendingColumnKeys.indexOf(key); setDragColumnIdx(index >= 0 ? index : null); }
+  function handleColumnDragOver(event: React.DragEvent, targetKey: string) { event.preventDefault(); if (dragColumnIdx === null) return; setPendingColumnKeys((current) => { const targetIdx = current.indexOf(targetKey); if (targetIdx < 0 || dragColumnIdx === targetIdx) return current; const next = [...current]; const [moved] = next.splice(dragColumnIdx, 1); next.splice(targetIdx, 0, moved); return next; }); setDragColumnIdx((current) => { const targetIdx = pendingColumnKeys.indexOf(targetKey); return targetIdx >= 0 ? targetIdx : current; }); }
+  function handleColumnDragEnd() { setDragColumnIdx(null); }
+  const fields = visibleColumnKeys.map((key) => allChooserFields.find((field) => field.key === key)).filter((field): field is (typeof allChooserFields)[number] => Boolean(field));
   const visibleLeadIds = (screen.data?.items || []).map((lead) => lead.id);
   const selectedLeadIdSet = new Set(screen.selectedLeadIds);
   const allVisibleSelected = visibleLeadIds.length > 0 && visibleLeadIds.every((id) => selectedLeadIdSet.has(id));
@@ -565,9 +743,9 @@ export function LeadsPage() {
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
     <header className="leads-header manage-header"><div className="manage-heading"><h1>Manage Leads</h1><button className="manage-refresh" type="button" onClick={() => void screen.load()} aria-label="Refresh leads" title="Refresh leads">↻</button></div><div className="manage-actions"><button className="leads-button secondary manage-bulk-upload" type="button" disabled={!screen.canImport} title={screen.bulkImportLabel} aria-label={screen.bulkImportLabel} onClick={() => { if (screen.canImport) screen.openBulkUpload(); }}>Bulk upload leads</button><button className="leads-button manage-quick-add" type="button" onClick={() => navigate("/leads?new=1")}>Quick Add Lead</button><button className="leads-button manage-add" type="button" onClick={() => navigate("/leads?new=1")}>＋ Add New Lead</button><div className="manage-overflow-wrap"><button className="leads-button manage-overflow" type="button" aria-label="More lead actions" aria-expanded={overflowOpen} onClick={() => setOverflowOpen((value) => !value)}>⋯</button>{overflowOpen && <div className="manage-overflow-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); void screen.load(); }}>Refresh</button>{screen.filtersActive && <button type="button" role="menuitem" onClick={() => { setOverflowOpen(false); screen.clearFilters(); }}>Clear filters</button>}</div>}</div></div></header>
     {screen.newLeadOpen && <form className="lead-create-form" onSubmit={(event) => void screen.createNewLead(event)}><div className="drawer-head"><h2>New lead</h2><button className="icon-button" type="button" onClick={screen.closeNewLead} aria-label="Close new lead form"><CloseIcon /></button></div><label>Name<input required value={screen.newLeadForm.name} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" value={screen.newLeadForm.email} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input value={screen.newLeadForm.phone} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input value={screen.newLeadForm.company} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Team<input value={screen.newLeadForm.team} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, team: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} value={screen.newLeadForm.lead_type} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, lead_type: value }))} /></label><label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} value={screen.newLeadForm.permission} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, permission: value }))} /></label><label>Product<select value={screen.newLeadForm.product} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, product: event.target.value }))}><option value="">Select product</option>{screen.products.map((product) => <option key={product.id} value={product.code}>{product.label}</option>)}</select></label><button className="leads-button" type="submit">Create lead</button></form>}
-    {screen.newLeadOpen && <div className="quick-add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeNewLead(); }}><form className="quick-add-modal" onSubmit={(event) => void screen.createNewLead(event)} aria-labelledby="quick-add-title">
+    {screen.newLeadOpen && <div className="quick-add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeNewLead(); }}><div className="quick-add-modal" aria-labelledby="quick-add-title">
       <div className="quick-add-header"><div className="quick-add-title-wrap"><div className="quick-add-icon"><UserIcon /></div><div><h2 id="quick-add-title">Quick Add Lead</h2><p>Add a new lead to your pipeline</p></div></div><button className="quick-add-close" type="button" onClick={screen.closeNewLead} aria-label="Close quick add lead"><CloseIcon /></button></div>
-      <div className="quick-add-fields">
+      <div className="legacy-quick-add-fields">
         <label className="quick-add-field"><span>Name <b>*</b></span><div className="quick-add-input"><UserIcon /><input required autoFocus placeholder="Enter name" value={screen.newLeadForm.name} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, name: event.target.value }))} /></div></label>
         <label className="quick-add-field"><span>Email <b>*</b></span><div className="quick-add-input"><MailIcon /><input required type="email" placeholder="Enter email" value={screen.newLeadForm.email} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, email: event.target.value }))} /></div></label>
         <label className="quick-add-field"><span>Phone <b>*</b></span><div className="quick-add-input"><PhoneIcon /><input required placeholder="Enter phone number" value={screen.newLeadForm.phone} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, phone: event.target.value }))} /></div></label>
@@ -577,8 +755,8 @@ export function LeadsPage() {
         <label className="quick-add-field"><span>Permission To Call</span><div className="quick-add-select"><PhoneIcon /><DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} value={screen.newLeadForm.permission} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, permission: value }))} /></div></label>
         <label className="quick-add-field quick-add-products"><span>Product</span><div className="quick-add-input"><BoxIcon /><select value={screen.newLeadForm.product} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, product: event.target.value }))}><option value="">Select product</option>{screen.products.map((product) => <option key={product.id} value={product.code}>{product.label}</option>)}</select></div></label>
       </div>
-      <div className="quick-add-actions"><button className="leads-button secondary" type="button" onClick={screen.closeNewLead}>Cancel</button><button className="leads-button quick-add-save" type="submit">Save Lead</button></div>
-    </form></div>}
+      <LeadForm form={screen.newLeadForm} setForm={screen.setNewLeadForm} errors={screen.formErrors} onSubmit={(event) => void screen.createNewLead(event)} onCancel={screen.closeNewLead} submitLabel="Save Lead" />
+    </div></div>}
     {/* Quick-filter chip bar */}
     <div className="lead-quick-chip-bar" role="toolbar" aria-label="Quick filters">
       {/* Date chip */}
@@ -678,6 +856,7 @@ export function LeadsPage() {
       {!screen.editing && <div className="lead-action-row"><button className="leads-button" type="button" onClick={() => screen.setEditing(true)}>Edit lead</button>{screen.canAssign && <button className="leads-button secondary" type="button" onClick={() => void screen.reassignByRoundRobin()}>Reassign by round-robin</button>}{screen.canConvertAccount && <button className="leads-button secondary" type="button" onClick={() => void screen.convertLead()}>Convert to account</button>}<label>Stage<DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="Unstaged" value={String(screen.detail.lead.stage || "")} onValueChange={(value) => void screen.updateStage(value)} /></label>{screen.canChangePermission && <label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" value={String(screen.detail.lead.permission || screen.dropdownDefaults.permission)} onValueChange={(value) => void screen.updatePermission(value)} /></label>}</div>}
       {screen.editing && <form className="lead-edit-form" onSubmit={(event) => void screen.saveLeadEdit(event)}><label>Name<input required className="lead-control" value={screen.editForm.name} onChange={(event) => screen.setEditForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" className="lead-control" value={screen.editForm.email} onChange={(event) => screen.setEditForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input className="lead-control" value={screen.editForm.phone} onChange={(event) => screen.setEditForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input className="lead-control" value={screen.editForm.company} onChange={(event) => screen.setEditForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} className="lead-control" value={screen.editForm.lead_type} onValueChange={(value) => screen.setEditForm((form) => ({ ...form, lead_type: value }))} /></label><div className="lead-action-row"><button className="leads-button" type="submit">Save lead</button><button className="leads-button secondary" type="button" onClick={() => screen.setEditing(false)}>Cancel</button></div></form>}
     </section>}
+    {screen.editing && <div className="lead-edit-form-host"><LeadForm form={screen.editForm} setForm={screen.setEditForm} errors={screen.formErrors} onSubmit={(event) => void screen.saveLeadEdit(event)} onCancel={() => screen.setEditing(false)} submitLabel="Save lead" /></div>}
     <section className={filtersOpen ? "lead-filters filters-open" : "lead-filters filters-collapsed"} aria-label="Lead filters">
       <button className="leads-button filter-toggle" type="button" aria-expanded={screen.advancedOpen} onClick={() => screen.openAdvancedFilter()}>+ Filter</button>
       <SavedFiltersPicker screen={screen} />
@@ -686,7 +865,33 @@ export function LeadsPage() {
       </div><div className="lead-filter-secondary"><label><span>Owner</span><input className="lead-control" value={screen.filters.owner} onChange={(event) => screen.updateFilter("owner", event.target.value)} placeholder="Owner" /></label><label><span>Lead status</span><input className="lead-control" value={screen.filters.lead_status} onChange={(event) => screen.updateFilter("lead_status", event.target.value)} placeholder="Any status" /></label><label><span>PSO from</span><input className="lead-control" type="date" value={screen.filters.pso_date_from} onChange={(event) => screen.updateFilter("pso_date_from", event.target.value)} /></label><label><span>PSO to</span><input className="lead-control" type="date" value={screen.filters.pso_date_to} onChange={(event) => screen.updateFilter("pso_date_to", event.target.value)} /></label><label><span>Follow-up</span><DropdownSelect dropdownKey="follow_up_filter" className="lead-control" includeEmpty emptyLabel="Any" value={screen.filters.next_follow_up} onValueChange={(value) => screen.updateFilter("next_follow_up", value)} /></label>{screen.filtersActive && <button className="leads-button clear-filters" type="button" onClick={screen.clearFilters}>Clear filters</button>}</div>
     </section>
     {screen.error && <div className="lead-state error" role="alert"><span>{screen.error}</span><button className="leads-button secondary" onClick={() => void screen.load()}>Retry</button></div>}{screen.loading && <div className="lead-state">Loading leads…</div>}{!screen.loading && !screen.error && screen.data?.items.length === 0 && <div className="lead-state"><strong>No leads in this view.</strong><span>Try another view or clear a filter.</span></div>}
-    {!screen.loading && !screen.error && !!screen.data?.items.length && <>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
+    {!screen.loading && !screen.error && !!screen.data?.items.length && <><div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="menu" onClick={() => setColumnChooserOpen((open) => !open)}>☷ <span>Columns</span></button>{columnChooserOpen && <div className="lead-column-menu" role="menu" aria-label="Choose columns">
+              <div className="col-menu-search-wrap">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input className="col-menu-search" type="text" placeholder="Search columns..." value={columnSearch} onChange={(e) => setColumnSearch(e.target.value)} autoFocus />
+              </div>
+              <label className="col-menu-select-all">
+                <input type="checkbox" checked={pendingAllSelected} onChange={toggleAllColumns} />
+                <span>Select All</span>
+                <span className="col-menu-count">{pendingSelectedCount} of {allChooserFields.length} selected</span>
+              </label>
+              <div className="col-menu-list">
+                {filteredChooserFields.map((field) => {
+                  const idx = pendingColumnKeys.indexOf(field.key);
+                  return (
+                    <label key={field.key} className={`col-menu-item${dragColumnIdx !== null && idx === dragColumnIdx ? " col-dragging" : ""}`} draggable onDragStart={() => handleColumnDragStart(field.key)} onDragOver={(e) => handleColumnDragOver(e, field.key)} onDragEnd={handleColumnDragEnd}>
+                      <input type="checkbox" checked={pendingColumnKeys.includes(field.key)} onChange={() => togglePendingColumn(field.key)} />
+                      <span>{field.label}</span>
+                      <span className="col-menu-drag-handle" aria-hidden="true">⠿</span>
+                    </label>
+                  );
+                })}
+              </div>
+               <div className="col-menu-footer">
+                 <button type="button" className="col-menu-reset" onClick={resetColumnSelection}>Reset</button>
+                 <button type="button" className="col-menu-apply" onClick={applyColumnSelection}>Apply</button>
+               </div>
+            </div>}</div></div></div>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
       <div className="lead-selection-bar" role="status" aria-live="polite">
         <span className="lead-selection-count">
           {screen.selectAllView ? (
@@ -697,7 +902,7 @@ export function LeadsPage() {
         </span>
         <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
-    )}<div className="lead-table-wrap"><table className="lead-table"><thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" /></label></th>{fields.map((field) => <th key={field.key} scope="col">{field.label}</th>)}<th scope="col">Status</th></tr></thead><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; return <tr key={lead.id} tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} onClick={(event) => event.stopPropagation()} /></td>{fields.map((field) => <td key={field.key}>{field.key === "name" ? <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></> : field.key === "permission" || field.key === "stage" ? <span className="lead-pill">{displayField(fieldValue(lead, field.key))}</span> : displayField(fieldValue(lead, field.key))}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={screen.statusUpdatingId === lead.id} onChange={(event) => void screen.updateLeadStatus(lead.id, event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>; })}</tbody></table></div><footer className="lead-pagination"><span>{screen.data.total} leads</span><div className="lead-pagination-controls"><label className="lead-page-size"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><button className="leads-button secondary" disabled={screen.page <= 1} onClick={screen.previousPage}>Previous</button><span>Page {screen.page} of {screen.totalPages}</span><button className="leads-button secondary" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>Next</button></div></footer></>}
+    )}<div className="lead-table-wrap"><table className="lead-table"><thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" /></label></th>{fields.map((field) => <th key={field.key} scope="col">{field.label}</th>)}<th scope="col">Status</th></tr></thead><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; return <tr key={lead.id} tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={() => void screen.openDetail(lead.id)} onKeyDown={(event) => { if (event.key === "Enter") void screen.openDetail(lead.id); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} onClick={(event) => event.stopPropagation()} /></td>{fields.map((field) => <td key={field.key} onClick={(event) => event.stopPropagation()}>{field.key === "name" ? <><strong><InlineLeadCell lead={lead} column={field} canEdit={screen.canEdit} dropdownOptions={screen.dropdownOptions} onSave={(key, value) => screen.updateLeadField(lead.id, key, value)} /></strong><small>{displayField(lead.lead_status || lead.email)}</small></> : <InlineLeadCell lead={lead} column={field} canEdit={screen.canEdit} dropdownOptions={screen.dropdownOptions} onSave={(key, value) => screen.updateLeadField(lead.id, key, value)} />}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={screen.statusUpdatingId === lead.id} onChange={(event) => void screen.updateLeadStatus(lead.id, event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>; })}</tbody></table></div></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
@@ -1614,6 +1819,9 @@ export function LeadsPage() {
                   </div>)}
                 </div>
               </div>
+
+              <div className="lead-details-section lead-system-info"><div className="lead-details-section-header">System info</div><div className="lead-details-grid">{SYSTEM_LEAD_FIELDS.map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{formatSystemDate(selectedLead?.[field.key])}</span></div>)}</div></div>
+              <div className="lead-details-section"><div className="lead-details-section-header">Lead relationship details</div><div className="lead-details-grid">{ADDITIONAL_LEAD_FIELDS.map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{displayField(selectedLead?.[field.key])}</span></div>)}</div><p className="lead-form-todo">TODO Phase 2: unsupported fields will become server-backed after migration/API approval.</p></div>
 
               {/* 5. Additional fields (6) collapsible */}
               <div className="lead-details-accordion">

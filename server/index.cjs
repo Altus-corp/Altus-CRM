@@ -11,6 +11,7 @@ const S = require("./security.cjs");
 const { CAPABILITIES, requireCapability, canManageRole } = require("./permissions.cjs");
 const { ADMIN_SCREENS, adminScreen } = require("./admin.cjs");
 const { writeAudit } = require("./audit.cjs");
+const { editable: INLINE_EDITABLE_FIELDS, byKey: INLINE_COLUMNS } = require("./lead-inline-fields.cjs");
 const A = require("./accounts.cjs");
 const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
 const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
@@ -113,6 +114,31 @@ async function quickFilterDelete(res, db, actor, id) {
   return json(res, 200, { id });
 }
 
+const USER_PREFERENCE_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
+const MAX_USER_PREFERENCE_KEYS = 100;
+function validateUserPreferenceValue(value) {
+  if (!Array.isArray(value) || value.length > MAX_USER_PREFERENCE_KEYS) return { error: "Preference value must be an ordered array of at most 100 keys." };
+  const keys = value.map((key) => typeof key === "string" ? key.trim() : key);
+  if (keys.some((key) => typeof key !== "string" || !key || !USER_PREFERENCE_KEY_RE.test(key))) return { error: "Preference value must contain non-empty string keys only." };
+  if (new Set(keys).size !== keys.length) return { error: "Preference value must not contain duplicate keys." };
+  return { value: keys };
+}
+async function userPreferenceGet(res, db, actor, key) {
+  const row = (await db.query("SELECT value FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key])).rows[0];
+  return json(res, 200, { value: row?.value ?? null });
+}
+async function userPreferenceWrite(req, res, db, actor, key) {
+  let body; try { body = await readJson(req); } catch { return json(res, 400, { error: "Invalid preference value." }); }
+  const checked = validateUserPreferenceValue(body?.value);
+  if (checked.error) return json(res, 400, { error: checked.error });
+  await db.query("INSERT INTO user_preferences(user_id,preference_key,value,updated_at) VALUES($1,$2,$3::jsonb,now()) ON CONFLICT(user_id,preference_key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()", [actor.id, key, JSON.stringify(checked.value)]);
+  return json(res, 200, { value: checked.value });
+}
+async function userPreferenceDelete(res, db, actor, key) {
+  await db.query("DELETE FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key]);
+  return json(res, 200, { value: null });
+}
+
 async function leadsCounts(res, db) {
   const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE COALESCE(l.custom_values->>'archived','false') <> 'true' AND ${predicate})::int AS "${key}"`);
   const result = await db.query(`SELECT ${expressions.join(", ")} FROM leads l`, []);
@@ -171,11 +197,12 @@ async function leadsList(req, res, db, url) {
   const page = isAll ? 1 : integerParam(url.searchParams.get("page"), 1, 1000000);
   const offset = isAll ? 0 : (page - 1) * pageSize;
   const listParams = params.slice(); listParams.push(pageSize, offset);
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,l.last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY l.${sort} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   return json(res, 200, { items: rows.rows, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
-async function leadDetail(req, res, db, id) {
+async function leadDetail(req, res, db, id, actor = null) {
+  if (actor?.id) await db.query("UPDATE leads SET last_opened_at=now(),last_opened_by=$2 WHERE id=$1 AND (last_opened_at IS NULL OR last_opened_at < now() - interval '5 minutes')", [id, actor.id]);
   const lead = (await db.query("SELECT * FROM leads WHERE id = $1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0];
   if (!lead) return json(res, 404, { error: "Lead not found." });
   const [calls, followups, history, messages, notes, products] = await Promise.all([
@@ -347,8 +374,54 @@ async function createLead(req, res, db, actor) {
     return json(res, 500, { error: "Unable to save lead." });
   }
 }
-async function updateLead(req, res, db, actor, id) {
-  const body = await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); if (body.permission !== undefined && body.permission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields({ ...current, ...body, custom_values: body.custom_values ?? current.custom_values }); if (!fields || !(await validDropdownValue(db, "lead_type", fields.lead_type)) || !(await validDropdownValue(db, "lead_stage", fields.stage)) || !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,team=$6,lead_type=$7,priority=$8,stage=$9,permission=$10,lead_status=$11,owner_user_id=$12,pso_date=$13,custom_values=$14,legacy_finance=$15,updated_at=now() WHERE id=$1", [id, fields.name, fields.email, fields.phone, fields.company, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
+function inlineText(value, max = 2000) { if (value == null) return null; const text = String(value).trim(); return text ? text.slice(0, max) : null; }
+function inlineDate(value, dateTime = false) { if (value == null || value === "") return null; const text = String(value); const pattern = dateTime ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/ : /^\d{4}-\d{2}-\d{2}$/; if (!pattern.test(text) || Number.isNaN(new Date(text).getTime())) throw Object.assign(new Error("Invalid date value."), { status: 400 }); return text; }
+async function updateInlineLeadField(req, res, db, actor, id, body) {
+  const requested = String(body.field || ""); const definition = INLINE_EDITABLE_FIELDS.get(requested); if (!definition) return json(res, 400, { error: "This lead field is not editable." });
+  const canonical = definition.aliasOf ? INLINE_COLUMNS.get(definition.aliasOf) || definition : definition;
+  const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." });
+  if (canonical.storage.kind === "column" && canonical.storage.key === "permission" && body.value !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
+  let value = body.value;
+  try {
+    if (canonical.input === "boolean") { if (value === "true" || value === "Yes") value = true; else if (value === "false" || value === "No" || value == null || value === "") value = value == null || value === "" ? null : false; else throw Object.assign(new Error("Value must be Yes or No."), { status: 400 }); }
+    else if (canonical.input === "date") value = inlineDate(value);
+    else if (canonical.input === "datetime") value = inlineDate(value, true);
+    else if (canonical.input === "email") { value = inlineText(value); if (value && !/^\S+@\S+\.\S+$/.test(value)) throw Object.assign(new Error("Enter a valid email address."), { status: 400 }); }
+    else if (canonical.input === "phone") { value = inlineText(value, 80); if (!value || !/^[+\d][\d\s().-]{6,}$/.test(value)) throw Object.assign(new Error("Enter a valid phone number."), { status: 400 }); }
+    else if (canonical.input === "dropdown") { value = inlineText(value, 200); if (value != null) await Dropdowns.assertSelectableOption(db, canonical.dropdown, value); }
+    else value = inlineText(value);
+    if (canonical.required && !value) throw Object.assign(new Error(`${canonical.label} is required.`), { status: 400 });
+    if (canonical.storage.key === "rating" && value != null && !["1", "2", "3", "4", "5"].includes(String(value))) throw Object.assign(new Error("Rating must be between 1 and 5."), { status: 400 });
+  } catch (error) { return json(res, error.status || 400, { error: error.message || "Invalid lead value." }); }
+  const duplicatePhone = canonical.storage.key === "phone" ? await findLeadDuplicates(db, value, current.email, id) : [];
+  if (duplicatePhone.length) return json(res, 409, { error: "Duplicate phone number: another lead already uses this phone number." });
+  try {
+    const updated = await transaction(db, async (tx) => {
+      let result;
+      if (canonical.storage.kind === "custom") {
+        result = await tx.query("UPDATE leads SET custom_values=jsonb_set(COALESCE(custom_values,'{}'::jsonb), ARRAY['lead_fields',$1::text], COALESCE($2::jsonb,'null'::jsonb), true), updated_at=now() WHERE id=$3 RETURNING *", [canonical.storage.key, JSON.stringify(value), id]);
+      } else if (canonical.storage.key === "name" || canonical.storage.key === "first_name" || canonical.storage.key === "last_name") {
+        const oldFirst = String(current.first_name || "").trim(); const oldLast = String(current.last_name || "").trim(); let name = String(current.name || "").trim(); let first = oldFirst; let last = oldLast;
+        if (canonical.storage.key === "name") { name = value || ""; const parts = name.split(/\s+/).filter(Boolean); first = parts[0] || ""; last = parts.slice(1).join(" "); }
+        if (canonical.storage.key === "first_name") { first = value || ""; name = `${first} ${last}`.trim(); }
+        if (canonical.storage.key === "last_name") { last = value || ""; name = `${first} ${last}`.trim(); }
+        if (!name) throw Object.assign(new Error("Name is required."), { status: 400 });
+        result = await tx.query("UPDATE leads SET name=$1,first_name=$2,last_name=$3,updated_at=now() WHERE id=$4 RETURNING *", [name, first || null, last || null, id]);
+      } else {
+        const allowed = new Set(["lead_type","company","phone","email","designation","lead_source","permission","last_call_at"]);
+        if (!allowed.has(canonical.storage.key)) throw Object.assign(new Error("This lead field is not editable."), { status: 400 });
+        result = await tx.query(`UPDATE leads SET ${canonical.storage.key}=$1,updated_at=now() WHERE id=$2 RETURNING *`, [value, id]);
+      }
+      const updatedLead = result.rows[0];
+      await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, field: requested, oldValue: JSON.stringify(current[canonical.storage.key] ?? current.custom_values?.lead_fields?.[canonical.storage.key] ?? null), newValue: JSON.stringify(value), ip: req.socket.remoteAddress });
+      return updatedLead;
+    });
+    return json(res, 200, { id, lead: updated });
+  } catch (error) { if (error.status) return json(res, error.status, { error: error.message }); return json(res, 500, { error: "Unable to save lead field." }); }
+}
+
+async function updateLead(req, res, db, actor, id, parsedBody = null) {
+  const body = parsedBody || await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); if (body.permission !== undefined && body.permission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const fields = leadFields({ ...current, ...body, custom_values: body.custom_values ?? current.custom_values }); if (!fields || !(await validDropdownValue(db, "lead_type", fields.lead_type)) || !(await validDropdownValue(db, "lead_stage", fields.stage)) || !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,email=$3,phone=$4,company=$5,team=$6,lead_type=$7,priority=$8,stage=$9,permission=$10,lead_status=$11,owner_user_id=$12,pso_date=$13,custom_values=$14,legacy_finance=$15,updated_at=now() WHERE id=$1", [id, fields.name, fields.email, fields.phone, fields.company, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch { return json(res, 500, { error: "Unable to save lead." }); }
 }
 async function reassignLeadRoundRobin(req, res, db, actor, id) {
   const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0];
@@ -558,6 +631,14 @@ async function route(req, res, db) {
   if (user && typeof db.query === "function") { try { user.capability_overrides = (await db.query("SELECT capability FROM user_capability_overrides WHERE user_id=$1", [user.id])).rows.map((row) => row.capability); } catch { user.capability_overrides = []; } }
   if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: publicUser(user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
+  const userPreferenceMatch = url.pathname.match(/^\/api\/user-preferences\/([^/]+)$/);
+  if (userPreferenceMatch && ["GET", "POST", "DELETE"].includes(req.method)) {
+    const key = decodeURIComponent(userPreferenceMatch[1]);
+    if (!USER_PREFERENCE_KEY_RE.test(key)) return json(res, 400, { error: "Invalid preference key." });
+    if (req.method === "GET") return userPreferenceGet(res, db, user, key);
+    if (req.method === "DELETE") return userPreferenceDelete(res, db, user, key);
+    return userPreferenceWrite(req, res, db, user, key);
+  }
   if (url.pathname === "/api/change-password" && req.method === "POST") return changePassword(req, res, db, user);
   if (url.pathname === "/api/dropdowns" && req.method === "GET") return safeDropdownOperation(res, () => Dropdowns.dropdownsList(req, res, db, user));
   if (url.pathname === "/api/dropdowns" && req.method === "POST") return safeDropdownOperation(res, () => Dropdowns.createDefinition(req, res, db, user));
@@ -678,11 +759,11 @@ async function route(req, res, db) {
   const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);
   if (leadWriteMatch && req.method === "POST") { const id = decodeURIComponent(leadWriteMatch[1]); if (leadWriteMatch[2] === "permission") { if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." }); return changeLeadPermission(req, res, db, user, id); } if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id); }
   const leadUpdateMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
-  if (leadUpdateMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return updateLead(req, res, db, user, decodeURIComponent(leadUpdateMatch[1])); }
+  if (leadUpdateMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const id = decodeURIComponent(leadUpdateMatch[1]); const body = await readJson(req); if (body.field !== undefined) return updateInlineLeadField(req, res, db, user, id, body); return updateLead(req, res, db, user, id, body); }
   const leadMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
   if (leadMatch && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
-    return leadDetail(req, res, db, decodeURIComponent(leadMatch[1]));
+    return leadDetail(req, res, db, decodeURIComponent(leadMatch[1]), user);
   }
   if (url.pathname === "/api/logout" && req.method === "POST") { await db.dropSession(token); try { await writeAudit(db, { actorUserId: user.id, action: "auth.logout", entityType: "auth", entityId: user.id, newValue: "session_deleted", ip: req.socket.remoteAddress }); } catch {} return json(res, 200, { ok: true }, { "Set-Cookie": S.sessionCookie(req, "", 0, PROXY_CONFIG) }); }
   return json(res, 404, { error: "Not found." });
@@ -731,4 +812,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
