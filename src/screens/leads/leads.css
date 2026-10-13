@@ -145,6 +145,42 @@
   .lead-filter-secondary { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
   .clear-filters { width: auto; }
 }
+
+/* Local UI additions: Quick Add and lead filter chips. */
+.quick-add-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--backdrop); }
+.quick-add-modal { width: min(1180px, 100%); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel); box-shadow: var(--shadow-pop); }
+.quick-add-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 28px 30px 26px; border-bottom: 1px solid var(--line); }
+.quick-add-title-wrap { display: flex; align-items: center; gap: 18px; }
+.quick-add-icon { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: var(--red-050); color: var(--red); }
+.quick-add-header h2 { margin: 0; color: var(--ink); font-size: 28px; }
+.quick-add-header p { margin: 5px 0 0; color: var(--ink-2); }
+.quick-add-close { display: grid; width: 34px; height: 34px; place-items: center; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; }
+.quick-add-fields { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 22px; padding: 32px 42px 20px; }
+.quick-add-field { display: grid; min-width: 0; gap: 9px; }
+.quick-add-field > span { color: var(--ink); font-size: 14px; font-weight: 600; }
+.quick-add-field b { color: var(--red); }
+.quick-add-input, .quick-add-select { position: relative; display: flex; align-items: center; min-width: 0; color: var(--ink-2); }
+.quick-add-input > svg, .quick-add-select > svg { position: absolute; left: 15px; z-index: 1; pointer-events: none; }
+.quick-add-input input, .quick-add-input select, .quick-add-select select { width: 100%; min-height: 48px; padding: 0 14px 0 47px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; }
+.quick-add-products { grid-column: span 2; }
+.quick-add-actions { display: flex; justify-content: flex-end; gap: 14px; padding: 12px 42px 32px; }
+.quick-add-save { border-color: var(--red); background: var(--red); color: var(--bg); }
+.lead-quick-chip-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; padding: 4px 0; }
+.lead-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink-1); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.lead-chip:hover, .lead-chip-active { border-color: var(--red); background: var(--red-050); color: var(--red); }
+.lead-chip-date { border-color: color-mix(in srgb, #f97316 45%, var(--line)); color: #c2410c; background: #fff7ed; }
+.lead-chip-activity, .lead-chip-filter { border-color: color-mix(in srgb, var(--red) 35%, var(--line)); color: var(--red); background: var(--red-050); }
+.lead-chip-divider { width: 1px; height: 20px; margin: 0 2px; background: var(--line); }
+.lead-chip-wrap { position: relative; }
+.call-logs-dropdown { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; display: grid; min-width: 230px; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-pop); }
+.call-logs-search { min-height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.call-logs-member { padding: 8px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-1); text-align: left; cursor: pointer; }
+.call-logs-member:hover, .call-logs-member-active { background: var(--red-050); color: var(--red); }
+.lead-pso-stage-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink-2); font-size: 12px; }
+.lead-pso-stage-bar button { margin-left: auto; border: 0; background: transparent; color: var(--red); cursor: pointer; }
+.lead-create-form { display: none; }
+@media (max-width: 900px) { .quick-add-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-inline: 26px; } .quick-add-products { grid-column: auto; } }
+@media (max-width: 560px) { .quick-add-fields { grid-template-columns: 1fr; padding: 24px 20px 10px; } .quick-add-actions { padding-inline: 20px; } }
 @media (max-width: 720px) {
   .leads-header { gap: 16px; margin-bottom: 20px; }
   .leads-header > .leads-button { width: 100%; }

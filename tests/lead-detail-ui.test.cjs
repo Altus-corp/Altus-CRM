@@ -7,6 +7,10 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /<th scope="col">Status<\/th>/, "Leads table should show a status column");
   assert.match(pageSource, /className="lead-status-select"/, "Lead status should use the table dropdown");
   assert.match(pageSource, /updateLeadStatus/, "Lead status dropdown should save changes");
+  assert.match(pageSource, /quick-add-modal/, "Leads page should include the Quick Add modal");
+  assert.match(pageSource, /lead-quick-chip-bar/, "Leads page should include the quick-filter chip bar");
+  assert.match(pageSource, /Call Logs/, "Leads page should include the Call Logs filter");
+  assert.match(pageSource, /Select Member/, "Admin Call Logs filter should include member selection");
 
   // Header & eyebrow
   assert.match(pageSource, /LEAD DETAIL/, "Should include LEAD DETAIL eyebrow");
