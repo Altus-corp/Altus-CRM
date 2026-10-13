@@ -16,7 +16,7 @@ const A = require("./accounts.cjs");
 const { QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, validateQuickFilter, buildQuickFilterWhere } = require("./quick-filters.cjs");
 const { guardedDatabaseUrl, reportFailure, databaseConnectionString } = require("./load-env.cjs");
 const { isSupabaseUrl } = require("./write-guard.cjs");
-const { sqlExpression } = require("../shared/lead-field-resolver.cjs");
+const { resolveLeadValue, sqlExpression } = require("../shared/lead-field-resolver.cjs");
 const Dropdowns = require("./dropdowns.cjs");
 const LeadImport = require("./lead-import.cjs");
 const { assignLeadRoundRobin, writeAssignmentHistory } = require("./lead-assignment.cjs");
@@ -35,6 +35,17 @@ const LEAD_SORTS = {
   pso_date: sqlExpression("psoDate"), next_follow_up_at: sqlExpression("nextFollowUpAt"), last_call_at: sqlExpression("lastCalledOn"), updated_at: sqlExpression("updated_at"),
   company: sqlExpression("company"), designation: sqlExpression("designation"), lead_source: sqlExpression("leadSource"), business_category: sqlExpression("business_category"), rating: sqlExpression("rating"),
 };
+const CANONICAL_LEAD_FIELDS = Object.freeze([
+  "name", "first_name", "last_name", "leadNo", "leadTypeCode", "company", "cellNo", "phone", "email", "designation", "businessCategory", "business_category", "leadSource", "rating", "permission", "lastCalledOn", "last_called_on", "lead_acquisition_date", "nature_of_business", "proposed_solution", "invite_sent_by_introducer", "invite_date_sent", "introducer_call_done", "introducer_call_date", "introducer_feedback", "introducer_name", "employee_name", "association_network_name", "chapter_name", "calling_resolution", "next_call_on", "calling_remarks", "intro_video_sent", "email_sent", "whatsapp_message_sent", "extra_notes", "created_at", "updated_at", "last_opened_at",
+]);
+function materializeLead(lead) {
+  const result = { ...lead };
+  for (const key of CANONICAL_LEAD_FIELDS) {
+    const value = resolveLeadValue(result, key);
+    if (value !== null && value !== undefined && (result[key] === null || result[key] === undefined || result[key] === "")) result[key] = value;
+  }
+  return result;
+}
 const LEAD_STAGE_SEMANTIC = "(SELECT o.semantic_key FROM dropdown_options o JOIN dropdown_definitions d ON d.id=o.dropdown_id WHERE d.key='lead_stage' AND o.value=l.stage AND o.is_active=true LIMIT 1)";
 
 const LEAD_VIEWS = Object.freeze({
@@ -207,7 +218,7 @@ async function leadsList(req, res, db, url) {
   // Keep the list endpoint usable while an older preview database is waiting for
   // migration 018. The field is optional in the client until that migration runs.
   const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY ${LEAD_SORTS[sort]} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
-  return json(res, 200, { items: rows.rows, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
+  return json(res, 200, { items: rows.rows.map(materializeLead), page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
 async function leadDetail(req, res, db, id, actor = null) {
@@ -230,7 +241,7 @@ async function leadDetail(req, res, db, id, actor = null) {
     db.query("SELECT n.*, u.name AS author_name FROM lead_notes n LEFT JOIN users u ON u.id = n.created_by WHERE n.lead_id = $1 ORDER BY n.created_at DESC NULLS LAST, n.id DESC", [id]),
     db.query("SELECT * FROM lead_products WHERE lead_id = $1 ORDER BY product_code ASC, id ASC", [id]),
   ]);
-  return json(res, 200, { lead, calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, notes: notes.rows, products: products.rows });
+  return json(res, 200, { lead: materializeLead(lead), calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, notes: notes.rows, products: products.rows });
 }
 
 function activityPage(url) {
