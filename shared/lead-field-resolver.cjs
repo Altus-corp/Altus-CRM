@@ -8,12 +8,12 @@ const FIELD_MAP = Object.freeze({
   leadNo: { column: "lead_no" },
   leadTypeCode: { column: "lead_type" },
   company: { column: "company", aliases: ["Company", "Company Name"] },
-  cellNo: { column: "phone", aliases: ["cell_no", "mobile", "Mobile", "Cell No"] },
-  phone: { column: "phone", aliases: ["cell_no", "mobile", "Mobile", "Cell No"] },
+  cellNo: { columns: ["phone", "alternate_phone"], aliases: ["cell_no", "mobile", "Mobile", "Cell No"] },
+  phone: { columns: ["phone", "alternate_phone"], aliases: ["cell_no", "mobile", "Mobile", "Cell No"] },
   email: { column: "email", aliases: ["Email", "Email ID"] },
   designation: { column: "designation", aliases: ["Designation"] },
-  city: { column: "city", aliases: ["City", "Location"] },
-  leadSource: { column: "lead_source", aliases: ["leadSource", "Lead Source", "Source"] },
+  city: { columns: ["city", "location"], aliases: ["City", "Location"] },
+  leadSource: { columns: ["lead_source", "lead_source_secondary"], aliases: ["leadSource", "Lead Source", "Source"] },
   sourceSystem: { column: "source_system" },
   permission: { column: "permission" },
   stage: { column: "stage" },
@@ -86,8 +86,10 @@ function resolveLeadValue(lead, key) {
     return normalizeValue(lead.name);
   }
   const definition = FIELD_MAP[key] || { custom: key };
-  if (definition.column && lead[definition.column] !== undefined) {
-    const value = normalizeValue(lead[definition.column]);
+  const columns = definition.columns || (definition.column ? [definition.column] : []);
+  for (const column of columns) {
+    if (lead[column] === undefined) continue;
+    const value = normalizeValue(lead[column]);
     if (value !== null && value !== undefined) return value;
   }
   const workbook = lead.custom_values?.mishtie_workbook;
@@ -111,9 +113,10 @@ function sqlExpression(key, alias = "l") {
   const definition = FIELD_MAP[key] || { custom: key };
   // Direct lead columns keep the existing indexed query path. Custom-backed
   // fields (and lastCalledOn, which has both sources) use the fallback chain.
-  if (definition.column && !definition.custom) return `${alias}.${definition.column}`;
+  const columns = definition.columns || (definition.column ? [definition.column] : []);
+  if (columns.length && !definition.custom) return columns.length === 1 ? `${alias}.${columns[0]}` : `COALESCE(${columns.map((column) => `${alias}.${column}`).join(", ")})`;
   const expressions = [];
-  if (definition.column) expressions.push(`${alias}.${definition.column}`);
+  for (const column of columns) expressions.push(`${alias}.${column}`);
   const keys = [definition.custom || key, ...(definition.aliases || [])];
   for (const source of ["lead_fields", null, "legacy_finance"]) {
     for (const candidate of keys) {

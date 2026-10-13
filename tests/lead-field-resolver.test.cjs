@@ -30,6 +30,13 @@ test("business category and industry remain separate mappings", () => {
   assert.equal(resolveLeadValue(lead, "industry"), "Health");
 });
 
+test("contact and location fields fall back to alternate lead columns", () => {
+  const lead = { alternate_phone: "+91 99999 00000", location: "Pune", lead_source_secondary: "Referral" };
+  assert.equal(resolveLeadValue(lead, "phone"), "+91 99999 00000");
+  assert.equal(resolveLeadValue(lead, "city"), "Pune");
+  assert.equal(resolveLeadValue(lead, "leadSource"), "Referral");
+});
+
 test("resolved SQL expressions use the same source order", () => {
   const sql = sqlExpression("business_category");
   assert.match(sql, /lead_fields/);

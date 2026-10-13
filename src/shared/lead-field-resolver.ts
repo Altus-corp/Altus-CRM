@@ -59,6 +59,9 @@ const direct: Record<string, string> = {
   owner: "owner_user_id", isPrePsDone: "is_pre_ps_done", first_name: "first_name", last_name: "last_name",
   created_at: "created_at", updated_at: "updated_at", last_opened_at: "last_opened_at",
 };
+const directFallbacks: Record<string, string[]> = {
+  cellNo: ["phone", "alternate_phone"], phone: ["phone", "alternate_phone"], city: ["city", "location"], leadSource: ["lead_source", "lead_source_secondary"],
+};
 
 function clean(value: unknown) {
   if (typeof value === "string" && value.trim().toLowerCase() === "not provided") return null;
@@ -73,8 +76,8 @@ export function resolveLeadValue(lead: ResolverLead, key: string): unknown {
     const last = resolveLeadValue(lead, "last_name");
     return first || last ? [first, last].filter(Boolean).join(" ") : clean(lead.name);
   }
-  const column = direct[key];
-  if (column) {
+  const columns = directFallbacks[key] || (direct[key] ? [direct[key]] : []);
+  for (const column of columns) {
     const value = clean(lead[column]);
     if (value !== null && value !== undefined) return value;
   }
