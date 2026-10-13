@@ -376,16 +376,20 @@
   .filters-collapsed { grid-template-columns: minmax(250px, 1fr) minmax(260px, max-content) 90px; }
 }
 
-/* Lead detail drawer: half-width panel with a neutral, theme-aware scrim. */
+/* Lead detail panel: a wide workspace view rather than a narrow side drawer. */
 .drawer-backdrop {
   background: color-mix(in srgb, var(--ink) 14%, transparent);
 }
 
 .lead-drawer {
-  width: min(780px, 94vw);
-  max-width: 780px;
+  width: min(80vw, 1440px);
+  max-width: 80vw;
   padding: 28px 32px;
 }
+
+/* Opening an activity replaces the detail view; it never creates a stacked third panel. */
+.leads-page.activity-form-active > .drawer-backdrop:not(.add-activity-backdrop) { visibility: hidden; }
+.add-activity-backdrop { justify-content: center; padding: 18px; background: color-mix(in srgb, var(--ink) 14%, transparent); }
 
 @media (max-width: 900px) {
   .manage-actions .leads-button { padding-inline: 10px; }
@@ -1908,13 +1912,13 @@
 }
 
 .lead-add-activity-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(620px, 95vw);
+  position: relative;
+  inset: auto;
+  width: min(80vw, 1180px);
+  height: min(900px, calc(100vh - 36px));
   background: var(--panel);
-  box-shadow: -4px 0 28px rgba(0, 0, 0, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
   display: flex;
   flex-direction: column;
   z-index: 1070;
