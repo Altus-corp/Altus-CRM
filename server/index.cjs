@@ -597,6 +597,23 @@ async function productCatalogList(res, db) {
   const rows = await db.query("SELECT id,code,label FROM master_values WHERE master_type='product' AND active=true ORDER BY sort_order,label", []);
   return json(res, 200, { products: rows.rows.map((row) => ({ id: row.id, code: String(row.code || row.label), label: row.label })) });
 }
+async function productStagesList(res, db, productId) {
+  const product = (await db.query("SELECT id FROM master_values WHERE id=$1 AND master_type='product'", [productId])).rows[0];
+  if (!product) return json(res, 404, { error: "Product not found." });
+  const rows = await db.query("SELECT id,product_id,label,sort_order,active FROM product_stages WHERE product_id=$1 ORDER BY sort_order,label", [productId]);
+  return json(res, 200, { stages: rows.rows });
+}
+async function productStageWrite(req, res, db, actor, productId, stageId = null) {
+  const body = await readJson(req); const label = String(body.label || "").trim();
+  if (!label || label.length > 120) return userWriteError(res, 400, "Invalid product stage.");
+  const product = (await db.query("SELECT id FROM master_values WHERE id=$1 AND master_type='product'", [productId])).rows[0];
+  if (!product) return userWriteError(res, 404, "Product not found.");
+  const id = stageId || `product-stage-${crypto.randomUUID()}`;
+  try { await transaction(db, async (tx) => {
+    await tx.query("INSERT INTO product_stages(id,product_id,label,sort_order,active) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET label=EXCLUDED.label,sort_order=EXCLUDED.sort_order,active=EXCLUDED.active,updated_at=now()", [id, productId, label, Number.isInteger(body.sort_order) ? body.sort_order : 0, body.active !== false]);
+    await writeAudit(tx, { actorUserId: actor.id, action: stageId ? "product_stage.updated" : "product_stage.created", entityType: "product_stage", entityId: id, newValue: label, ip: req.socket.remoteAddress });
+  }); return json(res, stageId ? 200 : 201, { id }); } catch (error) { return json(res, error?.code === "23505" ? 409 : 500, { error: error?.code === "23505" ? "That stage already exists for this product." : "Unable to save product stage." }); }
+}
 async function masterWrite(req, res, db, actor, id = null) {
   const body = await readJson(req); const masterType = String(body.master_type || "").trim(); const label = String(body.label || "").trim();
   if (!masterType || !label) return userWriteError(res, 400, "Invalid master value.");
@@ -718,6 +735,9 @@ async function route(req, res, db) {
   if (url.pathname === "/api/masters" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to edit masters."); return safeUserOperation(res, () => masterWrite(req, res, db, user)); }
   const masterMatch = url.pathname.match(/^\/api\/masters\/([^/]+)$/); if (masterMatch && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to edit masters."); return safeUserOperation(res, () => masterWrite(req, res, db, user, decodeURIComponent(masterMatch[1]))); }
   if (url.pathname === "/api/products" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to view products." }); return safeUserOperation(res, () => productCatalogList(res, db)); }
+  const productStageMatch = url.pathname.match(/^\/api\/products\/([^/]+)\/stages(?:\/([^/]+))?$/);
+  if (productStageMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return userWriteError(res, 403, "You do not have permission to view product stages."); return safeUserOperation(res, () => productStagesList(res, db, decodeURIComponent(productStageMatch[1]))); }
+  if (productStageMatch && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage product stages."); return safeUserOperation(res, () => productStageWrite(req, res, db, user, decodeURIComponent(productStageMatch[1]), productStageMatch[2] ? decodeURIComponent(productStageMatch[2]) : null)); }
   if (url.pathname === "/api/targets" && req.method === "GET") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to view targets."); return safeUserOperation(res, () => targetsList(res, db)); }
   if (url.pathname === "/api/targets" && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user)); }
   const targetMatch = url.pathname.match(/^\/api\/targets\/([^/]+)$/); if (targetMatch && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user, decodeURIComponent(targetMatch[1]))); }

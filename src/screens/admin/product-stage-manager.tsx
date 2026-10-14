@@ -1,0 +1,16 @@
+import { useEffect, useState } from "react";
+import { api } from "../../shared/api/client";
+
+type Product = { id: string; label: string; active: boolean };
+type Stage = { id: string; label: string; active: boolean; sort_order: number };
+
+export function ProductStageManager() {
+  const [products, setProducts] = useState<Product[]>([]); const [productId, setProductId] = useState(""); const [stages, setStages] = useState<Stage[]>([]); const [label, setLabel] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const loadProducts = async () => { const result = await api<{ values: Product[] }>("/api/masters?type=product"); const next = result.values.filter((item) => item.active); setProducts(next); setProductId((value) => value || next[0]?.id || ""); };
+  const loadStages = async (id: string) => { if (!id) return setStages([]); const result = await api<{ stages: Stage[] }>(`/api/products/${encodeURIComponent(id)}/stages`); setStages(result.stages); };
+  useEffect(() => { void loadProducts().catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load products.")); }, []);
+  useEffect(() => { void loadStages(productId).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load stages.")); }, [productId]);
+  async function save(event: React.FormEvent) { event.preventDefault(); if (!productId || !label.trim()) return; setBusy(true); try { await api(`/api/products/${encodeURIComponent(productId)}/stages`, { method: "POST", body: JSON.stringify({ label: label.trim(), sort_order: stages.length }) }); setLabel(""); await loadStages(productId); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to save stage."); } finally { setBusy(false); } }
+  async function toggle(stage: Stage) { if (!productId) return; setBusy(true); try { await api(`/api/products/${encodeURIComponent(productId)}/stages/${encodeURIComponent(stage.id)}`, { method: "POST", body: JSON.stringify({ label: stage.label, sort_order: stage.sort_order, active: !stage.active }) }); await loadStages(productId); } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to update stage."); } finally { setBusy(false); } }
+  return <section className="admin-products"><h2>Product stages</h2><p>Stages apply only to the selected product.</p><label>Product<select value={productId} onChange={(event) => setProductId(event.target.value)}>{products.map((product) => <option key={product.id} value={product.id}>{product.label}</option>)}</select></label><form className="admin-product-form" onSubmit={(event) => void save(event)}><label>Stage name<input required value={label} onChange={(event) => setLabel(event.target.value)} placeholder="e.g. Demo booked" /></label><button className="admin-create-submit" disabled={busy || !productId}>{busy ? "Saving…" : "Add stage"}</button></form>{error && <p className="admin-reset-error">{error}</p>}<div className="admin-product-list">{stages.map((stage) => <div key={stage.id}><span>{stage.label}</span><small>{stage.active ? "Active" : "Disabled"}</small><button type="button" disabled={busy} onClick={() => void toggle(stage)}>{stage.active ? "Deactivate" : "Enable"}</button></div>)}{productId && !stages.length && <p>No stages yet.</p>}</div></section>;
+}
