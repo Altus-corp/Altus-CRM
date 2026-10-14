@@ -116,6 +116,79 @@ test("wired drawer writes reject invalid fixture data and succeed against expect
   }
 });
 
+test("structured lead edit persists core and form custom fields for the selected lead", async () => {
+  const sql = [];
+  const lead = { ...fixtureLead(), first_name: "Old", last_name: "Lead", designation: "Old role", custom_values: { lead_fields: { extra_notes: "Old note" } }, legacy_finance: {} };
+  const db = {
+    sessionUser: async () => "owner-1",
+    userById: async () => ({ id: "owner-1", role: "Owner", active: true, offboarded: false }),
+    query: async (text, params = []) => {
+      sql.push({ text, params });
+      if (text.startsWith("SELECT * FROM leads WHERE id=$1")) return { rows: [lead] };
+      if (text.includes("FROM dropdown_definitions d JOIN dropdown_options")) return { rows: [{ id: "stage-option" }] };
+      if (text.includes("FROM workspace_settings")) return { rows: [{ value: [
+        { key: "extra_notes", label: "Extra Notes", type: "text" },
+        { key: "calling_remarks", label: "Calling Remarks", type: "textarea" },
+        { key: "intro_video_sent", label: "Intro video", type: "boolean" },
+        { key: "email_sent", label: "Email sent", type: "boolean" },
+        { key: "whatsapp_message_sent", label: "WhatsApp sent", type: "boolean" },
+      ] }] };
+      if (text.includes("SELECT id FROM leads WHERE (($1::text IS NOT NULL")) return { rows: [] };
+      return { rows: [] };
+    },
+  };
+  const result = await callRoute(db, "PATCH", `/api/leads/${LEAD_ID}`, {
+    name: "Updated Lead", first_name: "Updated", last_name: "Lead", email: "updated@example.test", phone: "0000000000", company: "Updated Co", designation: "Updated role", team: "Sales", lead_type: "DL", permission: "Yes", lead_status: "New",
+    lead_fields: { calling_remarks: "Updated remarks", intro_video_sent: "Yes", email_sent: "No", whatsapp_message_sent: "Yes", extra_notes: "Updated note" },
+  });
+  assert.equal(result.res.status, 200);
+  const update = sql.find((entry) => entry.text.startsWith("UPDATE leads SET"));
+  assert.ok(update);
+  assert.equal(update.params[0], LEAD_ID);
+  assert.equal(update.params[7], "Updated role");
+  assert.deepEqual(update.params[16].lead_fields, { extra_notes: "Updated note", calling_remarks: "Updated remarks", intro_video_sent: true, email_sent: false, whatsapp_message_sent: true });
+});
+
+test("editing only the phone preserves existing required lead values", async () => {
+  const sql = [];
+  const db = {
+    sessionUser: async () => "owner-1",
+    userById: async () => ({ id: "owner-1", role: "Owner", active: true, offboarded: false }),
+    query: async (text, params = []) => {
+      sql.push({ text, params });
+      if (text.startsWith("SELECT * FROM leads WHERE id=$1")) return { rows: [fixtureLead()] };
+      if (text.includes("SELECT id FROM leads WHERE (($1::text IS NOT NULL")) return { rows: [] };
+      return { rows: [] };
+    },
+  };
+  const result = await callRoute(db, "PATCH", `/api/leads/${LEAD_ID}`, { phone: "9999999999", lead_type: "", stage: "", permission: "", lead_fields: {} });
+  assert.equal(result.res.status, 200);
+  const update = sql.find((entry) => entry.text.startsWith("UPDATE leads SET"));
+  assert.ok(update);
+  assert.equal(update.params[1], "Synthetic Lead");
+  assert.equal(update.params[5], "9999999999");
+  assert.equal(update.params[9], "DL");
+  assert.equal(update.params[11], "lead");
+  assert.equal(update.params[12], "Yes");
+});
+
+test("phone-only edit also repairs legacy rows with empty dropdown fields", async () => {
+  const sql = [];
+  const db = {
+    sessionUser: async () => "owner-1",
+    userById: async () => ({ id: "owner-1", role: "Owner", active: true, offboarded: false }),
+    query: async (text, params = []) => {
+      sql.push({ text, params });
+      if (text.startsWith("SELECT * FROM leads WHERE id=$1")) return { rows: [{ ...fixtureLead(), lead_type: null, stage: null, permission: null }] };
+      if (text.includes("SELECT id FROM leads WHERE (($1::text IS NOT NULL")) return { rows: [] };
+      return { rows: [] };
+    },
+  };
+  const result = await callRoute(db, "PATCH", `/api/leads/${LEAD_ID}`, { phone: "9999999999", lead_type: "", stage: "", permission: "", lead_fields: {} });
+  assert.equal(result.res.status, 200);
+  assert.equal(sql.some((entry) => entry.text.startsWith("UPDATE leads SET")), true);
+});
+
 test("load detail is session and capability protected and reads drawer tables", async () => {
   const path = `/api/leads/${LEAD_ID}`;
   assert.equal((await callRoute(fixtureDb({ session: false }), "GET", path)).res.status, 401);
@@ -134,5 +207,13 @@ test("primary timeline renders persisted assignment history instead of a hard-co
   assert.match(source, /const SHOW_DEMO_TIMELINE = false/);
   assert.doesNotMatch(source, /Lead round-robined to \{ownerName\}/);
   assert.match(source, /assignmentHistory\.map/);
+});
+
+test("lead edit form normalizes object-backed date values before rendering date inputs", () => {
+  const source = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
+  assert.match(source, /function formScalar\(value: unknown\)/);
+  assert.match(source, /FORM_DATE_FIELDS/);
+  assert.match(source, /Object\.keys\(EMPTY_LEAD_FORM\)\.map\(\(key\) => \[key, formValue/);
+  assert.doesNotMatch(source, /Object\.keys\(EMPTY_LEAD_FORM\)\.map\(\(key\) => \[key, String\(/);
 });
 

@@ -143,6 +143,30 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Products/, "Should include Products field");
 });
 
+test("Lead Details edit transition dismisses the drawer before showing the edit form", () => {
+  const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  assert.match(functionSource, /function beginEdit\(\).*setDetail\(null\)/s);
+  assert.match(functionSource, /function beginEdit\(\).*next\.delete\("open"\)/s);
+  assert.match(functionSource, /const leadId = editingLeadId \|\| detail\?\.lead\.id/);
+  assert.match(pageSource, /onClick=\{screen\.beginEdit\}/);
+  assert.match(pageSource, /onCancel=\{screen\.cancelEdit\}/);
+});
+
+test("Lead Details edit action follows the lead edit capability", () => {
+  const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  assert.match(pageSource, /className="lead-details-edit-btn"[\s\S]*disabled=\{!screen\.canEdit\}/);
+  assert.match(functionSource, /function beginEdit\(\)[\s\S]*if \(!canEdit\)[\s\S]*permission to edit leads/);
+  assert.match(functionSource, /async function saveLeadEdit[\s\S]*if \(!canEdit\)/);
+});
+
+test("successful lead edit returns to the main list and uses a short success toast", () => {
+  const source = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
+  assert.match(source, /showToast\(\"Lead updated successfully\.\", 1800\)/);
+  assert.match(source, /setEditing\(false\); setEditingLeadId\(null\); showToast/);
+});
+
 test("Lead Details styles exist in leads.css", () => {
   const cssSource = fs.readFileSync("src/screens/leads/leads.css", "utf8");
 

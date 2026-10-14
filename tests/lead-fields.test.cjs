@@ -7,7 +7,7 @@ function db() { return { query: async (sql) => sql.includes("workspace_settings"
 
 test("default lead fields cover the requested acquisition and introducer data", () => {
   const keys = new Set(LeadFields.DEFAULT_FIELDS.map((field) => field.key));
-  for (const key of ["lead_acquisition_date", "business_category", "nature_of_business", "proposed_solution", "invite_sent_by_introducer", "introducer_feedback", "introducer_name", "employee_name", "association_network_name", "chapter_name", "extra_notes"]) assert.ok(keys.has(key), key);
+  for (const key of ["lead_acquisition_date", "business_category", "nature_of_business", "proposed_solution", "invite_sent_by_introducer", "introducer_feedback", "introducer_name", "employee_name", "association_network_name", "chapter_name", "extra_notes", "calling_remarks", "intro_video_sent", "email_sent", "whatsapp_message_sent"]) assert.ok(keys.has(key), key);
 });
 
 test("import maps Brevo-style and requested field headers into safe lead custom values", async () => {

@@ -24,6 +24,13 @@ const DEFAULT_FIELDS = Object.freeze([
   ["association_network_name", "Association/Network Name", "text"],
   ["chapter_name", "Chapter Name", "text"],
   ["extra_notes", "Extra Notes", "text"],
+  ["last_called_on", "Last Called On", "text"],
+  ["calling_resolution", "Calling Resolution", "text"],
+  ["next_call_on", "Next Call On", "text"],
+  ["calling_remarks", "Calling Remarks", "textarea"],
+  ["intro_video_sent", "2 Mins Intro Video Sent", "boolean"],
+  ["email_sent", "Email Sent", "boolean"],
+  ["whatsapp_message_sent", "Msg Sent on WhatsApp", "boolean"],
 ].map(([key, label, type], order) => Object.freeze({ key, label, type, active: true, detail_visible: true, order })));
 
 function text(value) { return String(value ?? "").trim(); }
@@ -49,7 +56,7 @@ async function getDefinitions(db) {
   return normalizeDefinitions(row?.value);
 }
 
-function normalizeValues(input, definitions) {
+function normalizeValues(input, definitions, { allowEmpty = false } = {}) {
   const source = plain(input); const byKey = new Map(definitions.map((field) => [field.key, field])); const values = {};
   for (const [key, raw] of Object.entries(source)) {
     const field = byKey.get(key); if (!field) continue;
@@ -57,9 +64,10 @@ function normalizeValues(input, definitions) {
       if (raw === true || raw === false) values[key] = raw;
       else if (["yes", "true", "1"].includes(text(raw).toLowerCase())) values[key] = true;
       else if (["no", "false", "0"].includes(text(raw).toLowerCase())) values[key] = false;
+      else if (allowEmpty && raw === "") values[key] = null;
       continue;
     }
-    const value = text(raw); if (!value) continue;
+    const value = text(raw); if (!value) { if (allowEmpty) values[key] = null; continue; }
     if (field.type === "date" && !validDate(value)) continue;
     if (field.type === "number" && !Number.isFinite(Number(value.replace(/,/g, "")))) continue;
     if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) continue;
@@ -72,7 +80,7 @@ function normalizeValues(input, definitions) {
 
 function mergeLeadValues(existing, incoming, definitions) {
   const base = plain(existing); const current = plain(base.lead_fields);
-  return { ...base, lead_fields: { ...current, ...normalizeValues(incoming, definitions) } };
+  return { ...base, lead_fields: { ...current, ...normalizeValues(incoming, definitions, { allowEmpty: true }) } };
 }
 
 async function saveDefinitions(db, actor, raw, ip) {
