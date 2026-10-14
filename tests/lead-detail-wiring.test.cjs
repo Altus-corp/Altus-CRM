@@ -131,17 +131,7 @@ test("load detail is session and capability protected and reads drawer tables", 
 
 test("primary timeline renders persisted assignment history instead of a hard-coded assignment", () => {
   const source = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
-  const knownDemoStrings = [
-    "Follow-up scheduled",
-    "Latest activity",
-    "WhatsApp message sent",
-    "Call activity marked",
-    "Aarav Mehta",
-    "Nikhil Shah",
-    "Productivity Shastra",
-    "Score 42",
-  ];
-  for (const value of knownDemoStrings) assert.match(source, new RegExp(value.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")), value);
+  assert.match(source, /const SHOW_DEMO_TIMELINE = false/);
   assert.doesNotMatch(source, /Lead round-robined to \{ownerName\}/);
   assert.match(source, /assignmentHistory\.map/);
 });
