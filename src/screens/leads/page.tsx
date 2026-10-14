@@ -519,6 +519,9 @@ export function LeadsPage() {
   const [activityFilterOpen, setActivityFilterOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [activityComposer, setActivityComposer] = useState<"note" | "call" | "followup" | null>(null);
+  const [detailPsoStage, setDetailPsoStage] = useState("Pre PSO");
+  const [detailPsoBarVisible, setDetailPsoBarVisible] = useState(false);
+  const [activeDetailProduct, setActiveDetailProduct] = useState("");
 
   // Add Note composer state matching reference design
   const [noteType, setNoteType] = useState<"general" | "call" | "meeting" | "handoff">("general");
@@ -623,6 +626,28 @@ export function LeadsPage() {
   useEffect(() => {
     if (screen.detail?.lead.id) setDetailTab("activity");
   }, [screen.detail?.lead.id]);
+  useEffect(() => {
+    if (!screen.detail && !screen.detailLoading) return;
+    const handleDetailEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (showAddActivityDrawer) {
+          setShowAddActivityDrawer(false);
+          return;
+        }
+        if (activityFilterOpen) {
+          setActivityFilterOpen(false);
+          return;
+        }
+        if (screen.editing) {
+          screen.setEditing(false);
+          return;
+        }
+        screen.closeDetail();
+      }
+    };
+    document.addEventListener("keydown", handleDetailEscape);
+    return () => document.removeEventListener("keydown", handleDetailEscape);
+  }, [screen.detail, screen.detailLoading, screen.closeDetail, screen.editing, showAddActivityDrawer, activityFilterOpen]);
   useEffect(() => { if (!screen.bulkUploadOpen) return; const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") screen.closeBulkUpload(); }; document.addEventListener("keydown", closeOnEscape); return () => document.removeEventListener("keydown", closeOnEscape); }, [screen.bulkUploadOpen, screen.closeBulkUpload]);
   function moveDetailTab(event: React.KeyboardEvent<HTMLButtonElement>, tab: LeadDetailTab) {
     const index = LEAD_DETAIL_TABS.findIndex(([key]) => key === tab);
@@ -1004,6 +1029,78 @@ export function LeadsPage() {
                 </button>
               ))}
             </div>
+
+            {/* 3b. Product and Stage Filter Chips */}
+            <div className="lead-detail-product-bar" role="toolbar" aria-label="Product and stage filters">
+              <button
+                className={`lead-chip lead-chip-filter${detailPsoBarVisible ? " lead-chip-active" : ""}`}
+                type="button"
+                aria-label="Filter by PSO"
+                aria-expanded={detailPsoBarVisible}
+                onClick={() => {
+                  setDetailPsoBarVisible((v) => !v);
+                  if (!detailPsoBarVisible) setDetailPsoStage("Pre PSO");
+                }}
+              >
+                <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <polygon points="13 1 1 1 5.5 6.5 5.5 12 8.5 13 8.5 6.5 13 1" />
+                </svg>
+                <span>PSO</span>
+                <svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <path d="m2 3.5 3 3 3-3" />
+                </svg>
+              </button>
+              {(["PS", "BSSO", "Altus OS", "Altus Concave", "Key note speech", "Consulting"] as const).map((label) => {
+                const isActive = activeDetailProduct === label;
+                return (
+                  <button
+                    key={label}
+                    className={`lead-chip lead-chip-filter${isActive ? " lead-chip-active" : ""}`}
+                    type="button"
+                    aria-label={`Filter by ${label}`}
+                    onClick={() => setActiveDetailProduct((curr) => (curr === label ? "" : label))}
+                  >
+                    <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                      <polygon points="13 1 1 1 5.5 6.5 5.5 12 8.5 13 8.5 6.5 13 1" />
+                    </svg>
+                    <span>{label}</span>
+                    <svg className="lead-chip-caret" viewBox="0 0 10 10" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                      <path d="m2 3.5 3 3 3-3" />
+                    </svg>
+                  </button>
+                );
+              })}
+            </div>
+            {detailPsoBarVisible && (
+              <div className="lead-pso-stage-bar" role="group" aria-label="PSO stage filter">
+                <span className="lead-pso-stage-label">PSO Stage</span>
+                <div className="lead-pso-stage-tabs">
+                  {(["Pre PSO", "During PSO", "Attend PSO", "Not Attend PSO"] as const).map((stage) => (
+                    <label key={stage} className="lead-pso-stage-tab">
+                      <input
+                        type="radio"
+                        name="detail-pso-stage"
+                        value={stage}
+                        checked={detailPsoStage === stage}
+                        onChange={() => setDetailPsoStage(stage)}
+                      />
+                      <span>{stage}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  className="lead-pso-clear"
+                  type="button"
+                  aria-label="Clear PSO stage filter"
+                  onClick={() => {
+                    setDetailPsoBarVisible(false);
+                    setDetailPsoStage("");
+                  }}
+                >
+                  <CloseIcon /> Clear
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 4. Tab Panel: Activity */}

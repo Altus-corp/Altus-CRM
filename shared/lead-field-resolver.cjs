@@ -86,10 +86,8 @@ function normalizeValue(value) {
 function nestedObjectSources(value, output = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return output;
   const entries = Object.entries(value);
-  if (entries.some(([, child]) => child && typeof child === "object" && !Array.isArray(child))) {
-    output.push(value);
-    for (const [, child] of entries) nestedObjectSources(child, output);
-  }
+  output.push(value);
+  for (const [, child] of entries) nestedObjectSources(child, output);
   return output;
 }
 

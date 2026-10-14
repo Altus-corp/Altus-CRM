@@ -11,7 +11,7 @@ test("default lead fields cover the requested acquisition and introducer data", 
 });
 
 test("import maps Brevo-style and requested field headers into safe lead custom values", async () => {
-  const file = Buffer.from("First Name,Last Name,Email ID,Cell No,Lead Acquisition Date,Invite Sent by Introducer,Introducer Name,Extra Notes\nSample,Person,sample@example.test,9000000000,2026-10-13,Yes,Sample Introducer,Sample note\n");
+  const file = Buffer.from("Lead No,First Name,Last Name,Email ID,Cell No,Lead Acquisition Date,Invite Sent by Introducer,Introducer Name,Extra Notes\nBREVO-001,Sample,Person,sample@example.test,9000000000,2026-10-13,Yes,Sample Introducer,Sample note\n");
   const result = await analyzeUpload(file, "brevo-export.csv", db());
   assert.equal(result.errors.length, 0);
   assert.equal(result.valid[0].values.name, "Sample Person");

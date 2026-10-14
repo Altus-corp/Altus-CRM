@@ -78,10 +78,8 @@ function clean(value: unknown) {
 function nestedObjectSources(value: unknown, output: Record<string, unknown>[] = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return output;
   const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.some(([, child]) => child && typeof child === "object" && !Array.isArray(child))) {
-    output.push(value as Record<string, unknown>);
-    for (const [, child] of entries) nestedObjectSources(child, output);
-  }
+  output.push(value as Record<string, unknown>);
+  for (const [, child] of entries) nestedObjectSources(child, output);
   return output;
 }
 
