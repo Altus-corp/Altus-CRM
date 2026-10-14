@@ -1,5 +1,5 @@
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Navbar, NAV_ITEMS } from "./nav";
 import { useLeadNavCounts, useNavGroupState } from "./function";
 import { useAuth } from "../auth/auth";
@@ -10,6 +10,52 @@ import { getTheme, setTheme } from "../theme/theme";
 import "./app-shell.css";
 
 type SearchResult = { id: string; name: string; company: string | null; stage: string | null };
+
+function MasterSidebar({
+  currentHref,
+  showAdmin,
+  adminNavbar,
+  theme,
+  hideMasterNavigation,
+}: {
+  currentHref: string;
+  showAdmin: boolean;
+  adminNavbar: ReactNode;
+  theme: "light" | "dark";
+  hideMasterNavigation: boolean;
+}) {
+  const leadMasterActive = currentHref.startsWith("/leads");
+
+  return <aside className="sidebar master-sidebar">
+    <div className="master-sidebar-brand">
+      <Link className="topbar-logo" to="/leads" aria-label="Go to Leads">
+        <img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" />
+        <span>Altus <b>CRM</b></span>
+      </Link>
+    </div>
+    <nav className="master-navigation" aria-label="Master navigation">
+      {!hideMasterNavigation && <NavLink
+          to="/leads"
+          end
+          className={leadMasterActive ? "master-navigation-toggle master-navigation-parent active" : "master-navigation-toggle master-navigation-parent"}
+        >
+          <span className="master-navigation-icon" aria-hidden="true">◫</span>
+          <span>Lead Master</span>
+        </NavLink>}
+      {!hideMasterNavigation && <div className="master-navigation-placeholder" aria-label="Product Master is planned">
+        <span className="master-navigation-icon" aria-hidden="true">□</span>
+        <span>Product Master</span>
+        <small>Planned</small>
+      </div>}
+      {!hideMasterNavigation && <div className="master-navigation-placeholder" aria-label="My Master is planned">
+        <span className="master-navigation-icon" aria-hidden="true">◇</span>
+        <span>My Master</span>
+        <small>Planned</small>
+      </div>}
+      {showAdmin && <div className="master-admin-navigation">{adminNavbar}</div>}
+    </nav>
+  </aside>;
+}
 
 function AccountMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onToggleTheme: () => void }) {
   const { user, logout } = useAuth();
@@ -65,20 +111,18 @@ export function AppShell() {
   const { user, logout } = useAuth();
   const canCreateLead = usePermission("leads.edit");
   const showAdminNav = usePermission("nav.admin");
-  const { counts, loading: countsLoading } = useLeadNavCounts();
+  const isAdminRole = user?.role?.trim().toLowerCase() === "admin";
+  const { counts, loading: countsLoading } = useLeadNavCounts(showAdminNav);
   const { collapsedGroups, toggleNavGroup } = useNavGroupState();
   const [theme, setCurrentTheme] = useState(getTheme);
   const currentHref = `${location.pathname}${location.search}`;
   function toggleTheme() { const next = theme === "light" ? "dark" : "light"; setTheme(next); setCurrentTheme(next); }
   const adminNavbar = <Navbar collapsed={false} showAdmin={showAdminNav} includeCore={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
-  return <div className={showAdminNav ? "shell admin-shell" : "shell"}>
-    {showAdminNav && <aside className="sidebar admin-sidebar">
-      {adminNavbar}
-    </aside>}
+  return <div className={showAdminNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
+    <MasterSidebar currentHref={currentHref} showAdmin={showAdminNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole || location.pathname.startsWith("/admin/")} />
     <main className="main">
-      <header className="topbar">
+      <header className="topbar topbar-without-navigation">
         <Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
-        <Navbar collapsed={false} showAdmin={false} responsive currentHref={currentHref} counts={counts} countsLoading={countsLoading} />
         <div className="topbar-right">
           <div className="top-actions">
             <GlobalSearch compact />

@@ -30,12 +30,16 @@ export function useNavGroupState() {
   };
 }
 
-export function useLeadNavCounts() {
+export function useLeadNavCounts(enabled = true) {
   const canView = usePermission("leads.view");
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(false);
   useEffect(() => {
-    if (!canView) return;
+    if (!enabled || !canView) {
+      setCounts({});
+      setLoading(false);
+      return;
+    }
     let live = true;
     setLoading(true);
     void api<Record<string, number>>("/api/leads/counts")
@@ -43,6 +47,6 @@ export function useLeadNavCounts() {
       .catch(() => { if (live) setCounts({}); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [canView]);
+  }, [canView, enabled]);
   return { counts, loading };
 }
