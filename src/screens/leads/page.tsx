@@ -773,7 +773,9 @@ export function LeadsPage() {
     if (resolution) callResolutionCounts.set(resolution, (callResolutionCounts.get(resolution) || 0) + 1);
   }
   function applyCallResolutionFilter(value: string) {
-    screen.updateManagedFilter("calling_resolution", selectedCallResolutions.length === 1 && selectedCallResolutions[0] === value ? [] : [value]);
+    screen.updateManagedFilter("calling_resolution", selectedCallResolutions.includes(value)
+      ? selectedCallResolutions.filter((selected) => selected !== value)
+      : [...selectedCallResolutions, value]);
   }
   function applyProductStageFilter(value: string) {
     screen.updateManagedFilter("product_stage", selectedProductStages.length === 1 && selectedProductStages[0] === value ? [] : [value]);

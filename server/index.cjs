@@ -29,7 +29,14 @@ const HOST = process.env.CRM_HOST || "127.0.0.1";
 const STATIC = path.resolve(process.env.CRM_STATIC || path.join(__dirname, "..", "dist"));
 const PG_URL = databaseConnectionString();
 const PROXY_CONFIG = { behindProxy: process.env.CRM_BEHIND_PROXY === "1", publicIsHttps: String(process.env.CRM_PUBLIC_URL || "").startsWith("https:"), trustedProxies: new Set(String(process.env.CRM_TRUSTED_PROXIES || "").split(",").map((v) => v.trim()).filter(Boolean)) };
-const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, capability_overrides: Array.isArray(u.capability_overrides) ? u.capability_overrides : [], must_change_password: Boolean(u.must_change_password) });
+const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, role_label: u.role_label || u.role, capability_overrides: Array.isArray(u.capability_overrides) ? u.capability_overrides : [], must_change_password: Boolean(u.must_change_password) });
+async function publicCurrentUser(db, user) {
+  if (!db || typeof db.query !== "function") return publicUser(user);
+  let profile;
+  try { profile = (await db.query("SELECT COALESCE(mr.name,ep.role_label) AS role_label FROM employee_profiles ep LEFT JOIN member_roles mr ON mr.id=ep.member_role_id WHERE ep.user_id=$1", [user.id])).rows[0]; }
+  catch { profile = (await db.query("SELECT role_label FROM employee_profiles WHERE user_id=$1", [user.id])).rows[0]; }
+  return publicUser({ ...user, role_label: profile?.role_label || user.role });
+}
 function sortText(expression) { return `LOWER(NULLIF(BTRIM(${expression}), ''))`; }
 function sortNumber(expression) { return `CASE WHEN ${expression} ~ '^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$' THEN (${expression})::numeric ELSE NULL END`; }
 function sortBoolean(expression) { return `CASE LOWER(BTRIM(COALESCE(${expression}, ''))) WHEN 'false' THEN 0 WHEN 'no' THEN 0 WHEN '0' THEN 0 WHEN 'true' THEN 1 WHEN 'yes' THEN 1 WHEN '1' THEN 1 ELSE NULL END`; }
@@ -580,21 +587,21 @@ async function usersCreate(req, res, db, actor) {
   try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid user data."); }
   const name = String(body.name || "").trim(); const email = String(body.email || "").trim().toLowerCase(); const requestedRole = String(body.role || "").trim(); const password = String(body.temporary_password || ""); const department = String(body.department || body.team || "").trim() || null; const requestedId = String(body.user_id || "").trim();
   if (!name || !EMAIL_RE.test(email) || !requestedRole || password.length < 12 || (requestedId && !USER_ID_RE.test(requestedId))) return userWriteError(res, 400, "Invalid user data.");
+  const savedRole = (await db.query("SELECT id,name,access_role FROM member_roles WHERE name=$1 AND active=true", [requestedRole])).rows[0] || null;
   let role = requestedRole;
   if (!USER_ROLES.includes(requestedRole)) {
-    const customRole = (await db.query("SELECT name, access_role FROM member_roles WHERE name=$1 AND active=true", [requestedRole])).rows[0];
-    if (!customRole) return userWriteError(res, 400, "Invalid role.");
-    role = customRole.access_role;
-  }
+    if (!savedRole) return userWriteError(res, 400, "Invalid role.");
+    role = savedRole.access_role;
+  } else if (savedRole) role = savedRole.access_role;
   if (!canManageRole(actor.role, role)) return userWriteError(res, 403, "You do not have permission to manage this role.");
   if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
   if (await db.userByEmail(email)) return userWriteError(res, 409, "User already exists.");
   const id = requestedId || `user-${crypto.randomUUID()}`; const salt = crypto.randomBytes(16).toString("hex"); const hash = S.passwordHash(password, salt).toString("hex");
   try {
     await transaction(db, async (tx) => {
-      await tx.query("INSERT INTO users (id, name, email, role, active, offboarded, must_change_password) VALUES ($1, $2, $3, $4, true, false, true)", [id, name, email, role]);
+      await tx.query("INSERT INTO users (id, name, email, role, member_role_id, active, offboarded, must_change_password) VALUES ($1, $2, $3, $4, $5, true, false, true)", [id, name, email, role, savedRole?.id || null]);
       await tx.query("INSERT INTO credentials (user_id, hash, salt) VALUES ($1, $2, $3)", [id, hash, salt]);
-      await tx.query("INSERT INTO employee_profiles (user_id, team, role_label, active) VALUES ($1, $2, $3, true) ON CONFLICT (user_id) DO UPDATE SET team = EXCLUDED.team, role_label = EXCLUDED.role_label, active = true", [id, department, requestedRole]);
+      await tx.query("INSERT INTO employee_profiles (user_id, team, role_label, member_role_id, active) VALUES ($1, $2, $3, $4, true) ON CONFLICT (user_id) DO UPDATE SET team = EXCLUDED.team, role_label = EXCLUDED.role_label, member_role_id = EXCLUDED.member_role_id, active = true", [id, department, requestedRole, savedRole?.id || null]);
       await writeAudit(tx, { actorUserId: actor.id, action: "member.created", entityType: "user", entityId: id, newValue: requestedRole, ip: req.socket.remoteAddress });
     });
     await clearUserWriteThrottle(db, actor);
@@ -605,6 +612,22 @@ async function usersCreate(req, res, db, actor) {
   }
 }
 async function memberRolesList(res, db) { const rows = await db.query("SELECT id,name,access_role FROM member_roles WHERE active=true ORDER BY name,id"); return json(res, 200, { roles: rows.rows }); }
+async function userRoleUpdate(req, res, db, actor, id) {
+  const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
+  if (target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user's role cannot be edited.");
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid role data."); }
+  const roleId = String(body.member_role_id || "").trim();
+  const assignedRole = (await db.query("SELECT id,name,access_role FROM member_roles WHERE id=$1 AND active=true", [roleId])).rows[0];
+  if (!assignedRole || !canManageRole(actor.role, assignedRole.access_role)) return userWriteError(res, 403, "You do not have permission to assign this role.");
+  try {
+    await transaction(db, async (tx) => {
+      await tx.query("UPDATE users SET role=$2,member_role_id=$3 WHERE id=$1", [id, assignedRole.access_role, assignedRole.id]);
+      await tx.query("INSERT INTO employee_profiles(user_id,role_label,member_role_id,active) VALUES($1,$2,$3,true) ON CONFLICT(user_id) DO UPDATE SET role_label=EXCLUDED.role_label,member_role_id=EXCLUDED.member_role_id", [id, assignedRole.name, assignedRole.id]);
+      await writeAudit(tx, { actorUserId: actor.id, action: "member.role_updated", entityType: "user", entityId: id, field: "member_role_id", oldValue: target.role, newValue: assignedRole.name, ip: req.socket.remoteAddress });
+    });
+    return json(res, 200, { user_id: id, member_role_id: assignedRole.id, role: assignedRole.name, access_role: assignedRole.access_role });
+  } catch { return userWriteError(res, 500, "Unable to update member role."); }
+}
 async function memberRoleCreate(req, res, db, actor) { let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid role data."); } const name = String(body.name || "").trim(); const accessRole = String(body.access_role || "").trim(); if (!name || name.length > 80 || !/^[\p{L}][\p{L}0-9 _-]*$/u.test(name) || !["Sales", "Viewer", "Admin"].includes(accessRole)) return userWriteError(res, 400, "Invalid role data."); if (actor.role !== "Owner" && accessRole === "Admin") return userWriteError(res, 403, "Only Owner may create Admin-level roles."); const id = `member-role-${crypto.randomUUID()}`; try { await db.query("INSERT INTO member_roles(id,name,access_role) VALUES($1,$2,$3)", [id, name, accessRole]); await writeAudit(db, { actorUserId: actor.id, action: "member_role.created", entityType: "member_role", entityId: id, newValue: name, ip: req.socket.remoteAddress }); return json(res, 201, { id, name, access_role: accessRole }); } catch (error) { if (error.code === "23505") return userWriteError(res, 409, "That role already exists."); throw error; } }
 async function departmentsList(res, db) { const rows = await db.query("SELECT id,name FROM departments WHERE active=true UNION SELECT 'department-team-' || md5(btrim(team)), btrim(team) FROM employee_profiles WHERE team IS NOT NULL AND btrim(team) <> '' ORDER BY name,id"); return json(res, 200, { departments: rows.rows }); }
 async function departmentCreate(req, res, db, actor) { let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid department data."); } const name = String(body.name || "").trim(); if (!name || name.length > 80 || !/^[\p{L}][\p{L}0-9 _-]*$/u.test(name)) return userWriteError(res, 400, "Invalid department data."); const id = `department-${crypto.randomUUID()}`; try { await db.query("INSERT INTO departments(id,name) VALUES($1,$2)", [id, name]); await writeAudit(db, { actorUserId: actor.id, action: "department.created", entityType: "department", entityId: id, newValue: name, ip: req.socket.remoteAddress }); return json(res, 201, { id, name }); } catch (error) { if (error.code === "23505") return userWriteError(res, 409, "That department already exists."); throw error; } }
@@ -727,7 +750,7 @@ async function login(req, res, db) {
   await db.throttleClear(S.accountBuckets(email));
   const token = await db.createSession(user.id, req.socket.remoteAddress || "");
   try { await writeAudit(db, { actorUserId: user.id, action: "auth.login_succeeded", entityType: "auth", entityId: user.id, newValue: "session_created", ip: req.socket.remoteAddress }); } catch {}
-  return json(res, 200, { ok: true, user: publicUser(user) }, { "Set-Cookie": S.sessionCookie(req, token, S.SESSION_SECONDS, PROXY_CONFIG) });
+  return json(res, 200, { ok: true, user: await publicCurrentUser(db, user) }, { "Set-Cookie": S.sessionCookie(req, token, S.SESSION_SECONDS, PROXY_CONFIG) });
 }
 
 async function route(req, res, db) {
@@ -749,7 +772,7 @@ async function route(req, res, db) {
   if (!url.pathname.startsWith("/api/") && req.method === "GET" && staticFile(req, res)) return;
   const token = S.sessionToken(req); const id = await db.sessionUser(token); const user = id ? await db.userById(id) : null;
   if (user && typeof db.query === "function") { try { user.capability_overrides = (await db.query("SELECT capability FROM user_capability_overrides WHERE user_id=$1", [user.id])).rows.map((row) => row.capability); } catch { user.capability_overrides = []; } }
-  if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: publicUser(user) }) : json(res, 401, { error: "Please sign in." });
+  if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: await publicCurrentUser(db, user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
   const userPreferenceMatch = url.pathname.match(/^\/api\/user-preferences\/([^/]+)$/);
   if (userPreferenceMatch && ["GET", "POST", "DELETE"].includes(req.method)) {
@@ -799,6 +822,8 @@ async function route(req, res, db) {
   if (integrationToggleMatch && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage integrations."); return safeUserOperation(res, () => Integrations.toggleConnection(req, res, db, user, decodeURIComponent(integrationToggleMatch[1]))); }
   const accessMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/access$/);
   if (accessMatch && ["GET", "POST"].includes(req.method)) { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user access."); const targetId = decodeURIComponent(accessMatch[1]); return safeUserOperation(res, () => req.method === "GET" ? userAccessList(res, db, user, targetId) : userAccessWrite(req, res, db, user, targetId)); }
+  const userRoleMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/role$/);
+  if (userRoleMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user roles."); return userRoleUpdate(req, res, db, user, decodeURIComponent(userRoleMatch[1])); }
   const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/(deactivate|offboard|reset-password)$/);
   if (userMatch && req.method === "POST") {
     if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
