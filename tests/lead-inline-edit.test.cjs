@@ -76,3 +76,45 @@ test("picker includes first and last name without auto-showing hidden additions"
   assert.match(pageSource, /const defaultColumnKeys = baseFields\.map/);
   assert.match(pageSource, /LEAD_COLUMNS\.filter\(\(field\) => !field\.aliasOf\)/);
 });
+
+test("header column moves use the visible-only order helper", () => {
+  const source = pageSource.match(/export function moveColumnKey[\s\S]*?\n}/)?.[0];
+  assert.ok(source, "moveColumnKey should be a small pure helper");
+  const executable = source.replace("export ", "").replace(/: readonly string\[\]/g, "").replace(/: string/g, "").replace(/: "before" \| "after"/g, "");
+  const moveColumnKey = new Function(`${executable}\nreturn moveColumnKey;`)();
+  const order = ["a", "b", "c", "d", "e"];
+  assert.deepEqual(moveColumnKey(order, "e", "a", "before"), ["e", "a", "b", "c", "d"]);
+  assert.deepEqual(moveColumnKey(order, "d", "b", "before"), ["a", "d", "b", "c", "e"]);
+  assert.deepEqual(moveColumnKey(order, "d", "b", "after"), ["a", "b", "d", "c", "e"]);
+  assert.deepEqual(moveColumnKey(order, "b", "d", "after"), ["a", "c", "d", "b", "e"]);
+  assert.deepEqual(moveColumnKey(order, "b", "d", "before"), ["a", "c", "b", "d", "e"]);
+  assert.deepEqual(moveColumnKey(order, "c", "c", "before"), order);
+  assert.deepEqual(moveColumnKey(order, "c", "b", "after"), order);
+});
+
+test("table header reorder shares Columns persistence and preserves sort interaction", () => {
+  assert.match(pageSource, /function saveColumnOrder\(order: string\[\]\)[\s\S]*?setVisibleColumnKeys\(next\)[\s\S]*?setPendingColumnKeys\(next\)[\s\S]*?\/api\/user-preferences/);
+  assert.match(pageSource, /handleHeaderDragOver[\s\S]*?event\.preventDefault\(\)[\s\S]*?setHeaderDropTarget\(\{ key: targetKey, side \}\)/);
+  assert.match(pageSource, /handleHeaderDrop[\s\S]*?headerDropTarget\?\.key === targetKey[\s\S]*?moveVisibleColumn\(sourceKey, dropTarget\.key, dropTarget\.side\)/);
+  assert.match(pageSource, /function moveVisibleColumn[\s\S]*?next\.every\([\s\S]*?return false;[\s\S]*?saveColumnOrder\(next\)/);
+  assert.match(pageSource, /suppressHeaderSortClickRef\.current = true/);
+  assert.match(pageSource, /onSort = \(key: string\) => \{ if \(suppressHeaderSortClickRef\.current\)/);
+  assert.match(pageSource, /lead-table-checkbox-col[\s\S]*?<\/th>\{fields\.map/);
+});
+
+test("header keyboard reorder and reset remain available", () => {
+  assert.match(pageSource, /event\.altKey[\s\S]*?ArrowLeft[\s\S]*?event\.preventDefault\(\)/);
+  assert.match(pageSource, /moveVisibleColumn\(key, targetKey, event\.key === "ArrowLeft" \? "before" : "after", true\)/);
+  assert.match(pageSource, /tabIndex: 0/);
+  assert.match(pageSource, /columnOrderAnnouncement/);
+  assert.match(pageSource, /function resetColumnSelection\(\)[\s\S]*?setVisibleColumnKeys\(defaults\)[\s\S]*?method: "DELETE"/);
+});
+
+test("Alt+Left and Alt+Right use one-place visible column moves", () => {
+  const source = pageSource.match(/export function moveColumnKey[\s\S]*?\n}/)?.[0];
+  const executable = source.replace("export ", "").replace(/: readonly string\[\]/g, "").replace(/: string/g, "").replace(/: "before" \| "after"/g, "");
+  const moveColumnKey = new Function(`${executable}\nreturn moveColumnKey;`)();
+  const order = ["a", "b", "c"];
+  assert.deepEqual(moveColumnKey(order, "b", "a", "before"), ["b", "a", "c"]);
+  assert.deepEqual(moveColumnKey(order, "b", "c", "after"), ["a", "c", "b"]);
+});
