@@ -138,7 +138,7 @@
 .lead-filters .leads-button { height: var(--control-h); min-height: var(--control-h); border-radius: 9px; }
 .clear-filters { align-self: end; }
 .lead-table-wrap { margin-top: 20px; border-radius: var(--radius-lg); box-shadow: var(--shadow-1); scrollbar-color: var(--bg-3) transparent; }
-.lead-table-wrap { max-height: calc(100vh - 390px); min-height: 260px; overflow-x: auto; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: auto; }
+.lead-table-wrap { max-height: none; min-height: 0; overflow-x: auto; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: auto; }
 .lead-table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }
 .lead-table-wrap::-webkit-scrollbar-track { background: var(--bg-2); border-radius: 8px; }
 .lead-table-wrap::-webkit-scrollbar-thumb { background: var(--bg-3); border: 3px solid var(--bg-2); border-radius: 8px; }
@@ -630,10 +630,30 @@
 
 /* Final Manage Leads composition refinement */
 .leads-page { margin-top: -14px; }
+@media (min-width: 641px) {
+  .leads-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-h) - clamp(24px, 4vw, 44px) - 56px); min-height: 0; }
+  .lead-table-wrap { flex: 1 1 auto; min-height: 220px; }
+}
 .manage-header { min-height: 40px; margin-bottom: 12px; }
 .manage-heading h1 { font-size: 27px; font-weight: 650; }
 .manage-actions { gap: 9px; }
 .manage-actions .leads-button { min-height: 38px; height: 38px; }
+.lead-managed-filter-row { display: flex; flex: 1 1 auto; align-items: center; gap: 7px; min-width: 0; overflow: visible; padding: 2px 0; }
+.lead-managed-multiselect { position: relative; flex: 0 0 170px; min-width: 170px; }
+.lead-managed-filter-select { display: flex; width: 100%; height: 38px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 11px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.lead-managed-filter-select:hover, .lead-managed-filter-select.active { border-color: var(--red); color: var(--red); }
+.lead-managed-filter-select span { color: var(--ink-2); }
+.lead-managed-options { position: absolute; z-index: 35; top: calc(100% + 7px); left: 0; width: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-pop); }
+.lead-managed-search { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.lead-managed-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; }
+.lead-managed-options-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; text-transform: uppercase; }
+.lead-managed-options-head button { border: 0; background: transparent; color: var(--ink-1); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.lead-managed-options-list { max-height: 290px; overflow: auto; padding: 7px; }
+.lead-managed-options-list label { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 10px; border-radius: 9px; color: var(--ink-1); cursor: pointer; font-size: 14px; }
+.lead-managed-options-list label:hover, .lead-managed-options-list label.selected { background: var(--bg-2); }
+.lead-managed-options-list input { width: 20px; height: 20px; margin: 0; accent-color: var(--red); }
+.lead-managed-options-list p { margin: 12px; color: var(--ink-2); font-size: 13px; }
+@media (max-width: 640px) { .lead-managed-filter-row { width: 100%; flex-wrap: wrap; } }
 .manage-refresh { width: 28px; height: 28px; }
 .lead-filters { margin-top: 0; padding: 9px 12px; border-color: var(--line); background: var(--panel); }
 .filters-collapsed { grid-template-columns: minmax(320px, 480px) minmax(150px, 180px) 96px; gap: 12px; justify-content: start; }

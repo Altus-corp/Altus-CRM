@@ -3,6 +3,7 @@ import { api } from "../../shared/api/client";
 import type { DropdownDefinition, DropdownOption } from "../../shared/dropdowns/client";
 
 type DefinitionDraft = Pick<DropdownDefinition, "label" | "required" | "default_value" | "is_visible" | "is_active">;
+type ProductCatalogItem = { id: string; code: string | null; label: string; active: boolean; sort_order: number };
 
 function sortedOptions(options: DropdownOption[]) {
   return [...options].sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id));
@@ -25,6 +26,7 @@ export function DropdownManagement() {
 
   const selected = definitions.find((definition) => definition.key === selectedKey) || null;
   const managed = selected?.source_type === "managed";
+  const reorderable = managed || selected?.key === "products";
   const options = useMemo(() => (selected ? sortedOptions(selected.options) : []), [selected]);
 
   const filteredDefinitions = useMemo(() => {
@@ -39,8 +41,13 @@ export function DropdownManagement() {
     setLoading(true);
     setError("");
     try {
-      const response = await api<{ dropdowns: DropdownDefinition[] }>("/api/dropdowns");
-      const next = response.dropdowns || [];
+      const [response, productResponse] = await Promise.all([
+        api<{ dropdowns: DropdownDefinition[] }>("/api/dropdowns"),
+        api<{ values: ProductCatalogItem[] }>("/api/masters?type=product"),
+      ]);
+      const productOptions: DropdownOption[] = (productResponse.values || []).map((product) => ({ id: product.id, dropdown_id: "dropdown-products-catalog", label: product.label, value: product.code || product.label, semantic_key: null, sort_order: product.sort_order || 0, is_active: product.active }));
+      const productsDefinition: DropdownDefinition = { id: "dropdown-products-catalog", key: "products", label: "Products", source_type: "api_backed", required: false, default_value: null, is_visible: true, is_active: true, sort_order: 145, options: productOptions };
+      const next = [...(response.dropdowns || []).filter((item) => item.key !== "products"), productsDefinition];
       setDefinitions(next);
       const activeKey = preserveKey || selectedKey;
       setSelectedKey(next.some((item) => item.key === activeKey) ? activeKey : next[0]?.key || "");
@@ -211,9 +218,9 @@ export function DropdownManagement() {
     [next[index], next[target]] = [next[target], next[index]];
     setError("");
     try {
-      await api(`/api/dropdowns/${encodeURIComponent(selected.id)}/options/reorder`, {
+      await api(selected.key === "products" ? "/api/products/reorder" : `/api/dropdowns/${encodeURIComponent(selected.id)}/options/reorder`, {
         method: "POST",
-        body: JSON.stringify({ option_ids: next.map((item) => item.id) }),
+        body: JSON.stringify(selected.key === "products" ? { product_ids: next.map((item) => item.id) } : { option_ids: next.map((item) => item.id) }),
       });
       await load(selected.key);
     } catch (cause) {
@@ -528,7 +535,7 @@ export function DropdownManagement() {
                             }`}
                           >
                             <td className="cell-reorder">
-                              {managed ? (
+                              {reorderable ? (
                                 <div className="reorder-btn-pair">
                                   <button
                                     type="button"

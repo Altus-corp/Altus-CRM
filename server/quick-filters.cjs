@@ -19,6 +19,7 @@ const QUICK_FILTER_FIELDS = Object.freeze({
   business_category: { label: "Business category", sql: sqlExpression("business_category"), kind: "text" },
   industry: { label: "Industry", sql: sqlExpression("industry"), kind: "text" },
   rating: { label: "Rating", sql: sqlExpression("rating"), kind: "text" },
+  calling_resolution: { label: "Calling resolution", sql: sqlExpression("calling_resolution"), kind: "text" },
   pso_date: { label: "PSO date", sql: sqlExpression("psoDate"), kind: "date" },
   next_follow_up_at: { label: "Next follow-up", sql: sqlExpression("nextFollowUpAt"), kind: "date" },
 });
