@@ -21,11 +21,11 @@ test("client and server capability maps stay mirrored", () => {
 });
 
 test("bulk upload UI is capability-gated", () => {
-  const source = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  const source = fs.readFileSync("src/shared/layout/app-shell.tsx", "utf8");
   const logic = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
-  assert.match(source, /disabled={!screen\.canImport}/);
+  assert.match(source, /disabled={!canImportLeads \|\| !leadNavbarActions}/);
   assert.match(source, /Bulk upload leads/);
-  assert.match(source, /screen\.bulkImportLabel/);
+  assert.match(source, /usePermission\("leads\.import"\)/);
   assert.match(logic, /Not available for your role/);
 });
 

@@ -24,3 +24,4 @@ test("hidden or inactive definitions do not erase a lead's saved values", () => 
   const merged = LeadFields.mergeLeadValues({ lead_fields: { extra_notes: "Existing note" } }, {}, fields);
   assert.equal(merged.lead_fields.extra_notes, "Existing note");
 });
+

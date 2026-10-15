@@ -14,6 +14,7 @@
   --ink-3: #98a2b3;
   --line: #e4e7ec;
   --line-2: #f2f4f7;
+  --action-beige: #f5f3ef;
   --pos: #12805c;
   --pos-bg: #e7f6ef;
   --warn: #9a6700;
@@ -79,6 +80,7 @@
   --ink-3: #71717a;
   --line: #26262c;
   --line-2: #1e1e23;
+  --action-beige: var(--bg-2);
   --red: #ff4d6d;
   --red-050: rgba(255, 77, 109, 0.14);
   --red-tint: rgba(255, 77, 109, 0.14);

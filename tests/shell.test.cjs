@@ -17,11 +17,19 @@ test("shell includes debounced keyboard search states and lead navigation", () =
   assert.match(source, /Search unavailable/);
 });
 
+test("quick-navigation chevron is rendered independently of the expanded search state", () => {
+  const source = shell();
+  assert.match(source, /expanded \? "navbar-search is-expanded" : "navbar-search"/);
+  assert.match(source, /className="navbar-action-button topbar-module-toggle"/);
+  assert.match(source, /aria-controls="topbar-module-links"/);
+});
+
 test("shell keeps role-gated new lead, theme, logout, master sidebar, and admin navigation", () => {
   const source = shell();
   assert.match(source, /usePermission\("leads\.edit"\)/);
   assert.match(source, /\{canCreateLead &&/);
-  assert.match(source, /navigate\("\/leads\?new=1"\)/);
+  assert.match(source, /LeadNavbarActionsContext/);
+  assert.match(source, /openNewLead/);
   assert.match(source, /toggleTheme/);
   assert.match(source, /signOut\(logout, navigate\)/);
   assert.match(source, /"shell sidebar-shell admin-shell"/);
@@ -34,7 +42,7 @@ test("shell keeps role-gated new lead, theme, logout, master sidebar, and admin 
   assert.match(source, /const isAdminRole = user\?\.role\?\.trim\(\)\.toLowerCase\(\) === "admin"/);
   assert.match(source, /hideMasterNavigation=\{isAdminRole \|\| location\.pathname\.startsWith\("\/admin\/"\)\}/);
   assert.match(source, /\{showAdmin && <div className="master-admin-navigation">\{adminNavbar\}<\/div>\}/);
-  assert.match(source, /<GlobalSearch compact \/>/);
+  assert.match(source, /<GlobalSearch \/>/);
   assert.doesNotMatch(source, /className="crumb"/);
   assert.doesNotMatch(source, /showAdmin=\{false\} responsive/);
   assert.doesNotMatch(source, /className="top-navigation"/);

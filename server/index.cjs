@@ -30,11 +30,25 @@ const STATIC = path.resolve(process.env.CRM_STATIC || path.join(__dirname, "..",
 const PG_URL = databaseConnectionString();
 const PROXY_CONFIG = { behindProxy: process.env.CRM_BEHIND_PROXY === "1", publicIsHttps: String(process.env.CRM_PUBLIC_URL || "").startsWith("https:"), trustedProxies: new Set(String(process.env.CRM_TRUSTED_PROXIES || "").split(",").map((v) => v.trim()).filter(Boolean)) };
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, capability_overrides: Array.isArray(u.capability_overrides) ? u.capability_overrides : [], must_change_password: Boolean(u.must_change_password) });
+function sortText(expression) { return `LOWER(NULLIF(BTRIM(${expression}), ''))`; }
+function sortNumber(expression) { return `CASE WHEN ${expression} ~ '^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)$' THEN (${expression})::numeric ELSE NULL END`; }
+function sortBoolean(expression) { return `CASE LOWER(BTRIM(COALESCE(${expression}, ''))) WHEN 'false' THEN 0 WHEN 'no' THEN 0 WHEN '0' THEN 0 WHEN 'true' THEN 1 WHEN 'yes' THEN 1 WHEN '1' THEN 1 ELSE NULL END`; }
+function sortDate(expression) { return `CASE WHEN ${expression} ~ '^(?:(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]00|[13579][26]00))-02-29|[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))$' THEN ${expression} ELSE NULL END`; }
+function sortTimestamp(expression) { return `CASE WHEN ${expression} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ](?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]{1,6})?)?Z?$' AND (${sortDate(`substring(${expression} from 1 for 10)`)} IS NOT NULL) THEN ${expression} ELSE NULL END`; }
+function jsonValue(key) { const escaped = String(key).replace(/'/g, "''"); return `NULLIF(NULLIF(COALESCE(l.custom_values->'lead_fields'->>'${escaped}', l.custom_values->>'${escaped}', l.legacy_finance->>'${escaped}'), ''), 'Not provided')`; }
 const LEAD_SORTS = {
-  name: sqlExpression("name"), stage: sqlExpression("stage"), lead_status: sqlExpression("lead_status"), permission: sqlExpression("permission"),
-  pso_date: sqlExpression("psoDate"), next_follow_up_at: sqlExpression("nextFollowUpAt"), last_call_at: sqlExpression("lastCalledOn"), updated_at: sqlExpression("updated_at"),
-  company: sqlExpression("company"), designation: sqlExpression("designation"), lead_source: sqlExpression("leadSource"), business_category: sqlExpression("business_category"), rating: sqlExpression("rating"),
+  lead_no: sortText(sqlExpression("leadNo")), lead_type: sortText(sqlExpression("leadTypeCode")), name: sortText(sqlExpression("name")), first_name: sortText(sqlExpression("first_name")), last_name: sortText(sqlExpression("last_name")), cell_no: sortText(sqlExpression("cellNo")), email: sortText(sqlExpression("email")), company: sortText(sqlExpression("company")), designation: sortText(sqlExpression("designation")), city: sortText(sqlExpression("city")), source_system: sortText(sqlExpression("sourceSystem")), lead_source: sortText(sqlExpression("leadSource")), permission: sortText(sqlExpression("permission")), stage: sortText(sqlExpression("stage")), lead_status: sortText(sqlExpression("lead_status")), priority: sortText("l.priority"), owner: sortText("sort_owner.name"),
+  pso_date: "l.pso_date", next_follow_up_at: "l.next_follow_up_at", last_call_at: sortTimestamp(`COALESCE(to_char(l.last_call_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS'), ${jsonValue("last_called_on")})`), created_at: "l.created_at", updated_at: "l.updated_at",
+  lead_acquisition_date: sortDate(sqlExpression("lead_acquisition_date")), business_category: sortText(sqlExpression("business_category")), rating: sortText(sqlExpression("rating")), nature_of_business: sortText(sqlExpression("nature_of_business")), proposed_solution: sortText(sqlExpression("proposed_solution")), invite_sent_by_introducer: sortBoolean(sqlExpression("invite_sent_by_introducer")), invite_date_sent: sortDate(sqlExpression("invite_date_sent")), introducer_call_done: sortBoolean(sqlExpression("introducer_call_done")), introducer_call_date: sortDate(sqlExpression("introducer_call_date")), introducer_feedback: sortText(sqlExpression("introducer_feedback")), introducer_name: sortText(sqlExpression("introducer_name")), employee_name: sortText(sqlExpression("employee_name")), association_network_name: sortText(sqlExpression("association_network_name")), chapter_name: sortText(sqlExpression("chapter_name")), calling_resolution: sortText(sqlExpression("calling_resolution")), next_call_on: sortTimestamp(sqlExpression("next_call_on")), calling_remarks: sortText(sqlExpression("calling_remarks")), intro_video_sent: sortBoolean(sqlExpression("intro_video_sent")), email_sent: sortBoolean(sqlExpression("email_sent")), whatsapp_message_sent: sortBoolean(sqlExpression("whatsapp_message_sent")), extra_notes: sortText(sqlExpression("extra_notes")),
+  service: sortText(jsonValue("service")), registration_time: sortTimestamp(jsonValue("registrationTime")), approval_status: sortText(jsonValue("approvalStatus")), zoom_or_physical: sortText(jsonValue("zoomOrPhysical")), confirmation_call_status: sortText(jsonValue("confirmationCallStatus")), zoom_link_sent: sortBoolean(jsonValue("zoomLinkSent")), attendance_status: sortText(jsonValue("attendanceStatus")), sales_follow_up_by: sortText(jsonValue("salesFollowUpBy")), sales_resolution: sortText(jsonValue("salesResolution")), camera_on: sortBoolean(jsonValue("cameraOn")), photo_taken: sortBoolean(jsonValue("photoTaken")), sales_notes: sortText(jsonValue("salesNotes")), left_halfway: sortBoolean(jsonValue("leftHalfway")), total_payable: sortNumber(jsonValue("totalPayable")), amount_paid: sortNumber(jsonValue("amountPaid")), balance_receivable: sortNumber(jsonValue("balanceReceivable")), target_date: sortDate(jsonValue("targetDate")),
 };
+function configuredLeadSortExpression(type, placeholder) {
+  const value = `NULLIF(BTRIM(l.custom_values->'lead_fields'->>${placeholder}), '')`;
+  if (type === "number") return sortNumber(value);
+  if (type === "date") return sortDate(value);
+  if (type === "boolean") return sortBoolean(value);
+  return sortText(value);
+}
 const CANONICAL_LEAD_FIELDS = Object.freeze([
   "name", "first_name", "last_name", "leadNo", "leadTypeCode", "company", "cellNo", "phone", "email", "designation", "businessCategory", "business_category", "leadSource", "rating", "permission", "lastCalledOn", "last_called_on", "lead_acquisition_date", "nature_of_business", "proposed_solution", "invite_sent_by_introducer", "invite_date_sent", "introducer_call_done", "introducer_call_date", "introducer_feedback", "introducer_name", "employee_name", "association_network_name", "chapter_name", "calling_resolution", "next_call_on", "calling_remarks", "intro_video_sent", "email_sent", "whatsapp_message_sent", "extra_notes", "created_at", "updated_at", "last_opened_at",
 ]);
@@ -230,7 +244,14 @@ async function leadsList(req, res, db, url) {
     where.push(advancedWhere.sql);
   }
   const sortParam = url.searchParams.get("sort");
-  if (sortParam && !Object.prototype.hasOwnProperty.call(LEAD_SORTS, sortParam)) return invalidLeadsQuery(res);
+  let configuredSort = null;
+  if (sortParam && !Object.prototype.hasOwnProperty.call(LEAD_SORTS, sortParam)) {
+    const key = String(sortParam).startsWith("configured:") ? String(sortParam).slice("configured:".length) : "";
+    if (!/^[a-z][a-z0-9_]{1,63}$/.test(key)) return invalidLeadsQuery(res);
+    const definitions = await LeadFields.getDefinitions(db);
+    configuredSort = definitions.find((field) => field.active && field.key === key) || null;
+    if (!configuredSort) return invalidLeadsQuery(res);
+  }
   const sort = sortParam || "updated_at";
   const directionParam = String(url.searchParams.get("direction") || "desc").toLowerCase();
   if (![
@@ -244,10 +265,13 @@ async function leadsList(req, res, db, url) {
   const pageSize = isAll ? Math.max(1, total) : integerParam(url.searchParams.get("page_size"), 50, 100);
   const page = isAll ? 1 : integerParam(url.searchParams.get("page"), 1, 1000000);
   const offset = isAll ? 0 : (page - 1) * pageSize;
-  const listParams = params.slice(); listParams.push(pageSize, offset);
+  const listParams = params.slice();
+  const sortExpression = configuredSort ? configuredLeadSortExpression(configuredSort.type, `$${listParams.length + 1}`) : LEAD_SORTS[sort];
+  if (configuredSort) listParams.push(configuredSort.key);
+  listParams.push(pageSize, offset);
   // Keep the list endpoint usable while an older preview database is waiting for
   // migration 018. The field is optional in the client until that migration runs.
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l ${filterSql} ORDER BY ${LEAD_SORTS[sort]} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   return json(res, 200, { items: rows.rows.map(materializeLead), page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 

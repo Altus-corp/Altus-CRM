@@ -22,6 +22,10 @@ Plan before implementation. The plan must name files, endpoints, data model chan
 
 ## Source and UI rules
 
+## UI conventions
+
+Do not add, change, or remove any icon unless explicitly asked. When asked to add or change an icon, use the lucide-react library only. Do not use emoji, inline SVG, or other icon packages.
+
 - The current branch is authoritative; never replace it with older material.
 - Keep the UI client-side rendered. Do not add SSR, hydration, Next.js, Tailwind, or a UI library without approval.
 - Use `src/screens/<name>/page.tsx` for rendering and `function.tsx` for screen state/API logic.

@@ -37,6 +37,29 @@ test("frontend editor supports cancel, optimistic response update, and rollback 
   assert.match(functionSource, /setData\(\(current\)/);
 });
 
+test("navbar new-lead action opens the full form through the URL and close clears it", () => {
+  assert.match(pageSource, /openNewLead: \(\) => navigate\("\/leads\?new=1"\)/);
+  assert.match(pageSource, /\{screen\.newLeadOpen && <div className="lead-edit-form-host">[\s\S]*?<LeadForm form=\{screen\.newLeadForm\}[\s\S]*?onCancel=\{screen\.closeNewLead\}/);
+  assert.match(functionSource, /function closeNewLead\(\) \{ const next = new URLSearchParams\(searchParams\); next\.delete\("new"\); setSearchParams\(next\); \}/);
+  assert.match(functionSource, /closeNewLead\(\); await load\(true\);/);
+});
+
+test("sortable lead headers use accessible Lucide icons and cycle server sort state", () => {
+  assert.match(pageSource, /import \{ ChevronsUpDown, ChevronDown, ChevronUp \} from "lucide-react"/);
+  assert.match(pageSource, /function SortableLeadHeader[\s\S]*?aria-sort=\{direction === "asc" \? "ascending" : direction === "desc" \? "descending" : "none"\}/);
+  assert.match(pageSource, /<SortIcon size=\{14\} strokeWidth=\{2\} aria-hidden="true" \/>/);
+  assert.match(pageSource, /<SortableLeadHeader label="Status" sortKey="lead_status"/);
+  assert.match(functionSource, /function changeSort\(nextSort: string\) \{ setPage\(1\); if \(sortBy !== nextSort\) \{ setSortBy\(nextSort\); setSortDir\("asc"\); return; \} if \(sortDir === "asc"\) \{ setSortDir\("desc"\); return; \} setSortBy\(null\); setSortDir\(null\); \}/);
+  assert.match(functionSource, /sort: sortBy \|\| "updated_at", direction: sortDir \|\| "desc"/);
+});
+
+test("every server-sortable lead header has the shared icon path and the checkbox stays plain", () => {
+  for (const key of ["leadNo", "leadTypeCode", "cellNo", "email", "lead_acquisition_date", "calling_resolution", "created_at", "sourceSystem", "owner", "totalPayable", "targetDate"]) assert.match(pageSource, new RegExp(`${key}: "`));
+  assert.match(pageSource, /configuredFieldsByKey\.has\(field\.key\) \? `configured:\$\{field\.key\}` : LEAD_SORT_KEYS\[field\.key\]/);
+  assert.match(pageSource, /<th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox[\s\S]*?<\/label><\/th>\{fields\.map/);
+});
+
+
 test("migration adds last-opened columns and idempotent dropdown seeds", () => {
   const migration = fs.readFileSync(path.join(root, "migrations", "018_lead_last_opened_and_inline_dropdowns.sql"), "utf8");
   assert.match(migration, /ADD COLUMN IF NOT EXISTS last_opened_at/);

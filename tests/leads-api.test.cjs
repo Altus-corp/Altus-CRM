@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { leadsList, leadsCounts, leadDetail, leadView, route } = require("../server/index.cjs");
+const { LEAD_SORTS, leadsList, leadsCounts, leadDetail, leadView, route } = require("../server/index.cjs");
 
 function response() {
   return {
@@ -105,6 +105,43 @@ test("lead list rejects invalid sort and silently ignored query values", async (
     assert.deepEqual(JSON.parse(res.body), { error: "Invalid leads query." });
     assert.doesNotMatch(res.body, /not_a_real_field|sideways|not_a_real_view|not-a-date|tomorrow/);
   }
+});
+
+test("lead list accepts every server sort allow-list key and keeps nulls last in both directions", async () => {
+  for (const sort of Object.keys(LEAD_SORTS)) for (const direction of ["asc", "desc"]) {
+    const calls = [];
+    const res = response();
+    await leadsList(getRequest(`/api/leads?sort=${sort}&direction=${direction}`), res, { query: async (sql, params) => { calls.push({ sql, params }); return sql.startsWith("SELECT count") ? { rows: [{ total: 0 }] } : { rows: [] }; } }, new URL(`http://localhost/api/leads?sort=${sort}&direction=${direction}`));
+    assert.equal(res.status, 200, `${sort} ${direction}`);
+    assert.match(calls[1].sql, new RegExp(`ORDER BY .+ ${direction.toUpperCase()} NULLS LAST, l\\.id ASC`));
+  }
+});
+
+test("guarded JSON sorts turn malformed stored values into null sort keys", () => {
+  assert.match(LEAD_SORTS.target_date, /CASE WHEN .+ THEN .+ ELSE NULL END/);
+  assert.doesNotMatch(LEAD_SORTS.target_date, /::date/);
+  assert.match(LEAD_SORTS.total_payable, /\^\[\+-\]\?\(\?:\[0-9\]/);
+  assert.match(LEAD_SORTS.total_payable, /ELSE NULL END/);
+  assert.match(LEAD_SORTS.zoom_link_sent, /WHEN 'false' THEN 0[\s\S]*WHEN 'true' THEN 1[\s\S]*ELSE NULL END/);
+  for (const malformed of ["2026-02-31", "not-a-number", "perhaps"]) assert.doesNotMatch(malformed, /^(?:true|false|yes|no|0|1)$/i);
+});
+
+test("configured lead-field sorting validates the active definition and binds its JSON key", async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.startsWith("SELECT value FROM workspace_settings")) return { rows: [{ value: [{ key: "score", label: "Score", type: "number", active: true, order: 0 }] }] };
+    return sql.startsWith("SELECT count") ? { rows: [{ total: 0 }] } : { rows: [] };
+  } };
+  const res = response();
+  await leadsList(getRequest("/api/leads?sort=configured:score&direction=asc"), res, db, new URL("http://localhost/api/leads?sort=configured:score&direction=asc"));
+  assert.equal(res.status, 200);
+  assert.match(calls.at(-1).sql, /custom_values->'lead_fields'->>\$1/);
+  assert.deepEqual(calls.at(-1).params, ["score", 50, 0]);
+
+  const rejected = response();
+  await leadsList(getRequest("/api/leads?sort=configured:not_active&direction=asc"), rejected, db, new URL("http://localhost/api/leads?sort=configured:not_active&direction=asc"));
+  assert.equal(rejected.status, 400);
 });
 
 test("Key Note returns an unavailable response", async () => {

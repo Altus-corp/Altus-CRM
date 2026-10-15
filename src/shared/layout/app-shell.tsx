@@ -7,9 +7,17 @@ import { displayRole, usePermission } from "../auth/permissions";
 import { signOut } from "../auth/sign-out";
 import { api } from "../api/client";
 import { getTheme, setTheme } from "../theme/theme";
+import { ChevronLeft, ChevronRight, Moon, Plus, Search, Sun, Upload } from "lucide-react";
+import { LeadNavbarActionsContext, type LeadNavbarActions } from "./lead-navbar-actions";
 import "./app-shell.css";
 
 type SearchResult = { id: string; name: string; company: string | null; stage: string | null };
+
+const TOPBAR_MODULES = [
+  { to: "/leads", label: "Leads" },
+  { to: "/marketing", label: "Marketing" },
+  { to: "/reports", label: "Reports" },
+];
 
 function MasterSidebar({
   currentHref,
@@ -86,7 +94,7 @@ function AccountMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onTogg
   </div>;
 }
 
-function GlobalSearch({ compact = false }: { compact?: boolean }) {
+function GlobalSearch() {
   const navigate = useNavigate();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -94,15 +102,18 @@ function GlobalSearch({ compact = false }: { compact?: boolean }) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "empty" | "error">("idle");
   const [open, setOpen] = useState(false);
-  const [compactOpen, setCompactOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  useEffect(() => { const closeOnOutside = (event: MouseEvent) => { if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false); }; document.addEventListener("mousedown", closeOnOutside); return () => document.removeEventListener("mousedown", closeOnOutside); }, []);
-  useEffect(() => { if (compactOpen) requestAnimationFrame(() => inputRef.current?.focus()); }, [compactOpen]);
+  useEffect(() => { const closeOnOutside = (event: MouseEvent) => { if (!wrapperRef.current?.contains(event.target as Node)) { setOpen(false); if (!query.trim()) setExpanded(false); } }; document.addEventListener("mousedown", closeOnOutside); return () => document.removeEventListener("mousedown", closeOnOutside); }, [query]);
+  useEffect(() => { if (expanded) requestAnimationFrame(() => inputRef.current?.focus()); }, [expanded]);
   useEffect(() => { const value = query.trim(); if (value.length < 2) { setResults([]); setState("idle"); setOpen(false); return; } setOpen(true); setState("loading"); setActiveIndex(-1); const timer = window.setTimeout(() => { void api<{ items: SearchResult[] }>(`/api/leads?search=${encodeURIComponent(value)}`).then((response) => { const next = response.items.slice(0, 8); setResults(next); setState(next.length ? "idle" : "empty"); }).catch(() => { setResults([]); setState("error"); }); }, 250); return () => window.clearTimeout(timer); }, [query]);
-  function choose(result: SearchResult) { setOpen(false); setQuery(""); setCompactOpen(false); navigate(`/leads?open=${encodeURIComponent(result.id)}`); }
-  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) { if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((value) => Math.min(value + 1, results.length - 1)); } else if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((value) => Math.max(value - 1, 0)); } else if (event.key === "Enter" && activeIndex >= 0 && results[activeIndex]) { event.preventDefault(); choose(results[activeIndex]); } else if (event.key === "Escape") { event.preventDefault(); setOpen(false); if (compact && !query) setCompactOpen(false); else inputRef.current?.focus(); } }
-  const searchField = <><span className="global-search-icon" aria-hidden="true">⌕</span><input ref={inputRef} value={query} aria-label="Search leads" placeholder="Search any record - name, company, phone, remark..." onChange={(event) => setQuery(event.target.value)} onFocus={() => { if (query.trim().length >= 2) setOpen(true); }} onKeyDown={onKeyDown} />{open && <div className="search-popover" role="listbox" aria-label="Lead search results">{state === "loading" && <div className="search-state">Searching…</div>}{state === "empty" && <div className="search-state">No matching leads.</div>}{state === "error" && <div className="search-state">Search unavailable.</div>}{state === "idle" && results.map((result, index) => <button key={result.id} type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? "search-result active" : "search-result"} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(result)}><span className="search-result-name">{result.name}</span><span className="search-result-meta">{result.company || "No company"} · {result.stage || "Unstaged"}</span></button>)}</div>}</>;
-  return <div className={compact ? "global-search compact-search" : "global-search"} ref={wrapperRef}>{compact && !compactOpen ? <button className="search-trigger" type="button" aria-label="Open global search" title="Open global search" onClick={() => setCompactOpen(true)}>⌕</button> : searchField}</div>;
+  function choose(result: SearchResult) { setOpen(false); setQuery(""); setExpanded(false); navigate(`/leads?open=${encodeURIComponent(result.id)}`); }
+  function closeIfEmpty() { if (!query.trim()) { setOpen(false); setExpanded(false); } }
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) { if (event.key === "ArrowDown") { event.preventDefault(); setOpen(true); setActiveIndex((value) => Math.min(value + 1, results.length - 1)); } else if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((value) => Math.max(value - 1, 0)); } else if (event.key === "Enter" && activeIndex >= 0 && results[activeIndex]) { event.preventDefault(); choose(results[activeIndex]); } else if (event.key === "Escape") { event.preventDefault(); setOpen(false); closeIfEmpty(); } }
+  return <div className={expanded ? "navbar-search is-expanded" : "navbar-search"} ref={wrapperRef} role="search" aria-label="Search leads">
+    {!expanded && <button className={query.trim() ? "navbar-action-button navbar-action-button--round is-active" : "navbar-action-button navbar-action-button--round"} type="button" aria-label="Search" title="Search" onClick={() => setExpanded(true)}><Search size={18} aria-hidden="true" /></button>}
+    {expanded && <><Search className="navbar-search-icon" size={16} aria-hidden="true" /><input ref={inputRef} value={query} aria-label="Search leads" placeholder="Search leads" onChange={(event) => setQuery(event.target.value)} onFocus={() => { if (query.trim().length >= 2) setOpen(true); }} onBlur={closeIfEmpty} onKeyDown={onKeyDown} />{open && <div className="search-popover" role="listbox" aria-label="Lead search results">{state === "loading" && <div className="search-state">Searching…</div>}{state === "empty" && <div className="search-state">No matching leads.</div>}{state === "error" && <div className="search-state">Search unavailable.</div>}{state === "idle" && results.map((result, index) => <button key={result.id} type="button" role="option" aria-selected={index === activeIndex} className={index === activeIndex ? "search-result active" : "search-result"} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(result)}><span className="search-result-name">{result.name}</span><span className="search-result-meta">{result.company || "No company"} · {result.stage || "Unstaged"}</span></button>)}</div>}</>}
+  </div>;
 }
 
 export function AppShell() {
@@ -115,26 +126,38 @@ export function AppShell() {
   const { counts, loading: countsLoading } = useLeadNavCounts(showAdminNav);
   const { collapsedGroups, toggleNavGroup } = useNavGroupState();
   const [theme, setCurrentTheme] = useState(getTheme);
+  const [leadNavbarActions, setLeadNavbarActions] = useState<LeadNavbarActions | null>(null);
+  const [topbarModulesOpen, setTopbarModulesOpen] = useState(false);
+  const canImportLeads = usePermission("leads.import");
+  const isLeadsScreen = location.pathname === "/leads";
   const currentHref = `${location.pathname}${location.search}`;
+  useEffect(() => { setTopbarModulesOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    if (!topbarModulesOpen) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setTopbarModulesOpen(false); };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [topbarModulesOpen]);
   function toggleTheme() { const next = theme === "light" ? "dark" : "light"; setTheme(next); setCurrentTheme(next); }
   const adminNavbar = <Navbar collapsed={false} showAdmin={showAdminNav} includeCore={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
-  return <div className={showAdminNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
+  return <LeadNavbarActionsContext.Provider value={setLeadNavbarActions}><div className={showAdminNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
     <MasterSidebar currentHref={currentHref} showAdmin={showAdminNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole || location.pathname.startsWith("/admin/")} />
     <main className="main">
       <header className="topbar topbar-without-navigation">
         <Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
         <div className="topbar-right">
           <div className="top-actions">
-            <GlobalSearch compact />
-            {canCreateLead && <button className="top-action-button" type="button" onClick={() => navigate("/leads?new=1")}>＋ New lead</button>}
-            <button className="top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`} title={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>{theme === "light" ? "☾" : "☀"}</button>
+            <button className="navbar-action-button topbar-module-toggle" type="button" aria-label={topbarModulesOpen ? "Hide quick navigation" : "Show quick navigation"} aria-expanded={topbarModulesOpen} aria-controls="topbar-module-links" onClick={() => setTopbarModulesOpen((open) => !open)}>{topbarModulesOpen ? <ChevronLeft size={18} aria-hidden="true" /> : <ChevronRight size={18} aria-hidden="true" />}</button>
+            <nav id="topbar-module-links" className={topbarModulesOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation">{TOPBAR_MODULES.map((module) => <NavLink key={module.to} to={module.to} onClick={() => setTopbarModulesOpen(false)}>{module.label}</NavLink>)}</nav>
+            {isLeadsScreen && <div className="navbar-lead-actions"><GlobalSearch /><button className="navbar-action-button" type="button" disabled={!canImportLeads || !leadNavbarActions} onClick={() => leadNavbarActions?.openBulkUpload()} aria-label="Bulk upload leads" title="Bulk upload leads"><Upload size={18} aria-hidden="true" /></button>{canCreateLead && <button className="navbar-action-button navbar-action-button--beige" type="button" disabled={!leadNavbarActions} onClick={() => leadNavbarActions?.openNewLead()} aria-label="Add new lead" title="Add new lead"><Plus size={18} strokeWidth={2.5} aria-hidden="true" /></button>}</div>}
+            <button className="top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`} title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}</button>
             <AccountMenu theme={theme} onToggleTheme={toggleTheme} />
           </div>
         </div>
       </header>
       <section className="content"><Outlet /></section>
     </main>
-  </div>;
+  </div></LeadNavbarActionsContext.Provider>;
 }
 
 export { NAV_ITEMS };
