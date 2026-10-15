@@ -3,7 +3,7 @@
 const { writeAudit } = require("./audit.cjs");
 
 const SETTING_KEY = "lead_field_definitions";
-const TYPES = new Set(["text", "textarea", "number", "date", "email", "phone", "url", "boolean"]);
+const TYPES = new Set(["text", "textarea", "number", "date", "email", "phone", "url", "boolean", "dropdown"]);
 const KEY_RE = /^[a-z][a-z0-9_]{1,63}$/;
 
 // These fields are stored inside leads.custom_values.lead_fields. Core lead columns
@@ -46,7 +46,9 @@ function normalizeDefinitions(value, fallback = DEFAULT_FIELDS) {
     const type = text(raw?.type || "text").toLowerCase();
     if (!KEY_RE.test(key) || seen.has(key) || !label || label.length > 80 || !TYPES.has(type)) continue;
     seen.add(key);
-    fields.push({ key, label, type, active: raw?.active !== false, detail_visible: raw?.detail_visible !== false, order: Number.isFinite(Number(raw?.order)) ? Number(raw.order) : index });
+    const options = Array.isArray(raw?.options) ? [...new Map(raw.options.map((option) => text(option)).filter((option) => option && option.length <= 80).map((option) => [option.toLowerCase(), option])).values()] : [];
+    if (type === "dropdown" && !options.length) continue;
+    fields.push({ key, label, type, options, active: raw?.active !== false, detail_visible: raw?.detail_visible !== false, order: Number.isFinite(Number(raw?.order)) ? Number(raw.order) : index });
   }
   return fields.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
 }
@@ -68,6 +70,7 @@ function normalizeValues(input, definitions, { allowEmpty = false } = {}) {
       continue;
     }
     const value = text(raw); if (!value) { if (allowEmpty) values[key] = null; continue; }
+    if (field.type === "dropdown") { const selected = (field.options || []).find((option) => option.toLowerCase() === value.toLowerCase()); if (!selected) continue; values[key] = selected; continue; }
     if (field.type === "date" && !validDate(value)) continue;
     if (field.type === "number" && !Number.isFinite(Number(value.replace(/,/g, "")))) continue;
     if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) continue;
@@ -94,4 +97,19 @@ async function saveDefinitions(db, actor, raw, ip) {
   return fields;
 }
 
-module.exports = { SETTING_KEY, DEFAULT_FIELDS, getDefinitions, normalizeDefinitions, normalizeValues, mergeLeadValues, saveDefinitions };
+async function deleteDefinition(db, actor, key, ip) {
+  const fieldKey = text(key).toLowerCase();
+  const fields = await getDefinitions(db);
+  const removed = fields.find((field) => field.key === fieldKey);
+  if (!removed) throw Object.assign(new Error("Lead field not found."), { status: 404 });
+  const remaining = fields.filter((field) => field.key !== fieldKey).map((field, order) => ({ ...field, order }));
+  await db.transaction(async (tx) => {
+    const previous = (await tx.query("SELECT value FROM workspace_settings WHERE setting_key=$1", [SETTING_KEY])).rows[0]?.value ?? null;
+    await tx.query("INSERT INTO workspace_settings(setting_key,value,active,updated_by,updated_at) VALUES($1,$2::jsonb,true,$3,now()) ON CONFLICT(setting_key) DO UPDATE SET value=EXCLUDED.value,active=true,updated_by=EXCLUDED.updated_by,updated_at=now()", [SETTING_KEY, JSON.stringify(remaining), actor.id]);
+    await tx.query("UPDATE leads SET custom_values = CASE WHEN custom_values ? 'lead_fields' THEN jsonb_set(custom_values, '{lead_fields}', COALESCE(custom_values->'lead_fields','{}'::jsonb) - $1::text, true) ELSE custom_values END, updated_at=now() WHERE custom_values ? 'lead_fields'", [fieldKey]);
+    await writeAudit(tx, { actorUserId: actor.id, action: "lead_field.deleted", entityType: "workspace_setting", entityId: fieldKey, oldValue: JSON.stringify(removed), newValue: JSON.stringify(remaining), ip });
+  });
+  return remaining;
+}
+
+module.exports = { SETTING_KEY, DEFAULT_FIELDS, getDefinitions, normalizeDefinitions, normalizeValues, mergeLeadValues, saveDefinitions, deleteDefinition };

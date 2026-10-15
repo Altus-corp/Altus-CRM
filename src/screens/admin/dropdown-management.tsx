@@ -26,6 +26,7 @@ export function DropdownManagement() {
 
   const selected = definitions.find((definition) => definition.key === selectedKey) || null;
   const managed = selected?.source_type === "managed";
+  const editableDefinition = selected?.source_type !== "api_backed" || selected?.key === "products";
   const reorderable = managed || selected?.key === "products";
   const options = useMemo(() => (selected ? sortedOptions(selected.options) : []), [selected]);
 
@@ -46,7 +47,8 @@ export function DropdownManagement() {
         api<{ values: ProductCatalogItem[] }>("/api/masters?type=product"),
       ]);
       const productOptions: DropdownOption[] = (productResponse.values || []).map((product) => ({ id: product.id, dropdown_id: "dropdown-products-catalog", label: product.label, value: product.code || product.label, semantic_key: null, sort_order: product.sort_order || 0, is_active: product.active }));
-      const productsDefinition: DropdownDefinition = { id: "dropdown-products-catalog", key: "products", label: "Products", source_type: "api_backed", required: false, default_value: null, is_visible: true, is_active: true, sort_order: 145, options: productOptions };
+      const savedProductsDefinition = (response.dropdowns || []).find((item) => item.key === "products");
+      const productsDefinition: DropdownDefinition = { ...(savedProductsDefinition || { id: "dropdown-products-catalog", key: "products", label: "Products", source_type: "api_backed" as const, required: false, default_value: null, is_visible: true, is_active: true, sort_order: 145 }), options: productOptions };
       const next = [...(response.dropdowns || []).filter((item) => item.key !== "products"), productsDefinition];
       setDefinitions(next);
       const activeKey = preserveKey || selectedKey;
@@ -86,6 +88,7 @@ export function DropdownManagement() {
 
   async function saveDefinition(event: React.FormEvent) {
     event.preventDefault();
+    if (!selected || !editableDefinition) return;
     if (!selected || !definitionDraft || !definitionDraft.label.trim()) {
       setError("Dropdown label is required.");
       return;
@@ -101,7 +104,7 @@ export function DropdownManagement() {
     setError("");
     setSuccessMessage("");
     try {
-      await api(`/api/dropdowns/${encodeURIComponent(selected.id)}`, {
+      await api(selected.key === "products" ? "/api/products/dropdown-definition" : `/api/dropdowns/${encodeURIComponent(selected.id)}`, {
         method: "POST",
         body: JSON.stringify(definitionDraft),
       });
@@ -364,6 +367,7 @@ export function DropdownManagement() {
                         setDefinitionDraft({ ...definitionDraft, label: event.target.value })
                       }
                       placeholder="e.g. Lead stage"
+                      disabled={!editableDefinition}
                     />
                     <span className="field-hint-text">Label displayed across forms and reports</span>
                   </div>
@@ -398,7 +402,7 @@ export function DropdownManagement() {
                             default_value: event.target.value || null,
                           })
                         }
-                        disabled={selected.source_type === "api_backed"}
+                      disabled={selected.source_type === "api_backed"}
                         placeholder="No default value"
                       />
                     )}
@@ -414,6 +418,7 @@ export function DropdownManagement() {
                       onChange={(event) =>
                         setDefinitionDraft({ ...definitionDraft, required: event.target.checked })
                       }
+                      disabled={!editableDefinition}
                     />
                     <div className="flag-content">
                       <strong>Required</strong>
@@ -428,6 +433,7 @@ export function DropdownManagement() {
                       onChange={(event) =>
                         setDefinitionDraft({ ...definitionDraft, is_visible: event.target.checked })
                       }
+                      disabled={!editableDefinition}
                     />
                     <div className="flag-content">
                       <strong>Visible</strong>
@@ -442,6 +448,7 @@ export function DropdownManagement() {
                       onChange={(event) =>
                         setDefinitionDraft({ ...definitionDraft, is_active: event.target.checked })
                       }
+                      disabled={!editableDefinition}
                     />
                     <div className="flag-content">
                       <strong>Active</strong>
@@ -451,9 +458,9 @@ export function DropdownManagement() {
                 </div>
 
                 <div className="dropdown-form-footer">
-                  <button type="submit" className="dropdown-primary-btn" disabled={savingDef}>
+                  {editableDefinition ? <button type="submit" className="dropdown-primary-btn" disabled={savingDef}>
                     {savingDef ? "Saving changes..." : "Save definition"}
-                  </button>
+                  </button> : <span className="field-hint-text">Products are managed in Product Catalog. You can reorder them below.</span>}
                 </div>
               </form>
             </div>

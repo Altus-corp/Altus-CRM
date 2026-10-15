@@ -144,6 +144,18 @@
 .lead-table-wrap::-webkit-scrollbar-thumb { background: var(--bg-3); border: 3px solid var(--bg-2); border-radius: 8px; }
 .lead-table-wrap::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
 .lead-table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 20px; padding: 12px 16px; border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--panel); color: var(--ink-2); font-size: 12px; }
+.call-resolution-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 -5px; padding: 0 2px; }
+.call-resolution-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border: 1px solid #cbd9ec; border-radius: 999px; background: #f7faff; color: #14243c; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; transition: border-color .14s ease, background .14s ease, transform .14s ease; }
+.call-resolution-chip strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.call-resolution-chip:hover { transform: translateY(-1px); border-color: #94b5e6; }
+.call-resolution-chip.selected { border-color: var(--red); background: var(--red-050); color: var(--red); box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 12%, transparent); }
+.call-resolution-dot { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 50%; background: #6a809f; }
+.tone-0 .call-resolution-dot { background: #7c3aed; }.tone-1 .call-resolution-dot { background: #4f46e5; }.tone-2 .call-resolution-dot { background: #f59e0b; }.tone-3 .call-resolution-dot { background: #f97316; }.tone-4 .call-resolution-dot { background: #dc2626; }.tone-5 .call-resolution-dot { background: #059669; }.tone-6 .call-resolution-dot { background: #0ea5e9; }
+.product-stage-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 10px 0 -5px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+.product-stage-summary > span:first-child { margin-right: 4px; color: var(--ink-2); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.product-stage-chip { min-height: 32px; padding: 0 13px; border: 1px solid color-mix(in srgb, var(--red) 32%, var(--line)); border-radius: 999px; background: var(--red-050); color: var(--red); cursor: pointer; font: inherit; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.product-stage-chip:hover, .product-stage-chip.selected { border-color: var(--red); background: var(--red); color: #fff; }
+.product-stage-empty { color: var(--ink-2); font-size: 12px; }
 .lead-group-by-wrap { position: relative; flex: 0 0 auto; }
 .lead-group-by-button { display: inline-flex; align-items: center; gap: 9px; min-height: 40px; font-size: 12px; }
 .lead-group-by-button span { color: var(--ink-1); }
@@ -300,6 +312,9 @@
 .lead-pill { min-width: 58px; justify-content: center; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--info) 18%, transparent); border-radius: 999px; background: var(--info-bg); color: var(--info); line-height: 1.1; }
 .lead-status-select { min-width: 92px; max-width: 140px; min-height: 30px; padding: 0 24px 0 10px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line)); border-radius: 999px; background: var(--panel); color: var(--red); font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
 .lead-status-select:disabled { cursor: wait; opacity: .65; }
+.lead-table-field-select { min-width: 112px; max-width: 190px; min-height: 30px; padding: 0 28px 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.lead-table-field-select:hover, .lead-table-field-select:focus { border-color: color-mix(in srgb, var(--red) 50%, var(--line)); outline: none; }
+.lead-table-field-select:disabled { cursor: not-allowed; opacity: .62; }
 .lead-state { min-height: 152px; margin-top: 20px; border-radius: var(--radius-lg); }
 .lead-pagination { padding-top: 16px; }
 .lead-pagination > span { font-variant-numeric: tabular-nums; }

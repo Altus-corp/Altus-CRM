@@ -174,16 +174,34 @@ async function leadsList(req, res, db, url) {
   for (const [query, column] of [["stage", "l.stage"], ["permission", "l.permission"], ["owner", "l.owner_user_id"], ["lead_status", "l.lead_status"]]) {
     const value = String(url.searchParams.get(query) || "").trim(); if (value) where.push(`${column} = ${bind(value)}`);
   }
-  const managedFilterFields = { lead_type: sqlExpression("leadTypeCode"), lead_stage: sqlExpression("stage"), permission: sqlExpression("permission"), business_category: sqlExpression("business_category"), calling_resolution: sqlExpression("calling_resolution"), rating: sqlExpression("rating"), lead_source: sqlExpression("leadSource") };
+  const managedFilterFields = { lead_type: sqlExpression("leadTypeCode"), lead_stage: sqlExpression("stage"), permission: sqlExpression("permission"), business_category: sqlExpression("business_category"), calling_resolution: sqlExpression("calling_resolution"), rating: sqlExpression("rating"), lead_source: sqlExpression("leadSource"), products: null, product_stage: null };
   const managedRaw = url.searchParams.get("managed_filters");
   if (managedRaw) {
     let managedFilters;
     try { managedFilters = JSON.parse(managedRaw); } catch { return invalidLeadsQuery(res); }
     if (!managedFilters || typeof managedFilters !== "object" || Array.isArray(managedFilters) || Object.keys(managedFilters).length > 12) return invalidLeadsQuery(res);
+    const selectedProducts = Array.isArray(managedFilters.products) ? managedFilters.products.map((value) => String(value || "").trim()).filter(Boolean) : [];
     for (const [key, rawValues] of Object.entries(managedFilters)) {
       const values = Array.isArray(rawValues) ? rawValues.map((value) => String(value || "").trim()).filter(Boolean) : [];
-      if (!Object.prototype.hasOwnProperty.call(managedFilterFields, key) || !values.length || values.length > 50 || new Set(values).size !== values.length || !(await Promise.all(values.map((value) => validDropdownValue(db, key, value)))).every(Boolean)) return invalidLeadsQuery(res);
-      where.push(`${managedFilterFields[key]} IN (${values.map((value) => bind(value)).join(", ")})`);
+      if (!Object.prototype.hasOwnProperty.call(managedFilterFields, key) || !values.length || values.length > 50 || new Set(values).size !== values.length) return invalidLeadsQuery(res);
+      if (key === "products") {
+        const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [values]);
+        if (available.rows.length !== values.length) return invalidLeadsQuery(res);
+        const productCodes = available.rows.map((row) => String(row.code || row.label));
+        where.push(`EXISTS (SELECT 1 FROM lead_products lp WHERE lp.lead_id=l.id AND lp.product_code IN (${productCodes.map((value) => bind(value)).join(", ")}))`);
+      } else if (key === "product_stage") {
+        if (!selectedProducts.length) return invalidLeadsQuery(res);
+        const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [selectedProducts]);
+        if (available.rows.length !== selectedProducts.length) return invalidLeadsQuery(res);
+        const productCodes = available.rows.map((row) => String(row.code || row.label));
+        where.push(`EXISTS (SELECT 1 FROM lead_products lp WHERE lp.lead_id=l.id AND lp.product_code IN (${productCodes.map((value) => bind(value)).join(", ")}) AND lp.stage IN (${values.map((value) => bind(value)).join(", ")}))`);
+      } else {
+        // Calling resolution is an Admin Lead Field. Its options can be changed at any time,
+        // so filter its stored values directly instead of rejecting a newly configured option.
+        const validValues = key === "calling_resolution" || (await Promise.all(values.map((value) => validDropdownValue(db, key, value)))).every(Boolean);
+        if (!validValues) return invalidLeadsQuery(res);
+        where.push(`${managedFilterFields[key]} IN (${values.map((value) => bind(value)).join(", ")})`);
+      }
     }
   }
   const psoFrom = dateParam(url.searchParams.get("pso_date_from")); const psoTo = dateParam(url.searchParams.get("pso_date_to"));
@@ -378,6 +396,10 @@ async function leadFieldsWrite(req, res, db, actor) {
   try { return json(res, 200, { fields: await LeadFields.saveDefinitions(db, actor, body.fields, req.socket.remoteAddress) }); }
   catch (error) { return userWriteError(res, error.status || 500, error.status ? error.message : "Unable to save lead fields."); }
 }
+async function leadFieldsDelete(res, db, actor, key, ip) {
+  try { return json(res, 200, { fields: await LeadFields.deleteDefinition(db, actor, key, ip) }); }
+  catch (error) { return userWriteError(res, error.status || 500, error.status ? error.message : "Unable to delete lead field."); }
+}
 function leadFields(body) {
   const type = leadTypeValue(body.lead_type); if (!type) return null;
   const first_name = String(body.first_name || "").trim() || null;
@@ -419,13 +441,20 @@ async function createLead(req, res, db, actor) {
 function inlineText(value, max = 2000) { if (value == null) return null; const text = String(value).trim(); return text ? text.slice(0, max) : null; }
 function inlineDate(value, dateTime = false) { if (value == null || value === "") return null; const text = String(value); const pattern = dateTime ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/ : /^\d{4}-\d{2}-\d{2}$/; if (!pattern.test(text) || Number.isNaN(new Date(text).getTime())) throw Object.assign(new Error("Invalid date value."), { status: 400 }); return text; }
 async function updateInlineLeadField(req, res, db, actor, id, body) {
-  const requested = String(body.field || ""); const definition = INLINE_EDITABLE_FIELDS.get(requested); if (!definition) return json(res, 400, { error: "This lead field is not editable." });
+  const requested = String(body.field || "");
+  const configuredField = (await LeadFields.getDefinitions(db)).find((field) => field.key === requested && field.active);
+  const definition = INLINE_EDITABLE_FIELDS.get(requested) || (configuredField ? { ...configuredField, input: configuredField.type === "boolean" ? "boolean" : configuredField.type === "date" ? "date" : configuredField.type === "dropdown" ? "dropdown" : "text", editable: true, storage: { kind: "custom", key: configuredField.key } } : null);
+  if (!definition) return json(res, 400, { error: "This lead field is not editable." });
   const canonical = definition.aliasOf ? INLINE_COLUMNS.get(definition.aliasOf) || definition : definition;
   const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." });
   if (canonical.storage.kind === "column" && canonical.storage.key === "permission" && body.value !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
   let value = body.value;
   try {
-    if (canonical.input === "boolean") { if (value === "true" || value === "Yes") value = true; else if (value === "false" || value === "No" || value == null || value === "") value = value == null || value === "" ? null : false; else throw Object.assign(new Error("Value must be Yes or No."), { status: 400 }); }
+    if (configuredField) {
+      const normalized = LeadFields.normalizeValues({ [requested]: value }, [configuredField], { allowEmpty: true });
+      if (!Object.prototype.hasOwnProperty.call(normalized, requested)) throw Object.assign(new Error(`Invalid value for ${configuredField.label}.`), { status: 400 });
+      value = normalized[requested];
+    } else if (canonical.input === "boolean") { if (value === "true" || value === "Yes") value = true; else if (value === "false" || value === "No" || value == null || value === "") value = value == null || value === "" ? null : false; else throw Object.assign(new Error("Value must be Yes or No."), { status: 400 }); }
     else if (canonical.input === "date") value = inlineDate(value);
     else if (canonical.input === "datetime") value = inlineDate(value, true);
     else if (canonical.input === "email") { value = inlineText(value); if (value && !/^\S+@\S+\.\S+$/.test(value)) throw Object.assign(new Error("Enter a valid email address."), { status: 400 }); }
@@ -611,6 +640,13 @@ async function productCatalogList(res, db) {
   const rows = await db.query("SELECT id,code,label FROM master_values WHERE master_type='product' AND active=true ORDER BY sort_order,label", []);
   return json(res, 200, { products: rows.rows.map((row) => ({ id: row.id, code: String(row.code || row.label), label: row.label })) });
 }
+async function productDropdownDefinitionSave(req, res, db, actor) {
+  const body = await readJson(req); const label = String(body.label || "Products").trim();
+  if (!label || label.length > 120) return userWriteError(res, 400, "Invalid product dropdown label.");
+  await db.query("INSERT INTO dropdown_definitions(id,key,label,source_type,required,default_value,is_visible,is_active,sort_order) VALUES('dropdown-products-catalog','products',$1,'api_backed',false,NULL,$2,$3,145) ON CONFLICT(key) DO UPDATE SET label=EXCLUDED.label,is_visible=EXCLUDED.is_visible,is_active=EXCLUDED.is_active,updated_at=now()", [label, body.is_visible !== false, body.is_active !== false]);
+  await writeAudit(db, { actorUserId: actor.id, action: "product.dropdown_updated", entityType: "dropdown_definition", entityId: "dropdown-products-catalog", newValue: label, ip: req.socket.remoteAddress });
+  return json(res, 200, { id: "dropdown-products-catalog" });
+}
 async function productCatalogReorder(req, res, db, actor) { const body = await readJson(req); if (!Array.isArray(body.product_ids) || !body.product_ids.length) return userWriteError(res, 400, "A complete product order is required."); const current = await db.query("SELECT id FROM master_values WHERE master_type='product'", []); const ids = current.rows.map((row) => row.id); if (ids.length !== body.product_ids.length || new Set(body.product_ids).size !== ids.length || body.product_ids.some((id) => !ids.includes(id))) return userWriteError(res, 400, "Invalid product order."); await transaction(db, async (tx) => { for (let index = 0; index < body.product_ids.length; index += 1) await tx.query("UPDATE master_values SET sort_order=$2,updated_at=now() WHERE id=$1", [body.product_ids[index], index]); await writeAudit(tx, { actorUserId: actor.id, action: "product.reordered", entityType: "product_catalog", entityId: "products", newValue: "ordered", ip: req.socket.remoteAddress }); }); return json(res, 200, { product_ids: body.product_ids }); }
 async function productStagesList(res, db, productId) {
   const product = (await db.query("SELECT id FROM master_values WHERE id=$1 AND master_type='product'", [productId])).rows[0];
@@ -750,6 +786,7 @@ async function route(req, res, db) {
   if (url.pathname === "/api/masters" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to edit masters."); return safeUserOperation(res, () => masterWrite(req, res, db, user)); }
   const masterMatch = url.pathname.match(/^\/api\/masters\/([^/]+)$/); if (masterMatch && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to edit masters."); return safeUserOperation(res, () => masterWrite(req, res, db, user, decodeURIComponent(masterMatch[1]))); }
   if (url.pathname === "/api/products" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to view products." }); return safeUserOperation(res, () => productCatalogList(res, db)); }
+  if (url.pathname === "/api/products/dropdown-definition" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage products."); return safeUserOperation(res, () => productDropdownDefinitionSave(req, res, db, user)); }
   if (url.pathname === "/api/products/reorder" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to reorder products."); return safeUserOperation(res, () => productCatalogReorder(req, res, db, user)); }
   const productStageMatch = url.pathname.match(/^\/api\/products\/([^/]+)\/stages(?:\/([^/]+))?$/);
   if (productStageMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return userWriteError(res, 403, "You do not have permission to view product stages."); return safeUserOperation(res, () => productStagesList(res, db, decodeURIComponent(productStageMatch[1]))); }
@@ -761,6 +798,8 @@ async function route(req, res, db) {
   if (url.pathname === "/api/workspace-settings" && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to edit workspace settings."); return safeUserOperation(res, () => settingWrite(req, res, db, user)); }
   if (url.pathname === "/api/lead-fields" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to view lead fields." }); return safeUserOperation(res, () => leadFieldsList(res, db)); }
   if (url.pathname === "/api/lead-fields" && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage lead fields."); return leadFieldsWrite(req, res, db, user); }
+  const leadFieldMatch = url.pathname.match(/^\/api\/lead-fields\/([^/]+)$/);
+  if (leadFieldMatch && req.method === "DELETE") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage lead fields."); return leadFieldsDelete(res, db, user, decodeURIComponent(leadFieldMatch[1]), req.socket.remoteAddress); }
   if (url.pathname === "/api/employees" && req.method === "GET") { if (!requireCapability("employees.manage", user)) return userWriteError(res, 403, "You do not have permission to view employees."); return safeUserOperation(res, () => employeesList(res, db)); }
   if (url.pathname === "/api/employees" && req.method === "POST") { if (!requireCapability("employees.manage", user)) return userWriteError(res, 403, "You do not have permission to edit employees."); return safeUserOperation(res, () => employeeWrite(req, res, db, user)); }
   const employeeOffboardMatch = url.pathname.match(/^\/api\/employees\/([^/]+)\/offboard$/); if (employeeOffboardMatch && req.method === "POST") { if (!requireCapability("employees.manage", user)) return userWriteError(res, 403, "You do not have permission to offboard employees."); return safeUserOperation(res, () => employeeOffboard(req, res, db, user, decodeURIComponent(employeeOffboardMatch[1]))); }
@@ -807,7 +846,7 @@ async function route(req, res, db) {
   }
   if (url.pathname === "/api/leads/import/template" && req.method === "GET") {
     if (!requireCapability("leads.import", user)) return json(res, 403, { error: "You do not have permission to import leads." });
-    try { const format = url.searchParams.get("format") || "xlsx"; const file = await LeadImport.template(format); res.writeHead(200, { "Content-Type": file.contentType, "Content-Disposition": `attachment; filename="${file.filename}"`, "Cache-Control": "no-store" }); return res.end(file.body); }
+    try { const format = url.searchParams.get("format") || "xlsx"; const file = await LeadImport.template(format, await LeadFields.getDefinitions(db)); res.writeHead(200, { "Content-Type": file.contentType, "Content-Disposition": `attachment; filename="${file.filename}"`, "Cache-Control": "no-store" }); return res.end(file.body); }
     catch (error) { return json(res, error.status || 500, { error: error.status ? error.message : "Unable to create the lead template." }); }
   }
   if (url.pathname === "/api/leads/import/apply" && req.method === "POST") {
