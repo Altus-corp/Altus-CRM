@@ -83,7 +83,7 @@ function AccountMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onTogg
   function itemKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) { if (["ArrowDown", "ArrowRight"].includes(event.key)) { event.preventDefault(); itemRefs.current[(index + 1) % menuItems.length]?.focus(); } else if (["ArrowUp", "ArrowLeft"].includes(event.key)) { event.preventDefault(); itemRefs.current[(index - 1 + menuItems.length) % menuItems.length]?.focus(); } else if (event.key === "Escape") { event.preventDefault(); closeMenu(true); } }
   function goAccount() { closeMenu(); navigate("/account"); }
   function handleSignOut() { closeMenu(); void signOut(logout, navigate); }
-  const roleLabel = displayRole(user?.role);
+  const roleLabel = user?.role_label || displayRole(user?.role);
   const accountName = user?.name && user.name !== roleLabel ? user.name : "";
   const userInitial = user?.name ? user.name.trim().charAt(0).toUpperCase() : (user?.email ? user.email.trim().charAt(0).toUpperCase() : "U");
   return <div className="account-menu-wrap" ref={menuRef}>
