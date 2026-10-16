@@ -32,18 +32,18 @@ function MasterSidebar({
   theme: "light" | "dark";
   hideMasterNavigation: boolean;
 }) {
-  const leadMasterActive = currentHref.startsWith("/leads");
+  const leadMasterActive = currentHref.startsWith("/lead-master");
 
   return <aside className="sidebar master-sidebar">
     <div className="master-sidebar-brand">
-      <Link className="topbar-logo" to="/leads" aria-label="Go to Leads">
+      <Link className="topbar-logo" to="/lead-master" aria-label="Go to Lead Master">
         <img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" />
         <span>Altus <b>CRM</b></span>
       </Link>
     </div>
     <nav className="master-navigation" aria-label="Master navigation">
       {!hideMasterNavigation && <NavLink
-          to="/leads?work_queue=lead_master"
+          to="/lead-master"
           end
           className={leadMasterActive ? "master-navigation-toggle master-navigation-parent active" : "master-navigation-toggle master-navigation-parent"}
         >
@@ -129,7 +129,8 @@ export function AppShell() {
   const [leadNavbarActions, setLeadNavbarActions] = useState<LeadNavbarActions | null>(null);
   const [topbarModulesOpen, setTopbarModulesOpen] = useState(false);
   const canImportLeads = usePermission("leads.import");
-  const isLeadsScreen = location.pathname === "/leads";
+  const isLeadsScreen = ["/leads", "/lead-master"].includes(location.pathname);
+  const homeHref = showAdminNav ? "/leads" : "/lead-master";
   const currentHref = `${location.pathname}${location.search}`;
   useEffect(() => { setTopbarModulesOpen(false); }, [location.pathname]);
   useEffect(() => {
@@ -144,7 +145,7 @@ export function AppShell() {
     <MasterSidebar currentHref={currentHref} showAdmin={showAdminNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole || location.pathname.startsWith("/admin/")} />
     <main className="main">
       <header className="topbar topbar-without-navigation">
-        <Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
+        <Link className="topbar-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
         <div className="topbar-right">
           <div className="top-actions">
             <button className="navbar-action-button topbar-module-toggle" type="button" aria-label={topbarModulesOpen ? "Hide quick navigation" : "Show quick navigation"} aria-expanded={topbarModulesOpen} aria-controls="topbar-module-links" onClick={() => setTopbarModulesOpen((open) => !open)}>{topbarModulesOpen ? <ChevronLeft size={18} aria-hidden="true" /> : <ChevronRight size={18} aria-hidden="true" />}</button>

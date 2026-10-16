@@ -7,6 +7,7 @@ import { IntegrationManager } from "./integration-manager";
 import { LeadFieldManager } from "./lead-field-manager";
 import { ProductStageManager } from "./product-stage-manager";
 import { AssignmentRuleManager } from "./assignment-rule-manager";
+import { UserManagement } from "./user-management";
 
 function label(value: string) { return value.replaceAll("_", " "); }
 type AdminRow = Record<string, string | number | boolean | null>;
@@ -21,6 +22,8 @@ export function AdminPage({ screen }: { screen: AdminScreenKey }) {
   const canAddPerson = hasCapability(user?.role, "users.manage");
   const canManageAssignment = hasCapability(user?.role, "leads.assign");
   const canManageAccess = canAddPerson;
+  if (screen === "user-management" && canAddPerson) return <main className="admin-page"><div className="admin-heading"><div><p className="eyebrow">Altus CRM</p><h1>{view.title}</h1><p>{view.description}</p></div></div><UserManagement /></main>;
+  if (screen === "assignment" && canManageAssignment) return <main className="admin-page"><div className="admin-heading"><div><p className="eyebrow">Altus CRM</p><h1>{view.title}</h1><p>{view.description}</p></div><span className="day-chip">{new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" }).format(new Date())}</span></div><AssignmentRuleManager /></main>;
   const roleOptions = (view.roles.length ? view.roles.filter((role) => user?.role === "Owner" || role.access_role !== "Admin").map((role) => role.name) : (user?.role === "Owner" ? ["Sales", "Viewer", "Admin"] : ["Sales", "Viewer"]));
   const accessRoleOptions = user?.role === "Owner" ? ["Sales", "Viewer", "Admin"] : ["Sales", "Viewer"];
   const metrics = Object.entries(view.data?.metrics || {});

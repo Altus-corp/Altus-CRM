@@ -2,7 +2,7 @@ import { ADDITIONAL_LEAD_FIELDS, ActivityKind, EMPTY_LEAD_FORM, fieldValue, isQu
 import { useAuth } from "../../shared/auth/auth";
 import { usePermission } from "../../shared/auth/permissions";
 import { api } from "../../shared/api/client";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { ChevronsUpDown, ChevronDown, ChevronUp } from "lucide-react";
 import { DropdownSelect } from "../../shared/dropdowns/component";
@@ -535,10 +535,11 @@ function InlineLeadCell({ lead, column, canEdit, dropdownOptions, onSave }: { le
   );
 }
 
-export function LeadsPage() {
-  const screen = useLeadsScreen();
+export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_master" | "focused_calling" | "" }) {
+  const screen = useLeadsScreen(forcedWorkQueue);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [callResolutionMoreOpen, setCallResolutionMoreOpen] = useState(false);
   const [collapsedCallResolutionCount, setCollapsedCallResolutionCount] = useState(0);
   const callResolutionBarRef = useRef<HTMLDivElement>(null);
@@ -559,7 +560,7 @@ export function LeadsPage() {
   const [detailPsoStage, setDetailPsoStage] = useState("Pre PSO");
   const [detailPsoBarVisible, setDetailPsoBarVisible] = useState(false);
   const [quickAddOpen] = useState(false);
-  useRegisterLeadNavbarActions({ openBulkUpload: screen.openBulkUpload, openNewLead: () => navigate("/leads?new=1") });
+  useRegisterLeadNavbarActions({ openBulkUpload: screen.openBulkUpload, openNewLead: () => navigate(`${location.pathname}?new=1`) });
   const [activeDetailProduct, setActiveDetailProduct] = useState("");
 
   // Add Note composer state matching reference design
@@ -906,14 +907,15 @@ export function LeadsPage() {
   }
   function renderLeadTableField(lead: Lead, field: LeadColumn) {
     if (field.key === "name") return <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></>;
-    const configured = configuredFieldsByKey.get(field.key);
+    const configured = configuredFieldsByKey.get(field.key) || (field.key === "calling_resolution" ? { key: "calling_resolution", label: "Calling Resolution", type: "dropdown", options: [] } : null);
     if (!configured || !["dropdown", "boolean"].includes(configured.type)) return displayField(fieldValue(lead, field.key));
     const currentValue = fieldValue(lead, field.key);
     const proposedSolution = String(fieldValue(lead, "proposed_solution") || "");
     const resolutionProductCodes = proposedSolution.split(/[,;|]/).map((value) => value.trim().toLowerCase()).filter(Boolean).flatMap((value) => screen.products.filter((product) => product.code.toLowerCase() === value || product.label.toLowerCase() === value).map((product) => product.code));
     const productOptions = field.key === "calling_resolution" ? [...new Map(resolutionProductCodes.flatMap((code) => callResolutionsByProductCode[code] || []).map((option) => [option.value, option])).values()] : [];
-    const options = configured.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured.options || []).map((option) => ({ value: option, label: option })))];
+    const baseOptions = configured.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured.options || []).map((option) => ({ value: option, label: option })))];
     const value = configured.type === "boolean" ? currentValue === true ? "true" : currentValue === false ? "false" : "" : String(currentValue || "");
+    const options = value && !baseOptions.some((option) => option.value === value) ? [{ value, label: value }, ...baseOptions] : baseOptions;
     return <select className="lead-table-field-select" aria-label={`Change ${configured.label} for ${lead.name}`} value={value} disabled={!screen.canEdit} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, field.key, event.target.value).catch(() => undefined); }}>
       {options.map((option) => <option key={option.value || "empty"} value={option.value}>{option.label}</option>)}
     </select>;

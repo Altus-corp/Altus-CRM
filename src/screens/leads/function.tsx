@@ -34,8 +34,12 @@ const leadsCache = new Map<string, { data: LeadsResponse; savedAt: number }>();
 const leadsInFlight = new Map<string, Promise<LeadsResponse>>();
 
 function cachedLeadsRequest(query: string, force = false) {
+  // Assignment can be performed by an Admin in another session. Queue pages
+  // must therefore revalidate immediately instead of showing a briefly stale
+  // cached list to the assigned user.
+  const isAssignedQueue = query.includes("work_queue=lead_master") || query.includes("work_queue=focused_calling");
   const cached = leadsCache.get(query);
-  if (!force && cached && Date.now() - cached.savedAt < LEADS_CACHE_TTL_MS) return Promise.resolve(cached.data);
+  if (!force && !isAssignedQueue && cached && Date.now() - cached.savedAt < LEADS_CACHE_TTL_MS) return Promise.resolve(cached.data);
   const pending = leadsInFlight.get(query);
   if (pending) return pending;
   const request = api<LeadsResponse>(`/api/leads?${query}`).then((data) => {
@@ -92,7 +96,7 @@ const VIEW_OPTIONS = LEAD_VIEW_GROUPS.flatMap((group) => group.views);
 
 function formatDate(value: string | null | undefined) { return value ? new Date(value).toLocaleDateString() : "—"; }
 
-export function useLeadsScreen() {
+export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling" | "" = "") {
   const { user } = useAuth();
   const leadTypeDropdown = useDropdown("lead_type");
   const stageDropdown = useDropdown("lead_stage");
@@ -117,9 +121,9 @@ export function useLeadsScreen() {
   const bulkImportLabel = canImport ? "Bulk upload leads" : `Not available for your role (${displayRole(user?.role)})`;
   const canConvertAccount = usePermission("accounts.create") && usePermission("contacts.create");
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedView = searchParams.get("view") || "";
+  const requestedView = forcedWorkQueue ? "" : searchParams.get("view") || "";
   const requestedWorkQueue = searchParams.get("work_queue") || "";
-  const initialWorkQueue = ["lead_master", "focused_calling"].includes(requestedWorkQueue) ? requestedWorkQueue : "";
+  const initialWorkQueue = ["lead_master", "focused_calling"].includes(requestedWorkQueue) ? requestedWorkQueue : forcedWorkQueue;
   const initialView = LEAD_VIEWS.some(([key]) => key === requestedView) ? requestedView : "";
   const [view, setView] = useState(initialView); const [filters, setFilters] = useState<LeadFilters>({ ...EMPTY_FILTERS, work_queue: initialWorkQueue }); const [page, setPage] = useState(1); const [pageSize, setPageSize] = useState<number | "all">(50); const [sortBy, setSortBy] = useState<string | null>(null); const [sortDir, setSortDir] = useState<LeadSortDirection | null>(null);
   const [advancedConditions, setAdvancedConditions] = useState<QuickFilterCondition[]>([]); const [draftConditions, setDraftConditions] = useState<QuickFilterCondition[]>([]); const [advancedJoin, setAdvancedJoin] = useState<"AND" | "OR">("AND"); const [draftJoin, setDraftJoin] = useState<"AND" | "OR">("AND");
