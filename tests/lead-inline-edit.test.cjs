@@ -56,7 +56,7 @@ test("sortable lead headers use accessible Lucide icons and cycle server sort st
 test("every server-sortable lead header has the shared icon path and the checkbox stays plain", () => {
   for (const key of ["leadNo", "leadTypeCode", "cellNo", "email", "lead_acquisition_date", "calling_resolution", "created_at", "sourceSystem", "owner", "totalPayable", "targetDate"]) assert.match(pageSource, new RegExp(`${key}: "`));
   assert.match(pageSource, /configuredFieldsByKey\.has\(field\.key\) \? `configured:\$\{field\.key\}` : LEAD_SORT_KEYS\[field\.key\]/);
-  assert.match(pageSource, /<th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label"><TableSelectAllCheckbox[\s\S]*?<\/label><\/th>\{fields\.map/);
+  assert.match(pageSource, /function LeadTableHeader[\s\S]*?<th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">\{selectAll\}<\/label><\/th>\{fields\.map/);
 });
 
 
