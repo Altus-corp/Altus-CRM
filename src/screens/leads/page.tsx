@@ -408,6 +408,22 @@ const LEAD_DETAIL_TABS: Array<[LeadDetailTab, string]> = [
   ["follow-up", "Follow-up"],
 ];
 
+type DetailField = readonly [key: string, label: string];
+
+const DETAIL_FIELD_SECTIONS: ReadonlyArray<readonly [title: string, fields: readonly DetailField[]]> = [
+  ["Basic information", [["lead_no", "Lead no"], ["first_name", "First name"], ["last_name", "Last name"], ["lead_type", "Lead type"]]],
+  ["Contact", [["phone", "Mobile"], ["email", "Email"], ["city", "City"], ["address", "Address"]]],
+  ["Business", [["company", "Company"], ["designation", "Designation"], ["business_category", "Business category"], ["nature_of_business", "Nature of business"], ["proposed_solution", "Proposed solution"]]],
+  ["Status & assignment", [["stage", "Lead stage"], ["lead_status", "Lead status"], ["permission", "Permission to call"], ["owner_user_id", "Assigned to"], ["lead_source", "Lead source"], ["source_system", "Source system"], ["team", "Team"]]],
+  ["Dates", [["lead_acquisition_date", "Lead acquisition date"], ["pso_date", "PSO date"], ["last_called_on", "Last called on"], ["next_call_on", "Next call on"], ["next_follow_up_at", "Next follow-up"], ["created_at", "Created on"], ["updated_at", "Last modified on"], ["last_opened_at", "Last opened on"]]],
+  ["Introducer & outreach", [["invite_sent_by_introducer", "Invite sent by introducer"], ["invite_date_sent", "Invite date sent"], ["introducer_call_done", "Introducer call done"], ["introducer_call_date", "Introducer call date"], ["introducer_feedback", "Introducer feedback"], ["introducer_name", "Introducer name"], ["employee_name", "Employee name"], ["association_network_name", "Association / network name"], ["chapter_name", "Chapter name"], ["calling_resolution", "Calling resolution"], ["calling_remarks", "Calling remarks"], ["intro_video_sent", "2 mins intro video sent"], ["email_sent", "Email sent"], ["whatsapp_message_sent", "Message sent on WhatsApp"]]],
+  ["Notes", [["extra_notes", "Extra notes"]]],
+];
+
+const DETAIL_DATE_FIELDS = new Set(["lead_acquisition_date", "pso_date", "last_called_on", "last_call_at", "next_call_on", "next_follow_up_at", "invite_date_sent", "introducer_call_date", "created_at", "updated_at", "last_opened_at", "target_date"]);
+const DETAIL_INTERNAL_FIELD = /(^id$|_id$|^source_id$|organization|tenant|created_by|updated_by|deleted_at|hash|token|password|secret|session|custom_values|legacy_finance|archived)/i;
+const detailFieldLabel = (key: string) => key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+
 function AdvancedFilterPanel({ screen, onSave }: { screen: ReturnType<typeof useLeadsScreen>; onSave: () => void }) {
   if (!screen.advancedOpen) return null;
   return <div className="advanced-filter-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.setAdvancedOpen(false); }}>
@@ -906,6 +922,42 @@ export function LeadsPage() {
   const leadStatus = displayField(fieldValue(selectedLead!, "lead_status"));
   const leadSource = displayField(fieldValue(selectedLead!, "leadSource"));
   const ownerName = displayField(fieldValue(selectedLead!, "owner"));
+  const detailOptions = [
+    ...screen.userOptions,
+    ...Object.values(screen.dropdownOptions).flatMap((options) => Array.isArray(options) ? options : []),
+    ...screen.managedFilterDropdowns.flatMap((dropdown) => dropdown.options),
+  ] as Array<{ value: string; label: string }>;
+  const knownDetailKeys = new Set(DETAIL_FIELD_SECTIONS.flatMap(([, fields]) => fields.map(([key]) => key)).concat(["name", "leadNo", "leadTypeCode", "cellNo", "leadSource", "lastCalledOn", "psoDate", "nextFollowUpAt", "isPrePsDone", "owner", "products"]));
+  const customLeadFields = selectedLead?.custom_values && typeof selectedLead.custom_values === "object" && !Array.isArray(selectedLead.custom_values)
+    ? (selectedLead.custom_values as Record<string, unknown>).lead_fields as Record<string, unknown> | undefined : undefined;
+  const configuredDetailFields = screen.leadFields.filter((field) => field.active && field.detail_visible && !knownDetailKeys.has(field.key)).map((field) => [field.key, field.label] as DetailField);
+  const unconfiguredCustomFields = customLeadFields ? Object.entries(customLeadFields)
+    .filter(([key, value]) => !knownDetailKeys.has(key) && !configuredDetailFields.some(([configuredKey]) => configuredKey === key) && !DETAIL_INTERNAL_FIELD.test(key) && (value === null || typeof value !== "object" || Array.isArray(value)))
+    .map(([key]) => [key, detailFieldLabel(key)] as DetailField) : [];
+  const additionalStoredFields = selectedLead ? Object.entries(selectedLead)
+    .filter(([key, value]) => !knownDetailKeys.has(key) && !DETAIL_INTERNAL_FIELD.test(key) && value !== undefined && (value === null || typeof value !== "object" || value instanceof Date))
+    .map(([key]) => [key, detailFieldLabel(key)] as DetailField) : [];
+  const allAdditionalStoredFields = [...additionalStoredFields, ...unconfiguredCustomFields];
+  const readableDetailValue = (key: string, source?: unknown) => {
+    let value = source === undefined ? fieldValue(selectedLead!, key) : source;
+    if (key === "owner_user_id") value = screen.userOptions.find((option) => option.value === String(value ?? ""))?.label ?? null;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      value = record.label ?? record.display ?? record.text ?? record.value ?? record.date ?? null;
+    }
+    if (Array.isArray(value)) value = value.join(", ");
+    if (value === null || value === undefined || value === "") return "-";
+    const option = detailOptions.find((item) => item.value === String(value));
+    if (option) return option.label;
+    if (DETAIL_DATE_FIELDS.has(key)) {
+      const date = new Date(String(value));
+      return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    return /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(String(value)) ? "-" : String(value);
+  };
+  const detailFieldValue = (key: string) => customLeadFields && Object.prototype.hasOwnProperty.call(customLeadFields, key)
+    ? readableDetailValue(key, customLeadFields[key]) : readableDetailValue(key);
   const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
   return <div className={`leads-page${showAddActivityDrawer ? " activity-form-active" : ""}`}>
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
@@ -1097,13 +1149,62 @@ export function LeadsPage() {
           aria-modal="true"
           aria-label={`Lead details for ${screen.detail.lead.name}`}
         >
-          {/* 1-3. Static Top Section (Header, Quick Actions, Tabs) */}
+          {/* 1-3. Static Top Section (Header with Inline Quick Actions, Tabs + Nav Stepper) */}
           <div className="lead-detail-static-top">
-            {/* 1. Header */}
+            {/* 1. Header with Eyebrow, Title + Inline Quick Actions, and Close button */}
             <div className="lead-detail-header">
               <div className="lead-detail-title-group">
                 <span className="lead-detail-eyebrow">LEAD DETAIL</span>
-                <h2 className="lead-detail-title">{displayField(fieldValue(selectedLead!, "name"))}</h2>
+                <div className="lead-detail-title-row">
+                  <h2 className="lead-detail-title">{displayField(fieldValue(selectedLead!, "name"))}</h2>
+                  <div className="lead-detail-quick-actions" aria-label="Quick actions">
+                    <button
+                      type="button"
+                      className="lead-quick-action-btn"
+                      disabled={!screen.canLogCall}
+                      title={screen.canLogCall ? "Log a call" : screen.callDisabledReason}
+                      aria-label={screen.canLogCall ? "Call" : `Call disabled: ${screen.callDisabledReason}`}
+                      onClick={() => {
+                        setDetailTab("activity");
+                        setActivityComposer("call");
+                      }}
+                    >
+                      <CallIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="lead-quick-action-btn"
+                      title="Email lead"
+                      aria-label="Email"
+                      onClick={() => {
+                        if (screen.detail?.lead.email) {
+                          window.location.href = `mailto:${screen.detail.lead.email}`;
+                        } else {
+                          alert("No email address registered for this lead.");
+                        }
+                      }}
+                    >
+                      <EmailIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="lead-quick-action-btn"
+                      title="Send WhatsApp message"
+                      aria-label="WhatsApp"
+                      onClick={() => {
+                        const phone = screen.detail?.lead.phone;
+                        if (phone) {
+                          const clean = phone.replace(/[^0-9]/g, "");
+                          window.open(`https://wa.me/${clean}`, "_blank", "noopener,noreferrer");
+                        } else {
+                          alert("No phone number registered for this lead.");
+                        }
+                      }}
+                    >
+                      <WhatsAppIcon />
+                    </button>
+                  </div>
+                </div>
               </div>
               <button
                 className="lead-detail-close-btn"
@@ -1115,80 +1216,7 @@ export function LeadsPage() {
               </button>
             </div>
 
-            {/* 2. Quick actions */}
-            <div className="lead-quick-actions-bar" aria-label="Quick actions">
-              <span className="lead-quick-actions-label">Quick actions</span>
-              <div className="lead-quick-actions-list">
-                <button
-                  type="button"
-                  className="lead-quick-action-btn"
-                  disabled={!screen.canLogCall}
-                  title={screen.canLogCall ? "Log a call" : screen.callDisabledReason}
-                  aria-label={screen.canLogCall ? "Log call" : `Log call disabled: ${screen.callDisabledReason}`}
-                  onClick={() => {
-                    setDetailTab("activity");
-                    setActivityComposer("call");
-                  }}
-                >
-                  <CallIcon />
-                  <span>Call</span>
-                </button>
-                <button
-                  type="button"
-                  className="lead-quick-action-btn"
-                  onClick={() => {
-                    if (screen.detail?.lead.email) {
-                      window.location.href = `mailto:${screen.detail.lead.email}`;
-                    } else {
-                      alert("No email address registered for this lead.");
-                    }
-                  }}
-                >
-                  <EmailIcon />
-                  <span>Email</span>
-                </button>
-                <button
-                  type="button"
-                  className="lead-quick-action-btn"
-                  onClick={() => {
-                    const phone = screen.detail?.lead.phone;
-                    if (phone) {
-                      const clean = phone.replace(/[^0-9]/g, "");
-                      window.open(`https://wa.me/${clean}`, "_blank", "noopener,noreferrer");
-                    } else {
-                      alert("No phone number registered for this lead.");
-                    }
-                  }}
-                >
-                  <WhatsAppIcon />
-                  <span>WhatsApp</span>
-                </button>
-                <button
-                  type="button"
-                  className="lead-quick-action-btn"
-                  onClick={() => {
-                    setDetailTab("notes");
-                    setShowNoteForm(true);
-                  }}
-                >
-                  <NoteIcon />
-                  <span>Note</span>
-                </button>
-                <button
-                  type="button"
-                  className="lead-quick-action-btn"
-                  onClick={() => {
-                    setDetailTab("follow-up");
-                    setShowFollowUpForm(true);
-                  }}
-                >
-                  <CalendarIcon />
-                  <span>Follow-up</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 3. Section Tabs */}
+            {/* 2. Section Tabs */}
             <div className="lead-detail-tabs" role="tablist" aria-label="Lead detail sections">
               {LEAD_DETAIL_TABS.map(([tab, label]) => (
                 <button
@@ -1380,8 +1408,8 @@ export function LeadsPage() {
                     <BuildingIcon />
                   </div>
                   <div className="lead-meta-text">
-                    <strong className="lead-meta-value">{leadStatus}</strong>
                     <span className="lead-meta-label">Lead status</span>
+                    <strong className="lead-meta-value">{leadStatus}</strong>
                   </div>
                 </div>
 
@@ -1393,8 +1421,8 @@ export function LeadsPage() {
                     <GlobeIcon />
                   </div>
                   <div className="lead-meta-text">
-                    <strong className="lead-meta-value">{leadSource}</strong>
                     <span className="lead-meta-label">Source</span>
+                    <strong className="lead-meta-value">{leadSource}</strong>
                   </div>
                 </div>
 
@@ -1403,14 +1431,7 @@ export function LeadsPage() {
                 {/* Col 3: Assigned to */}
                 <div className="lead-meta-col assignee-col">
                   <div className="lead-meta-avatar" aria-hidden="true">
-                    <span>
-                      {ownerName
-                        .split(" ")
-                        .map((n: string) => n[0])
-                        .slice(0, 2)
-                        .join("")
-                        .toUpperCase()}
-                    </span>
+                    <UserIcon />
                   </div>
                   <div className="lead-meta-text">
                     <span className="lead-meta-label">Assigned to</span>
@@ -1894,6 +1915,26 @@ export function LeadsPage() {
                 </div>
               </div>
 
+              {DETAIL_FIELD_SECTIONS.map(([title, fields]) => <div className="lead-details-section" key={title}>
+                <div className="lead-details-section-header">{title}</div>
+                <div className="lead-details-grid">{fields.map(([key, label]) => <div className="lead-details-item" key={key}>
+                  <span className="lead-details-label">{label}</span><span className="lead-details-value">{detailFieldValue(key)}</span>
+                </div>)}</div>
+              </div>)}
+              {configuredDetailFields.length > 0 && <div className="lead-details-section">
+                <div className="lead-details-section-header">Custom fields</div>
+                <div className="lead-details-grid">{configuredDetailFields.map(([key, label]) => <div className="lead-details-item" key={key}>
+                  <span className="lead-details-label">{label}</span><span className="lead-details-value">{detailFieldValue(key)}</span>
+                </div>)}</div>
+              </div>}
+              {allAdditionalStoredFields.length > 0 && <div className="lead-details-section">
+                <div className="lead-details-section-header">Additional stored fields</div>
+                <div className="lead-details-grid">{allAdditionalStoredFields.map(([key, label]) => <div className="lead-details-item" key={key}>
+                  <span className="lead-details-label">{label}</span><span className="lead-details-value">{detailFieldValue(key)}</span>
+                </div>)}</div>
+              </div>}
+
+              {false && <>
               {/* 1. Contact information */}
               <div className="lead-details-section">
                 <div className="lead-details-section-header">Contact information</div>
@@ -2011,7 +2052,7 @@ export function LeadsPage() {
                     <span className="lead-details-label">Created on</span>
                     <span className="lead-details-value">
                       {selectedLead?.created_at
-                        ? new Date(String(selectedLead.created_at)).toLocaleString("en-GB", {
+                        ? new Date(String(selectedLead?.created_at)).toLocaleString("en-GB", {
                             day: "numeric",
                             month: "short",
                             year: "numeric",
@@ -2098,8 +2139,8 @@ export function LeadsPage() {
                         <span className="lead-details-label">Products</span>
                         <span className="lead-details-value">
                           {displayField(
-                            (screen.detail?.products && screen.detail.products.length > 0)
-                              ? screen.detail.products.map((p: any) => p.code || p.name).join(", ")
+                            (screen.detail?.products && screen.detail!.products.length > 0)
+                              ? screen.detail!.products.map((p: any) => p.code || p.name).join(", ")
                               : fieldValue(selectedLead!, "products")
                           )}
                         </span>
@@ -2108,6 +2149,7 @@ export function LeadsPage() {
                   </div>
                 )}
               </div>
+              </>}
             </section>
           )}
 
@@ -2761,12 +2803,11 @@ export function LeadsPage() {
                     <p>No follow-ups are currently scheduled for this lead.</p>
                     {!showFollowUpForm && (
                       <button
-                        className="leads-button"
-                        style={{ marginTop: 12 }}
+                        className="lead-schedule-followup-empty-btn"
                         type="button"
                         onClick={() => setShowFollowUpForm(true)}
                       >
-                        ＋ Schedule follow-up
+                        + Schedule follow-up
                       </button>
                     )}
                   </div>

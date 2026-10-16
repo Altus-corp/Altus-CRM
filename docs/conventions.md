@@ -5,4 +5,4 @@
 - `page.tsx` files render UI, while `function.tsx` files hold screen state and logic.
 - Styles use tokens from `src/shared/theme/tokens.css` instead of hard-coded colors.
 - Role rules are defined in one capability map and mirrored for the client and server.
-- The six core navigation items (Leads, Marketing, Reports, Quote & Invoicing, Accounts & Contacts, and Tasks & Activity) are shown to every role; extended sidebar groups require the `nav.admin` capability.
+- Users with `nav.admin` see all six core navigation items (Leads, Marketing, Reports, Quote & Invoicing, Accounts & Contacts, and Tasks & Activity); everyone else sees only Leads and Reports. This is a UI restriction only; server permissions are unchanged. Extended sidebar groups require the `nav.admin` capability.

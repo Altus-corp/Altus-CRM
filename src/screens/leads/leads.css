@@ -935,7 +935,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 6px;
 }
 
 .lead-detail-eyebrow {
@@ -946,6 +946,21 @@
   color: var(--red);
   text-transform: uppercase;
   margin-bottom: 6px;
+}
+
+.lead-detail-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.lead-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
 }
 
 .lead-detail-title {
@@ -979,29 +994,9 @@
   border-color: var(--ink-3);
 }
 
-/* Quick actions bar */
-.lead-quick-actions-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
-  flex-wrap: wrap;
-}
-
-.lead-quick-actions-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-2);
-  margin-right: 4px;
-  white-space: nowrap;
-}
-
-.lead-quick-actions-list {
-  display: flex;
+/* Inline quick actions */
+.lead-detail-quick-actions {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
@@ -1010,13 +1005,43 @@
 .lead-quick-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 36px;
   height: 36px;
-  padding: 0 13px;
+  padding: 0;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--bg);
-  color: var(--ink-1);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lead-quick-action-btn:hover:not(:disabled) {
+  border-color: var(--ink-3);
+  background: var(--bg-1);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+
+.lead-quick-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+/* Schedule follow-up empty button */
+.lead-schedule-followup-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -1024,9 +1049,9 @@
   transition: all 0.15s ease;
 }
 
-.lead-quick-action-btn:hover {
-  border-color: var(--ink-3);
+.lead-schedule-followup-empty-btn:hover {
   background: var(--bg-1);
+  border-color: var(--ink-3);
   color: var(--ink);
   box-shadow: var(--shadow-1);
 }
@@ -1507,6 +1532,7 @@
 }
 
 .lead-detail-static-top .lead-detail-tabs {
+  margin-top: 14px;
   margin-bottom: 0;
   border-bottom: 1px solid var(--line);
 }

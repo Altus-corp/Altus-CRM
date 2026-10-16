@@ -1,3 +1,9 @@
+export class ApiError extends Error {
+  readonly status: number;
+  readonly path: string;
+  constructor(message: string, status: number, path: string) { super(message); this.name = "ApiError"; this.status = status; this.path = path; }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -5,6 +11,6 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || "Request failed.");
+  if (!response.ok) throw new ApiError(body.error || "Request failed.", response.status, path);
   return body as T;
 }

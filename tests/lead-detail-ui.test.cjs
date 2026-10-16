@@ -143,6 +143,18 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Products/, "Should include Products field");
 });
 
+test("Details tab renders the complete sales-safe lead record independently of list columns", () => {
+  const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
+  assert.match(pageSource, /DETAIL_FIELD_SECTIONS/);
+  for (const section of ["Basic information", "Contact", "Business", "Status & assignment", "Dates", "Introducer & outreach", "Notes"]) assert.match(pageSource, new RegExp(section));
+  assert.match(pageSource, /Additional stored fields/);
+  assert.match(pageSource, /customLeadFields/);
+  assert.match(pageSource, /DETAIL_INTERNAL_FIELD/);
+  assert.match(pageSource, /owner_user_id[\s\S]*screen\.userOptions/);
+  assert.match(pageSource, /DETAIL_DATE_FIELDS/);
+  assert.match(pageSource, /return "-"/);
+});
+
 test("Lead Details edit transition dismisses the drawer before showing the edit form", () => {
   const functionSource = fs.readFileSync("src/screens/leads/function.tsx", "utf8");
   const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");

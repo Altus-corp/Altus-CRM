@@ -23,7 +23,7 @@
 | Marketing | Placeholder view over lead data; no dedicated data model yet. | Placeholder view / draft-test mode |
 | Dashboard | No dashboard route or dedicated dashboard screen exists in the current repository. | Not started |
 
-The six core navigation items are available to every role. Admin groups appear only with the `nav.admin` capability. Old stages remain filters/tabs inside Leads.
+Users with `nav.admin` see all six core navigation items; everyone else sees only Leads and Reports. This is a UI restriction only; server permissions are unchanged. Admin groups appear only with the `nav.admin` capability. Old stages remain filters/tabs inside Leads.
 
 ## Later candidates
 

@@ -31,7 +31,7 @@ Do not add, change, or remove any icon unless explicitly asked. When asked to ad
 - Use `src/screens/<name>/page.tsx` for rendering and `function.tsx` for screen state/API logic.
 - Use `src/shared/` for shared API, auth, layout, and theme code.
 - Use tokens from `src/shared/theme/tokens.css`; do not introduce unrelated hard-coded colors.
-- Keep Leads, Marketing, Reports, Quote & Invoicing, Accounts & Contacts, and Tasks & Activity available to every role.
+- Users with `nav.admin` see Leads, Marketing, Reports, Quote & Invoicing, Accounts & Contacts, and Tasks & Activity; everyone else sees only Leads and Reports. This is a UI restriction only; server permissions are unchanged.
 - Show admin groups only through the `nav.admin` capability. Old stages are Leads filters/tabs.
 - Do not alter unrelated screens.
 

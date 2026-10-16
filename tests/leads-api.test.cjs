@@ -162,3 +162,15 @@ test("lead detail returns the lead and all four read-only child collections", as
   assert.equal(body.lead.id, "fixture-lead");
   assert.deepEqual(Object.keys(body).sort(), ["calls", "followups", "history", "lead", "messages", "notes", "products"]);
 });
+
+test("lead detail retains all lead columns rather than the list endpoint projection", async () => {
+  const db = { query: async (sql) => {
+    if (sql.startsWith("SELECT * FROM leads")) return { rows: [{ id: "fixture-lead", address: "Fixture address", custom_values: { lead_fields: { custom_field: "Fixture value" } } }] };
+    return { rows: [] };
+  } };
+  const res = response();
+  await leadDetail(getRequest("/api/leads/fixture-lead"), res, db, "fixture-lead");
+  const body = JSON.parse(res.body);
+  assert.equal(body.lead.address, "Fixture address");
+  assert.equal(body.lead.custom_values.lead_fields.custom_field, "Fixture value");
+});

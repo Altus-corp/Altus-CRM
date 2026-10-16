@@ -63,7 +63,6 @@ export type ExtendedNavItem = {
   label: string;
   countKey?: string;
   navNo?: string;
-  placeholder?: boolean;
 };
 
 export type ExtendedNavGroup = {
@@ -78,15 +77,15 @@ export const ADMIN_NAV_GROUPS = [
     collapsible: true,
     items: [
       { to: "/leads?view=new_leads", label: "Leads", countKey: "new_leads" },
-      { to: "/admin/assignment", label: "Assignment", placeholder: true },
+      { to: "/admin/assignment", label: "Assignment" },
       { to: "/reports", label: "Reports" },
-      { to: "/admin/panel", label: "Admin Panel", placeholder: true },
-      { to: "/admin/dropdowns", label: "Dropdown Management", placeholder: true },
-      { to: "/admin/templates", label: "Templates", placeholder: true },
-      { to: "/admin/import-export", label: "Import / Export", placeholder: true },
-      { to: "/admin/integrations", label: "Integrations", placeholder: true },
-      { to: "/admin/audit", label: "Audit Log", placeholder: true },
-      { to: "/admin/process-flow", label: "Process Flow", placeholder: true },
+      { to: "/admin/panel", label: "Admin Panel" },
+      { to: "/admin/dropdowns", label: "Dropdown Management" },
+      { to: "/admin/templates", label: "Templates" },
+      { to: "/admin/import-export", label: "Import / Export" },
+      { to: "/admin/integrations", label: "Integrations" },
+      { to: "/admin/audit", label: "Audit Log" },
+      { to: "/admin/process-flow", label: "Process Flow" },
     ],
   },
 ] as const satisfies readonly ExtendedNavGroup[];
