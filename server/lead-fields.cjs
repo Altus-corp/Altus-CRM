@@ -25,13 +25,13 @@ const DEFAULT_FIELDS = Object.freeze([
   ["chapter_name", "Chapter Name", "text"],
   ["extra_notes", "Extra Notes", "text"],
   ["last_called_on", "Last Called On", "text"],
-  ["calling_resolution", "Calling Resolution", "text"],
+  ["calling_resolution", "Calling Resolution", "dropdown"],
   ["next_call_on", "Next Call On", "text"],
   ["calling_remarks", "Calling Remarks", "textarea"],
   ["intro_video_sent", "2 Mins Intro Video Sent", "boolean"],
   ["email_sent", "Email Sent", "boolean"],
   ["whatsapp_message_sent", "Msg Sent on WhatsApp", "boolean"],
-].map(([key, label, type], order) => Object.freeze({ key, label, type, active: true, detail_visible: true, order })));
+].map(([key, label, type], order) => Object.freeze({ key, label, type, options: [], product_resolutions: key === "calling_resolution", active: true, detail_visible: true, order })));
 
 function text(value) { return String(value ?? "").trim(); }
 function plain(value) { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
@@ -47,8 +47,9 @@ function normalizeDefinitions(value, fallback = DEFAULT_FIELDS) {
     if (!KEY_RE.test(key) || seen.has(key) || !label || label.length > 80 || !TYPES.has(type)) continue;
     seen.add(key);
     const options = Array.isArray(raw?.options) ? [...new Map(raw.options.map((option) => text(option)).filter((option) => option && option.length <= 80).map((option) => [option.toLowerCase(), option])).values()] : [];
-    if (type === "dropdown" && !options.length) continue;
-    fields.push({ key, label, type, options, active: raw?.active !== false, detail_visible: raw?.detail_visible !== false, order: Number.isFinite(Number(raw?.order)) ? Number(raw.order) : index });
+    const productResolutions = key === "calling_resolution" && raw?.product_resolutions === true;
+    if (type === "dropdown" && !options.length && !productResolutions) continue;
+    fields.push({ key, label, type, options, product_resolutions: productResolutions, active: raw?.active !== false, detail_visible: raw?.detail_visible !== false, order: Number.isFinite(Number(raw?.order)) ? Number(raw.order) : index });
   }
   return fields.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
 }
@@ -70,7 +71,7 @@ function normalizeValues(input, definitions, { allowEmpty = false } = {}) {
       continue;
     }
     const value = text(raw); if (!value) { if (allowEmpty) values[key] = null; continue; }
-    if (field.type === "dropdown") { const selected = (field.options || []).find((option) => option.toLowerCase() === value.toLowerCase()); if (!selected) continue; values[key] = selected; continue; }
+    if (field.type === "dropdown") { if (field.product_resolutions) { values[key] = value; continue; } const selected = (field.options || []).find((option) => option.toLowerCase() === value.toLowerCase()); if (!selected) continue; values[key] = selected; continue; }
     if (field.type === "date" && !validDate(value)) continue;
     if (field.type === "number" && !Number.isFinite(Number(value.replace(/,/g, "")))) continue;
     if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) continue;

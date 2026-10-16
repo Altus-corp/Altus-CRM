@@ -186,7 +186,7 @@ async function leadsCounts(res, db) {
   return json(res, 200, counts);
 }
 
-async function leadsList(req, res, db, url) {
+async function leadsList(req, res, db, url, actor) {
   const params = [];
   const where = ["COALESCE(l.custom_values->>'archived','false') <> 'true'"];
   const bind = (value) => { params.push(value); return `$${params.length}`; };
@@ -195,6 +195,10 @@ async function leadsList(req, res, db, url) {
   for (const [query, column] of [["stage", "l.stage"], ["permission", "l.permission"], ["owner", "l.owner_user_id"], ["lead_status", "l.lead_status"]]) {
     const value = String(url.searchParams.get(query) || "").trim(); if (value) where.push(`${column} = ${bind(value)}`);
   }
+  const workQueue = String(url.searchParams.get("work_queue") || "");
+  if (!["", "lead_master", "focused_calling"].includes(workQueue)) return invalidLeadsQuery(res);
+  if (workQueue) where.push(`l.owner_user_id = ${bind(actor.id)}`);
+  if (workQueue === "focused_calling") where.push("l.next_follow_up_at >= CURRENT_DATE", "l.next_follow_up_at < CURRENT_DATE + INTERVAL '1 day'");
   const managedFilterFields = { lead_type: sqlExpression("leadTypeCode"), lead_stage: sqlExpression("stage"), permission: sqlExpression("permission"), business_category: sqlExpression("business_category"), calling_resolution: sqlExpression("calling_resolution"), rating: sqlExpression("rating"), lead_source: sqlExpression("leadSource"), products: null, product_stage: null };
   const managedRaw = url.searchParams.get("managed_filters");
   if (managedRaw) {
@@ -209,7 +213,10 @@ async function leadsList(req, res, db, url) {
         const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [values]);
         if (available.rows.length !== values.length) return invalidLeadsQuery(res);
         const productCodes = available.rows.map((row) => String(row.code || row.label));
-        where.push(`EXISTS (SELECT 1 FROM lead_products lp WHERE lp.lead_id=l.id AND lp.product_code IN (${productCodes.map((value) => bind(value)).join(", ")}))`);
+        // In a user's Lead Master / Focussed Calling queue, product selection is a
+        // context selector: it loads that product's stage and call-resolution options.
+        // Only those detailed choices should narrow the assigned-leads queue.
+        if (!workQueue) where.push(`EXISTS (SELECT 1 FROM lead_products lp WHERE lp.lead_id=l.id AND lp.product_code IN (${productCodes.map((value) => bind(value)).join(", ")}))`);
       } else if (key === "product_stage") {
         if (!selectedProducts.length) return invalidLeadsQuery(res);
         const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [selectedProducts]);
@@ -222,6 +229,12 @@ async function leadsList(req, res, db, url) {
         const validValues = key === "calling_resolution" || (await Promise.all(values.map((value) => validDropdownValue(db, key, value)))).every(Boolean);
         if (!validValues) return invalidLeadsQuery(res);
         where.push(`${managedFilterFields[key]} IN (${values.map((value) => bind(value)).join(", ")})`);
+        if (key === "calling_resolution" && selectedProducts.length) {
+          const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [selectedProducts]);
+          if (available.rows.length !== selectedProducts.length) return invalidLeadsQuery(res);
+          const productCodes = available.rows.map((row) => String(row.code || row.label));
+          where.push(`EXISTS (SELECT 1 FROM lead_products lp WHERE lp.lead_id=l.id AND lp.product_code IN (${productCodes.map((value) => bind(value)).join(", ")}))`);
+        }
       }
     }
   }
@@ -278,7 +291,7 @@ async function leadsList(req, res, db, url) {
   listParams.push(pageSize, offset);
   // Keep the list endpoint usable while an older preview database is waiting for
   // migration 018. The field is optional in the client until that migration runs.
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance,COALESCE((SELECT array_agg(DISTINCT lp.product_code) FROM lead_products lp WHERE lp.lead_id=l.id),ARRAY[]::text[]) AS product_codes FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   return json(res, 200, { items: rows.rows.map(materializeLead), page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
@@ -481,7 +494,9 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
   if (canonical.storage.kind === "column" && canonical.storage.key === "permission" && body.value !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
   let value = body.value;
   try {
-    if (configuredField) {
+    if (configuredField && requested === "calling_resolution") {
+      value = inlineText(value, 200);
+    } else if (configuredField) {
       const normalized = LeadFields.normalizeValues({ [requested]: value }, [configuredField], { allowEmpty: true });
       if (!Object.prototype.hasOwnProperty.call(normalized, requested)) throw Object.assign(new Error(`Invalid value for ${configuredField.label}.`), { status: 400 });
       value = normalized[requested];
@@ -492,6 +507,16 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
     else if (canonical.input === "phone") { value = inlineText(value, 80); if (!value || !/^[+\d][\d\s().-]{6,}$/.test(value)) throw Object.assign(new Error("Enter a valid phone number."), { status: 400 }); }
     else if (canonical.input === "dropdown") { value = inlineText(value, 200); if (value != null) await Dropdowns.assertSelectableOption(db, canonical.dropdown, value); }
     else value = inlineText(value);
+    if (requested === "calling_resolution" && value != null) {
+      const proposed = String(current.custom_values?.lead_fields?.proposed_solution ?? current.custom_values?.proposed_solution ?? "");
+      const proposedProducts = proposed.split(/[,;|]/).map((item) => item.trim()).filter(Boolean);
+      if (!proposedProducts.length) throw Object.assign(new Error("Select the lead's Proposed Solution product before choosing a call resolution."), { status: 400 });
+      const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [proposedProducts]);
+      if (!available.rows.length) throw Object.assign(new Error("The Proposed Solution product is no longer active."), { status: 400 });
+      const productCodes = available.rows.map((row) => String(row.code || row.label));
+      const allowed = await db.query("SELECT 1 FROM product_call_resolutions r JOIN master_values m ON m.id=r.product_id WHERE r.active=true AND r.label=$1 AND m.code = ANY($2::text[]) LIMIT 1", [value, productCodes]);
+      if (!allowed.rows[0]) throw Object.assign(new Error("This call resolution is not active for the lead's Proposed Solution product."), { status: 400 });
+    }
     if (canonical.required && !value) throw Object.assign(new Error(`${canonical.label} is required.`), { status: 400 });
     if (canonical.storage.key === "rating" && value != null && !["1", "2", "3", "4", "5"].includes(String(value))) throw Object.assign(new Error("Rating must be between 1 and 5."), { status: 400 });
   } catch (error) { return json(res, error.status || 400, { error: error.message || "Invalid lead value." }); }
@@ -712,6 +737,86 @@ async function productStageWrite(req, res, db, actor, productId, stageId = null)
     await writeAudit(tx, { actorUserId: actor.id, action: stageId ? "product_stage.updated" : "product_stage.created", entityType: "product_stage", entityId: id, newValue: label, ip: req.socket.remoteAddress });
   }); return json(res, stageId ? 200 : 201, { id }); } catch (error) { return json(res, error?.code === "23505" ? 409 : 500, { error: error?.code === "23505" ? "That stage already exists for this product." : "Unable to save product stage." }); }
 }
+async function productCallResolutionsList(res, db, productId) {
+  const product = (await db.query("SELECT id FROM master_values WHERE id=$1 AND master_type='product'", [productId])).rows[0];
+  if (!product) return json(res, 404, { error: "Product not found." });
+  const rows = await db.query("SELECT id,product_id,label,sort_order,active FROM product_call_resolutions WHERE product_id=$1 ORDER BY sort_order,label", [productId]);
+  return json(res, 200, { resolutions: rows.rows });
+}
+async function productCallResolutionWrite(req, res, db, actor, productId, resolutionId = null) {
+  const body = await readJson(req); const label = String(body.label || "").trim();
+  if (!label || label.length > 120) return userWriteError(res, 400, "Invalid product call resolution.");
+  const product = (await db.query("SELECT id FROM master_values WHERE id=$1 AND master_type='product'", [productId])).rows[0];
+  if (!product) return userWriteError(res, 404, "Product not found.");
+  const id = resolutionId || `product-call-resolution-${crypto.randomUUID()}`;
+  try { await transaction(db, async (tx) => {
+    await tx.query("INSERT INTO product_call_resolutions(id,product_id,label,sort_order,active) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET label=EXCLUDED.label,sort_order=EXCLUDED.sort_order,active=EXCLUDED.active,updated_at=now()", [id, productId, label, Number.isInteger(body.sort_order) ? body.sort_order : 0, body.active !== false]);
+    await writeAudit(tx, { actorUserId: actor.id, action: resolutionId ? "product_call_resolution.updated" : "product_call_resolution.created", entityType: "product_call_resolution", entityId: id, newValue: label, ip: req.socket.remoteAddress });
+  }); return json(res, resolutionId ? 200 : 201, { id }); } catch (error) { return json(res, error?.code === "23505" ? 409 : 500, { error: error?.code === "23505" ? "That call resolution already exists for this product." : "Unable to save product call resolution." }); }
+}
+async function productOptionDelete(res, db, actor, productId, optionId, kind, ip) {
+  const table = kind === "stage" ? "product_stages" : "product_call_resolutions";
+  const entityType = kind === "stage" ? "product_stage" : "product_call_resolution";
+  const existing = (await db.query(`SELECT id,label FROM ${table} WHERE id=$1 AND product_id=$2`, [optionId, productId])).rows[0];
+  if (!existing) return userWriteError(res, 404, "Product option not found.");
+  await transaction(db, async (tx) => {
+    await tx.query(`DELETE FROM ${table} WHERE id=$1 AND product_id=$2`, [optionId, productId]);
+    await writeAudit(tx, { actorUserId: actor.id, action: `${entityType}.deleted`, entityType, entityId: optionId, oldValue: existing.label, ip });
+  });
+  return json(res, 200, { id: optionId, deleted: true });
+}
+const ASSIGNMENT_CONDITION_FIELDS = new Set(["team", "lead_type", "stage", "lead_status", "source_system", "lead_source"]);
+function assignmentRulePayload(body) {
+  const name = String(body.name || "").trim(); const priority = Number(body.priority);
+  if (!name || name.length > 120 || !Number.isInteger(priority) || priority < 0 || priority > 100000) return null;
+  const conditions = body.conditions && typeof body.conditions === "object" && !Array.isArray(body.conditions) ? body.conditions : {};
+  const actions = body.actions && typeof body.actions === "object" && !Array.isArray(body.actions) ? body.actions : {};
+  const cleanConditions = {};
+  for (const [key, value] of Object.entries(conditions)) { const text = String(value || "").trim(); if (text && ASSIGNMENT_CONDITION_FIELDS.has(key) && text.length <= 120) cleanConditions[key] = text; }
+  const userIds = Array.isArray(actions.user_ids) ? [...new Set(actions.user_ids.map((value) => String(value || "").trim()).filter((value) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value)))].slice(0, 100) : [];
+  if (!userIds.length) return null;
+  return { name, priority, enabled: body.enabled !== false, conditions: cleanConditions, actions: { user_ids: userIds } };
+}
+async function assignmentRulesList(res, db) {
+  const rows = await db.query("SELECT id,name,priority,enabled,conditions,actions,last_assigned_user_id,rotation_updated_at FROM assignment_rules ORDER BY priority,name,id");
+  return json(res, 200, { rules: rows.rows });
+}
+async function assignmentRuleWrite(req, res, db, actor, id = null) {
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid assignment rule."); }
+  const rule = assignmentRulePayload(body); if (!rule) return userWriteError(res, 400, "Provide a name, priority, and at least one eligible team member.");
+  const members = await db.query("SELECT id FROM users WHERE id = ANY($1::text[]) AND active=true AND offboarded=false", [rule.actions.user_ids]);
+  if (members.rows.length !== rule.actions.user_ids.length) return userWriteError(res, 400, "One or more selected team members are inactive or unavailable.");
+  const ruleId = id || `assignment-rule-${crypto.randomUUID()}`;
+  if (id && !(await db.query("SELECT id FROM assignment_rules WHERE id=$1", [id])).rows[0]) return userWriteError(res, 404, "Assignment rule not found.");
+  await transaction(db, async (tx) => {
+    await tx.query("INSERT INTO assignment_rules(id,source_id,name,priority,enabled,conditions,actions,rule,updated_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,'{}'::jsonb,now()) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,priority=EXCLUDED.priority,enabled=EXCLUDED.enabled,conditions=EXCLUDED.conditions,actions=EXCLUDED.actions,updated_at=now()", [ruleId, ruleId, rule.name, rule.priority, rule.enabled, JSON.stringify(rule.conditions), JSON.stringify(rule.actions)]);
+    await writeAudit(tx, { actorUserId: actor.id, action: id ? "assignment_rule.updated" : "assignment_rule.created", entityType: "assignment_rule", entityId: ruleId, newValue: rule.name, ip: req.socket.remoteAddress });
+  });
+  return json(res, id ? 200 : 201, { id: ruleId });
+}
+async function assignmentRuleDelete(res, db, actor, id, ip) {
+  const existing = (await db.query("SELECT name FROM assignment_rules WHERE id=$1", [id])).rows[0]; if (!existing) return userWriteError(res, 404, "Assignment rule not found.");
+  await transaction(db, async (tx) => { await tx.query("DELETE FROM assignment_rules WHERE id=$1", [id]); await writeAudit(tx, { actorUserId: actor.id, action: "assignment_rule.deleted", entityType: "assignment_rule", entityId: id, oldValue: existing.name, ip }); });
+  return json(res, 200, { id, deleted: true });
+}
+async function assignmentManualWrite(req, res, db, actor) {
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid manual assignment."); }
+  const ownerId = String(body.owner_user_id || "").trim();
+  const leadIds = Array.isArray(body.lead_ids) ? [...new Set(body.lead_ids.map((value) => String(value || "").trim()).filter((value) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)))].slice(0, 100) : [];
+  if (!ownerId || !leadIds.length) return userWriteError(res, 400, "Choose at least one lead and an active user.");
+  const owner = (await db.query("SELECT id,name FROM users WHERE id=$1 AND active=true AND offboarded=false", [ownerId])).rows[0];
+  if (!owner) return userWriteError(res, 400, "The selected user is inactive or unavailable.");
+  await transaction(db, async (tx) => {
+    const selected = (await tx.query("SELECT id,owner_user_id FROM leads WHERE id = ANY($1::text[]) FOR UPDATE", [leadIds])).rows;
+    if (selected.length !== leadIds.length) throw Object.assign(new Error("One or more leads were not found."), { status: 404 });
+    for (const lead of selected) {
+      await tx.query("UPDATE leads SET owner_user_id=$2,updated_at=now() WHERE id=$1", [lead.id, owner.id]);
+      await writeAssignmentHistory(tx, { leadId: lead.id, actorId: actor.id, action: "lead.owner_changed", previousOwner: lead.owner_user_id, ownerId: owner.id, reason: "manual", note: `Manually assigned to ${owner.name || owner.id}.` });
+      await writeAudit(tx, { actorUserId: actor.id, action: "lead.manually_assigned", entityType: "lead", entityId: lead.id, oldValue: lead.owner_user_id || null, newValue: owner.id, ip: req.socket.remoteAddress });
+    }
+  });
+  return json(res, 200, { assigned: leadIds.length, owner: { id: owner.id, name: owner.name } });
+}
 async function masterWrite(req, res, db, actor, id = null) {
   const body = await readJson(req); const masterType = String(body.master_type || "").trim(); const label = String(body.label || "").trim();
   if (!masterType || !label) return userWriteError(res, 400, "Invalid master value.");
@@ -837,9 +942,20 @@ async function route(req, res, db) {
   if (url.pathname === "/api/products" && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to view products." }); return safeUserOperation(res, () => productCatalogList(res, db)); }
   if (url.pathname === "/api/products/dropdown-definition" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage products."); return safeUserOperation(res, () => productDropdownDefinitionSave(req, res, db, user)); }
   if (url.pathname === "/api/products/reorder" && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to reorder products."); return safeUserOperation(res, () => productCatalogReorder(req, res, db, user)); }
+  if (url.pathname === "/api/assignment-rules" && req.method === "GET") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRulesList(res, db)); }
+  if (url.pathname === "/api/assignment-rules" && req.method === "POST") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRuleWrite(req, res, db, user)); }
+  if (url.pathname === "/api/assignment-rules/manual" && req.method === "POST") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to assign leads."); return assignmentManualWrite(req, res, db, user); }
+  const assignmentRuleMatch = url.pathname.match(/^\/api\/assignment-rules\/([^/]+)$/);
+  if (assignmentRuleMatch && req.method === "PATCH") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRuleWrite(req, res, db, user, decodeURIComponent(assignmentRuleMatch[1]))); }
+  if (assignmentRuleMatch && req.method === "DELETE") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRuleDelete(res, db, user, decodeURIComponent(assignmentRuleMatch[1]), req.socket.remoteAddress)); }
   const productStageMatch = url.pathname.match(/^\/api\/products\/([^/]+)\/stages(?:\/([^/]+))?$/);
   if (productStageMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return userWriteError(res, 403, "You do not have permission to view product stages."); return safeUserOperation(res, () => productStagesList(res, db, decodeURIComponent(productStageMatch[1]))); }
   if (productStageMatch && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage product stages."); return safeUserOperation(res, () => productStageWrite(req, res, db, user, decodeURIComponent(productStageMatch[1]), productStageMatch[2] ? decodeURIComponent(productStageMatch[2]) : null)); }
+  if (productStageMatch && productStageMatch[2] && req.method === "DELETE") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage product stages."); return safeUserOperation(res, () => productOptionDelete(res, db, user, decodeURIComponent(productStageMatch[1]), decodeURIComponent(productStageMatch[2]), "stage", req.socket.remoteAddress)); }
+  const productCallResolutionMatch = url.pathname.match(/^\/api\/products\/([^/]+)\/call-resolutions(?:\/([^/]+))?$/);
+  if (productCallResolutionMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return userWriteError(res, 403, "You do not have permission to view product call resolutions."); return safeUserOperation(res, () => productCallResolutionsList(res, db, decodeURIComponent(productCallResolutionMatch[1]))); }
+  if (productCallResolutionMatch && req.method === "POST") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage product call resolutions."); return safeUserOperation(res, () => productCallResolutionWrite(req, res, db, user, decodeURIComponent(productCallResolutionMatch[1]), productCallResolutionMatch[2] ? decodeURIComponent(productCallResolutionMatch[2]) : null)); }
+  if (productCallResolutionMatch && productCallResolutionMatch[2] && req.method === "DELETE") { if (!requireCapability("masters.edit", user)) return userWriteError(res, 403, "You do not have permission to manage product call resolutions."); return safeUserOperation(res, () => productOptionDelete(res, db, user, decodeURIComponent(productCallResolutionMatch[1]), decodeURIComponent(productCallResolutionMatch[2]), "resolution", req.socket.remoteAddress)); }
   if (url.pathname === "/api/targets" && req.method === "GET") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to view targets."); return safeUserOperation(res, () => targetsList(res, db)); }
   if (url.pathname === "/api/targets" && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user)); }
   const targetMatch = url.pathname.match(/^\/api\/targets\/([^/]+)$/); if (targetMatch && req.method === "POST") { if (!requireCapability("targets.manage", user)) return userWriteError(res, 403, "You do not have permission to edit targets."); return safeUserOperation(res, () => targetWrite(req, res, db, user, decodeURIComponent(targetMatch[1]))); }
@@ -883,7 +999,7 @@ async function route(req, res, db) {
   if (followupActionMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const leadId = decodeURIComponent(followupActionMatch[1]); const followupId = decodeURIComponent(followupActionMatch[2]); return followupActionMatch[3] === "reschedule" ? rescheduleLeadFollowup(req, res, db, user, leadId, followupId) : completeLeadFollowup(req, res, db, user, leadId, followupId); }
   if (url.pathname === "/api/leads" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
-    return leadsList(req, res, db, url);
+    return leadsList(req, res, db, url, user);
   }
   if (url.pathname === "/api/leads/counts" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });

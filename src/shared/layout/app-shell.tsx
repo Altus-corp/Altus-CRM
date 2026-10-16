@@ -40,7 +40,7 @@ function MasterSidebar({
     </div>
     <nav className="master-navigation" aria-label="Master navigation">
       {!hideMasterNavigation && <NavLink
-          to="/leads"
+          to="/leads?work_queue=lead_master"
           end
           className={leadMasterActive ? "master-navigation-toggle master-navigation-parent active" : "master-navigation-toggle master-navigation-parent"}
         >

@@ -12,6 +12,7 @@ import "./leads.css";
 const LEADS_COLUMN_PREFERENCE_KEY = "leads.columns.v1";
 const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
+const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
 const LEAD_SORT_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", first_name: "first_name", last_name: "last_name", company: "company", cellNo: "cell_no", email: "email", designation: "designation", businessCategory: "business_category", business_category: "business_category", leadSource: "lead_source", rating: "rating", permission: "permission", lastCalledOn: "last_call_at", last_called_on: "last_call_at", lead_acquisition_date: "lead_acquisition_date", nature_of_business: "nature_of_business", proposed_solution: "proposed_solution", invite_sent_by_introducer: "invite_sent_by_introducer", invite_date_sent: "invite_date_sent", introducer_call_done: "introducer_call_done", introducer_call_date: "introducer_call_date", introducer_feedback: "introducer_feedback", introducer_name: "introducer_name", employee_name: "employee_name", association_network_name: "association_network_name", chapter_name: "chapter_name", calling_resolution: "calling_resolution", next_call_on: "next_call_on", calling_remarks: "calling_remarks", intro_video_sent: "intro_video_sent", email_sent: "email_sent", whatsapp_message_sent: "whatsapp_message_sent", extra_notes: "extra_notes", created_at: "created_at", updated_at: "updated_at", city: "city", sourceSystem: "source_system", leadAcquiredDate: "lead_acquisition_date", natureOfBusiness: "nature_of_business", service: "service", owner: "owner", callingResolution: "calling_resolution", priority: "priority", callingRemarks: "calling_remarks", psoDate: "pso_date", registrationTime: "registration_time", approvalStatus: "approval_status", zoomOrPhysical: "zoom_or_physical", confirmationCallStatus: "confirmation_call_status", zoomLinkSent: "zoom_link_sent", attendanceStatus: "attendance_status", salesFollowUpBy: "sales_follow_up_by", salesResolution: "sales_resolution", cameraOn: "camera_on", photoTaken: "photo_taken", salesNotes: "sales_notes", leftHalfway: "left_halfway", nextFollowUpAt: "next_follow_up_at", totalPayable: "total_payable", amountPaid: "amount_paid", balanceReceivable: "balance_receivable", targetDate: "target_date" };
 function columnStorageKey(userId: string) { return `${LEADS_COLUMN_PREFERENCE_KEY}:${userId}`; }
 function readStoredColumns(userId: string | undefined): unknown {
@@ -726,6 +727,19 @@ export function LeadsPage() {
   const [groupByOpen, setGroupByOpen] = useState(false);
   const selectedProductCodes = screen.managedFilters.products || [];
   const [productStageOptions, setProductStageOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [productCallResolutionOptions, setProductCallResolutionOptions] = useState<Array<{ id: string; value: string; label: string }>>([]);
+  const [callResolutionsByProductCode, setCallResolutionsByProductCode] = useState<Record<string, Array<{ value: string; label: string }>>>({});
+  const visibleProposedSolutionProducts = Array.from(new Set((screen.data?.items || []).flatMap((lead) => String(fieldValue(lead, "proposed_solution") || "").split(/[,;|]/).map((value) => value.trim().toLowerCase()).filter(Boolean)).flatMap((value) => screen.products.filter((product) => product.code.toLowerCase() === value || product.label.toLowerCase() === value).map((product) => product.code))));
+  useEffect(() => {
+    const visibleProducts = screen.products.filter((product) => visibleProposedSolutionProducts.includes(product.code));
+    if (!visibleProducts.length) { setCallResolutionsByProductCode({}); return; }
+    let live = true;
+    void Promise.all(visibleProducts.map(async (product) => {
+      const response = await api<{ resolutions: Array<{ label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/call-resolutions`);
+      return [product.code, (response.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ value: resolution.label, label: resolution.label }))] as const;
+    })).then((entries) => { if (live) setCallResolutionsByProductCode(Object.fromEntries(entries)); }).catch(() => { if (live) setCallResolutionsByProductCode({}); });
+    return () => { live = false; };
+  }, [screen.products, visibleProposedSolutionProducts.join("|")]);
   useEffect(() => { if (!selectedProductCodes.length && (screen.managedFilters.product_stage || []).length) screen.updateManagedFilter("product_stage", []); }, [selectedProductCodes.join("|"), screen.managedFilters.product_stage?.join("|")]);
   useEffect(() => {
     const selectedProducts = screen.products.filter((product) => selectedProductCodes.includes(product.code) || selectedProductCodes.includes(product.label));
@@ -733,12 +747,26 @@ export function LeadsPage() {
     let live = true;
     void Promise.all(selectedProducts.map(async (product) => {
       const response = await api<{ stages: Array<{ id: string; label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/stages`);
-      return (response.stages || []).filter((stage) => stage.active).map((stage) => ({ id: `${product.id}:${stage.id}`, label: stage.label }));
+      return (response.stages || []).filter((stage) => stage.active && !SYSTEM_WORK_QUEUE_STAGE_LABELS.has(stage.label.trim().toLowerCase())).map((stage) => ({ id: `${product.id}:${stage.id}`, label: stage.label }));
     })).then((groups) => {
       if (!live) return;
       const seen = new Set<string>();
       setProductStageOptions(groups.flat().filter((stage) => !seen.has(stage.label) && (seen.add(stage.label), true)));
     }).catch(() => { if (live) setProductStageOptions([]); });
+    return () => { live = false; };
+  }, [screen.products, selectedProductCodes.join("|")]);
+  useEffect(() => {
+    const selectedProducts = screen.products.filter((product) => selectedProductCodes.includes(product.code) || selectedProductCodes.includes(product.label));
+    if (!selectedProducts.length) { setProductCallResolutionOptions([]); return; }
+    let live = true;
+    void Promise.all(selectedProducts.map(async (product) => {
+      const response = await api<{ resolutions: Array<{ id: string; label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/call-resolutions`);
+      return (response.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ id: `${product.id}:${resolution.id}`, value: resolution.label, label: resolution.label }));
+    })).then((groups) => {
+      if (!live) return;
+      const seen = new Set<string>();
+      setProductCallResolutionOptions(groups.flat().filter((resolution) => !seen.has(resolution.value) && (seen.add(resolution.value), true)));
+    }).catch(() => { if (live) setProductCallResolutionOptions([]); });
     return () => { live = false; };
   }, [screen.products, selectedProductCodes.join("|")]);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys));
@@ -848,7 +876,8 @@ export function LeadsPage() {
   const callResolutionOptions = configuredCallResolutionField
     ? (configuredCallResolutionField.options || []).map((option, index) => ({ id: `lead-field-calling-resolution-${index}`, value: option, label: option }))
     : screen.dropdownOptions.callingResolution.filter((option) => option.value);
-  const callResolutionOptionsKey = callResolutionOptions.map((option) => `${option.value}:${option.label}`).join("|");
+  const activeCallResolutionOptions = selectedProductCodes.length ? productCallResolutionOptions : callResolutionOptions;
+  const callResolutionOptionsKey = activeCallResolutionOptions.map((option) => `${option.value}:${option.label}`).join("|");
   useEffect(() => {
     const bar = callResolutionBarRef.current;
     const measure = callResolutionMeasureRef.current;
@@ -871,8 +900,11 @@ export function LeadsPage() {
     observer.observe(bar);
     return () => observer.disconnect();
   }, [callResolutionOptionsKey, screen.data?.total]);
-  const hasHiddenCallResolutionOptions = collapsedCallResolutionCount < callResolutionOptions.length;
-  const visibleCallResolutionOptions = callResolutionMoreOpen ? callResolutionOptions : callResolutionOptions.slice(0, collapsedCallResolutionCount);
+  const hasHiddenCallResolutionOptions = !selectedProductCodes.length && collapsedCallResolutionCount < activeCallResolutionOptions.length;
+  // Product options are intentionally always visible. Selecting a product is only
+  // a context choice in Lead Master/Focussed Calling; a resolution filters leads
+  // only after the user clicks one of these chips.
+  const visibleCallResolutionOptions = selectedProductCodes.length || callResolutionMoreOpen ? activeCallResolutionOptions : activeCallResolutionOptions.slice(0, collapsedCallResolutionCount);
   const selectedCallResolutions = screen.managedFilters.calling_resolution || [];
   const selectedProductStages = screen.managedFilters.product_stage || [];
   const callResolutionCounts = new Map<string, number>();
@@ -893,7 +925,10 @@ export function LeadsPage() {
     const configured = configuredFieldsByKey.get(field.key);
     if (!configured || !["dropdown", "boolean"].includes(configured.type)) return displayField(fieldValue(lead, field.key));
     const currentValue = fieldValue(lead, field.key);
-    const options = configured.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(configured.options || []).map((option) => ({ value: option, label: option }))];
+    const proposedSolution = String(fieldValue(lead, "proposed_solution") || "");
+    const resolutionProductCodes = proposedSolution.split(/[,;|]/).map((value) => value.trim().toLowerCase()).filter(Boolean).flatMap((value) => screen.products.filter((product) => product.code.toLowerCase() === value || product.label.toLowerCase() === value).map((product) => product.code));
+    const productOptions = field.key === "calling_resolution" ? [...new Map(resolutionProductCodes.flatMap((code) => callResolutionsByProductCode[code] || []).map((option) => [option.value, option])).values()] : [];
+    const options = configured.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured.options || []).map((option) => ({ value: option, label: option })))];
     const value = configured.type === "boolean" ? currentValue === true ? "true" : currentValue === false ? "false" : "" : String(currentValue || "");
     return <select className="lead-table-field-select" aria-label={`Change ${configured.label} for ${lead.name}`} value={value} disabled={!screen.canEdit} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, field.key, event.target.value).catch(() => undefined); }}>
       {options.map((option) => <option key={option.value || "empty"} value={option.value}>{option.label}</option>)}
@@ -1094,10 +1129,11 @@ export function LeadsPage() {
         {hasHiddenCallResolutionOptions && <button className="call-resolution-more" type="button" aria-expanded={callResolutionMoreOpen} aria-label={callResolutionMoreOpen ? "Show fewer statuses" : "Show more statuses"} title={callResolutionMoreOpen ? "Show fewer statuses" : "Show more statuses"} onClick={() => setCallResolutionMoreOpen((open) => !open)}>{callResolutionMoreOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}</button>}
         <div className="call-resolution-measure" ref={callResolutionMeasureRef} aria-hidden="true">
           <span className="call-resolution-chip" data-call-resolution-measure-chip><span className="call-resolution-dot" /><strong>{screen.data.total}</strong><span className="call-resolution-label">Total</span></span>
-          {callResolutionOptions.map((option, index) => <span className={`call-resolution-chip tone-${index % 7}`} data-call-resolution-measure-chip key={option.id || option.value}><span className="call-resolution-dot" /><strong>{callResolutionCounts.get(option.value) || 0}</strong><span className="call-resolution-label">{option.label}</span></span>)}
+          {activeCallResolutionOptions.map((option, index) => <span className={`call-resolution-chip tone-${index % 7}`} data-call-resolution-measure-chip key={option.id || option.value}><span className="call-resolution-dot" /><strong>{callResolutionCounts.get(option.value) || 0}</strong><span className="call-resolution-label">{option.label}</span></span>)}
         </div>
       </div>
-      {selectedProductCodes.length > 0 && <div className="product-stage-summary" aria-label="Filter selected product by stage"><span>Product stages</span><button type="button" className={!selectedProductStages.length ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.updateManagedFilter("product_stage", [])}>All stages</button>{productStageOptions.map((stage) => <button key={stage.id} type="button" className={selectedProductStages.includes(stage.label) ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => applyProductStageFilter(stage.label)}>{stage.label}</button>)}{!productStageOptions.length && <span className="product-stage-empty">No active stages for this product.</span>}</div>}<div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="menu" onClick={() => setColumnChooserOpen((open) => !open)}>☷ <span>Columns</span></button>{columnChooserOpen && <div className="lead-column-menu" role="menu" aria-label="Choose columns">
+      <div className="product-stage-summary system-work-queue-summary" aria-label="My lead queues"><span>My lead queues</span><button type="button" className={screen.filters.work_queue === "lead_master" ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.chooseWorkQueue("lead_master")}>Lead Master</button><button type="button" className={screen.filters.work_queue === "focused_calling" ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.chooseWorkQueue("focused_calling")}>Focussed Calling</button>{selectedProductCodes.length > 0 && <>{productStageOptions.map((stage) => <button key={stage.id} type="button" className={selectedProductStages.includes(stage.label) ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => applyProductStageFilter(stage.label)}>{stage.label}</button>)}{!productStageOptions.length && <span className="product-stage-empty">No active stages for this product.</span>}</>}</div>
+      <div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="menu" onClick={() => setColumnChooserOpen((open) => !open)}>☷ <span>Columns</span></button>{columnChooserOpen && <div className="lead-column-menu" role="menu" aria-label="Choose columns">
               <div className="col-menu-search-wrap">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 <input className="col-menu-search" type="text" placeholder="Search columns..." value={columnSearch} onChange={(e) => setColumnSearch(e.target.value)} autoFocus />
