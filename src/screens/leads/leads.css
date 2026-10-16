@@ -37,7 +37,7 @@
 .leads-button { min-height: 36px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 700; }
 .leads-button:hover:not(:disabled), .icon-button:hover { border-color: var(--red); color: var(--red); }
 .leads-button:disabled { cursor: not-allowed; opacity: .45; }
-.lead-table-wrap { overflow: auto; margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
+.lead-table-wrap { position: relative; overflow: auto; margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
 .lead-table { width: 100%; border-collapse: collapse; min-width: 940px; font-size: 12px; }
 .lead-table th { padding: 13px 16px; background: var(--bg-2); color: var(--ink-2); border-bottom: 1px solid var(--line); font-size: 10px; font-weight: 800; text-align: left; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
 .lead-sort-button { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
@@ -45,6 +45,7 @@
 .lead-sort-button.is-sorted svg, .lead-sort-button:hover svg { color: var(--ink-1); }
 .lead-table td { padding: 15px 16px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); white-space: nowrap; }
 .lead-table tbody tr:last-child td { border-bottom: 0; }
+.lead-table tbody:empty::after { content: "No leads found."; position: absolute; top: 50%; left: 50%; color: var(--ink-2); font-size: 13px; text-align: center; white-space: nowrap; transform: translate(-50%, -50%); }
 .lead-table tbody tr { cursor: pointer; outline: none; }
 .lead-table tbody tr:hover, .lead-table tbody tr:focus { background: var(--red-050); }
 .lead-table td:first-child, .lead-table td strong { color: var(--ink); }
