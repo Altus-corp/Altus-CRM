@@ -526,6 +526,7 @@ async function createLead(req, res, db, actor) {
 }
 function inlineText(value, max = 2000) { if (value == null) return null; const text = String(value).trim(); return text ? text.slice(0, max) : null; }
 function inlineDate(value, dateTime = false) { if (value == null || value === "") return null; const text = String(value); const pattern = dateTime ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/ : /^\d{4}-\d{2}-\d{2}$/; if (!pattern.test(text) || Number.isNaN(new Date(text).getTime())) throw Object.assign(new Error("Invalid date value."), { status: 400 }); return text; }
+function resolutionAllowedForProducts(value, productCodes, activeResolutionsByProduct) { return value != null && value !== "" && productCodes.some((code) => (activeResolutionsByProduct[code] || []).some((label) => label === String(value))); }
 async function updateInlineLeadField(req, res, db, actor, id, body) {
   const requested = String(body.field || "");
   const configuredField = (await LeadFields.getDefinitions(db)).find((field) => field.key === requested && field.active);
@@ -556,8 +557,9 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
       const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [proposedProducts]);
       if (!available.rows.length) throw Object.assign(new Error("The Proposed Solution product is no longer active."), { status: 400 });
       const productCodes = available.rows.map((row) => String(row.code || row.label));
-      const allowed = await db.query("SELECT 1 FROM product_call_resolutions r JOIN master_values m ON m.id=r.product_id WHERE r.active=true AND r.label=$1 AND m.code = ANY($2::text[]) LIMIT 1", [value, productCodes]);
-      if (!allowed.rows[0]) throw Object.assign(new Error("This call resolution is not active for the lead's Proposed Solution product."), { status: 400 });
+      const allowed = await db.query("SELECT m.code,r.label FROM product_call_resolutions r JOIN master_values m ON m.id=r.product_id WHERE r.active=true AND r.label=$1 AND m.code = ANY($2::text[])", [value, productCodes]);
+      const active = Object.fromEntries(productCodes.map((code) => [code, allowed.rows.filter((row) => String(row.code) === code).map((row) => String(row.label))]));
+      if (!resolutionAllowedForProducts(value, productCodes, active)) throw Object.assign(new Error("This call resolution is not active for the lead's Proposed Solution product."), { status: 400 });
     }
     if (canonical.required && !value) throw Object.assign(new Error(`${canonical.label} is required.`), { status: 400 });
     if (canonical.storage.key === "rating" && value != null && !["1", "2", "3", "4", "5"].includes(String(value))) throw Object.assign(new Error("Rating must be between 1 and 5."), { status: 400 });
@@ -1131,4 +1133,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, resolutionAllowedForProducts };
