@@ -13,6 +13,8 @@ export const NAV_ITEMS = [
 
 const CORE_NAV_MENUS: Record<string, readonly { to: string; label: string }[]> = {
   "/leads": [
+    { to: "/leads?work_queue=lead_master", label: "Lead Master" },
+    { to: "/leads?work_queue=focused_calling", label: "Focussed Calling" },
     { to: "/leads", label: "All Leads" },
     { to: "/leads?view=new_leads", label: "New Leads" },
     { to: "/leads?view=qualified", label: "Qualified Leads" },

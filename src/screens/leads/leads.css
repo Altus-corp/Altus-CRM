@@ -172,6 +172,7 @@
 .call-resolution-summary + .lead-table-toolbar { margin-top: 10px; }
 .product-stage-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 10px 0 -5px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
 .product-stage-summary > span:first-child { margin-right: 4px; color: var(--ink-2); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.product-stage-inline-label { margin-left: 8px; color: var(--ink-2); font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .product-stage-chip { min-height: 32px; padding: 0 13px; border: 1px solid color-mix(in srgb, var(--red) 32%, var(--line)); border-radius: 999px; background: var(--red-050); color: var(--red); cursor: pointer; font: inherit; font-size: 12px; font-weight: 750; white-space: nowrap; }
 .product-stage-chip:hover, .product-stage-chip.selected { border-color: var(--red); background: var(--red); color: #fff; }
 .product-stage-empty { color: var(--ink-2); font-size: 12px; }
