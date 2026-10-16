@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Readable } = require("stream");
-const { route, validateUserPreferenceValue } = require("../server/index.cjs");
+const { route, validateUserPreferenceValue, validateTableColumnWidths } = require("../server/index.cjs");
 
 function response() { return { status: 0, headers: {}, body: "", setHeader() {}, writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = String(body || ""); } }; }
 function request(method, url, body) { const req = Readable.from([Buffer.from(JSON.stringify(body || {}))]); req.method = method; req.url = url; req.headers = { "x-altus": "1" }; req.socket = { remoteAddress: "127.0.0.1", encrypted: false }; return req; }
@@ -59,4 +59,40 @@ test("user preference endpoint rejects invalid values before writing", async () 
     assert.equal(res.status, 400);
   }
   assert.equal(writes, 0);
+});
+
+test("table column widths are validated and scoped to the authenticated user", async () => {
+  const rows = new Map();
+  let sessionUser = "user-a";
+  const db = {
+    sessionUser: async () => sessionUser,
+    userById: async (id) => ({ id, role: "Sales", active: true, offboarded: false }),
+    query: async (sql, params = []) => {
+      if (sql.includes("capability FROM user_capability_overrides")) return { rows: [] };
+      const [userId, key, value] = params;
+      const storageKey = `${userId}:${key}`;
+      if (sql.startsWith("SELECT value")) return { rows: rows.has(storageKey) ? [{ value: rows.get(storageKey) }] : [] };
+      if (sql.startsWith("INSERT INTO user_preferences")) { rows.set(storageKey, JSON.parse(value)); return { rows: [] }; }
+      if (sql.startsWith("DELETE FROM user_preferences")) { rows.delete(storageKey); return { rows: [] }; }
+      return { rows: [] };
+    },
+  };
+  const saved = response();
+  await route(request("PUT", "/api/user-preferences/table/lead_master", { widths: { name: 220, company: 180 } }), saved, db);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(rows.get("user-a:table_widths:lead_master"), { name: 220, company: 180 });
+
+  sessionUser = "user-b";
+  const otherRead = response();
+  await route(request("GET", "/api/user-preferences/table/lead_master"), otherRead, db);
+  assert.deepEqual(JSON.parse(otherRead.body), { widths: null });
+
+  sessionUser = "user-a";
+  const removed = response();
+  await route(request("DELETE", "/api/user-preferences/table/lead_master"), removed, db);
+  assert.equal(removed.status, 200);
+  assert.equal(rows.has("user-a:table_widths:lead_master"), false);
+  assert.match(validateTableColumnWidths({ unknown: 160 }, { allowedColumns: new Set(["name"]) }).error, /Unknown/);
+  assert.match(validateTableColumnWidths({ name: 79 }, { allowedColumns: new Set(["name"]) }).error, /80/);
+  assert.match(validateTableColumnWidths({ name: 160.5 }, { allowedColumns: new Set(["name"]) }).error, /whole numbers/);
 });

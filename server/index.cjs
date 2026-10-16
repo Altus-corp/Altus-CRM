@@ -23,6 +23,7 @@ const { assignLeadRoundRobin, writeAssignmentHistory } = require("./lead-assignm
 const PasswordReset = require("./password-reset.cjs");
 const Integrations = require("./integrations.cjs");
 const LeadFields = require("./lead-fields.cjs");
+const LEAD_TABLE_COLUMN_KEYS = new Set([...require("../shared/lead-inline-columns.json").map((column) => column.key), "lead_status"]);
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -176,6 +177,47 @@ async function userPreferenceDelete(res, db, actor, key) {
   try { await db.query("DELETE FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, key]); }
   catch (error) { if (error?.code !== "42P01") throw error; }
   return json(res, 200, { value: null });
+}
+
+const TABLE_PREFERENCES = {
+  lead_master: { preferenceKey: "table_widths:lead_master", allowedColumns: LEAD_TABLE_COLUMN_KEYS, allowConfiguredFields: true },
+};
+const MIN_TABLE_COLUMN_WIDTH = 80;
+const MAX_TABLE_COLUMN_WIDTH = 600;
+const MAX_TABLE_COLUMN_WIDTHS = 30;
+function tablePreferenceFor(tableKey) { return TABLE_PREFERENCES[tableKey] || null; }
+function validateTableColumnWidths(value, preference) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "Column widths must be an object." };
+  const entries = Object.entries(value);
+  if (entries.length > MAX_TABLE_COLUMN_WIDTHS) return { error: `Column widths may contain at most ${MAX_TABLE_COLUMN_WIDTHS} columns.` };
+  for (const [key, width] of entries) {
+    if (!preference.allowedColumns.has(key)) return { error: `Unknown table column: ${key}.` };
+    if (!Number.isInteger(width) || width < MIN_TABLE_COLUMN_WIDTH || width > MAX_TABLE_COLUMN_WIDTH) return { error: `Column widths must be whole numbers between ${MIN_TABLE_COLUMN_WIDTH} and ${MAX_TABLE_COLUMN_WIDTH}.` };
+  }
+  return { value: Object.fromEntries(entries) };
+}
+async function tablePreferenceGet(res, db, actor, preference) {
+  let result;
+  try { result = await db.query("SELECT value FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, preference.preferenceKey]); }
+  catch (error) { if (error?.code === "42P01") return json(res, 200, { widths: null }); throw error; }
+  return json(res, 200, { widths: result.rows[0]?.value ?? null });
+}
+async function tablePreferenceWrite(req, res, db, actor, preference) {
+  let body; try { body = await readJson(req); } catch { return json(res, 400, { error: "Invalid column widths." }); }
+  let allowedColumns = preference.allowedColumns;
+  if (preference.allowConfiguredFields) {
+    try { allowedColumns = new Set([...allowedColumns, ...(await LeadFields.getDefinitions(db)).map((field) => field.key)]); } catch { /* the static Lead Master columns remain valid if field settings are unavailable */ }
+  }
+  const checked = validateTableColumnWidths(body?.widths, { ...preference, allowedColumns });
+  if (checked.error) return json(res, 400, { error: checked.error });
+  try { await db.query("INSERT INTO user_preferences(user_id,preference_key,value,updated_at) VALUES($1,$2,$3::jsonb,now()) ON CONFLICT(user_id,preference_key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()", [actor.id, preference.preferenceKey, JSON.stringify(checked.value)]); }
+  catch (error) { if (error?.code !== "42P01") throw error; }
+  return json(res, 200, { widths: checked.value });
+}
+async function tablePreferenceDelete(res, db, actor, preference) {
+  try { await db.query("DELETE FROM user_preferences WHERE user_id=$1 AND preference_key=$2", [actor.id, preference.preferenceKey]); }
+  catch (error) { if (error?.code !== "42P01") throw error; }
+  return json(res, 200, { widths: null });
 }
 
 async function leadsCounts(res, db) {
@@ -879,6 +921,15 @@ async function route(req, res, db) {
   if (user && typeof db.query === "function") { try { user.capability_overrides = (await db.query("SELECT capability FROM user_capability_overrides WHERE user_id=$1", [user.id])).rows.map((row) => row.capability); } catch { user.capability_overrides = []; } }
   if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: await publicCurrentUser(db, user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
+  const tablePreferenceMatch = url.pathname.match(/^\/api\/user-preferences\/table\/([^/]+)$/);
+  if (tablePreferenceMatch && ["GET", "PUT", "DELETE"].includes(req.method)) {
+    if (["PUT", "DELETE"].includes(req.method) && !S.csrfValid(req)) return json(res, 403, { error: "Missing request header." });
+    const preference = tablePreferenceFor(decodeURIComponent(tablePreferenceMatch[1]));
+    if (!preference) return json(res, 404, { error: "Unknown table preference." });
+    if (req.method === "GET") return tablePreferenceGet(res, db, user, preference);
+    if (req.method === "DELETE") return tablePreferenceDelete(res, db, user, preference);
+    return tablePreferenceWrite(req, res, db, user, preference);
+  }
   const userPreferenceMatch = url.pathname.match(/^\/api\/user-preferences\/([^/]+)$/);
   if (userPreferenceMatch && ["GET", "POST", "DELETE"].includes(req.method)) {
     const key = decodeURIComponent(userPreferenceMatch[1]);
@@ -1080,4 +1131,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin };

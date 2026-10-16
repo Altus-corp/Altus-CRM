@@ -38,12 +38,15 @@
 .leads-button:hover:not(:disabled), .icon-button:hover { border-color: var(--red); color: var(--red); }
 .leads-button:disabled { cursor: not-allowed; opacity: .45; }
 .lead-table-wrap { position: relative; overflow: auto; margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
-.lead-table { width: 100%; border-collapse: collapse; min-width: 940px; font-size: 12px; }
+.lead-table { --lead-col-line: color-mix(in srgb, var(--line) 48%, transparent); width: 100%; border-collapse: collapse; min-width: 940px; table-layout: fixed; font-size: 12px; }
 .lead-table th { padding: 13px 16px; background: var(--bg-2); color: var(--ink-2); border-bottom: 1px solid var(--line); font-size: 10px; font-weight: 800; text-align: left; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
-.lead-sort-button { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.lead-sort-button { display: inline-flex; width: 100%; min-width: 0; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.lead-header-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lead-sort-button svg { color: var(--ink-2); }
+.lead-sort-button svg { flex: 0 0 auto; }
 .lead-sort-button.is-sorted svg, .lead-sort-button:hover svg { color: var(--ink-1); }
-.lead-table td { padding: 15px 16px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); white-space: nowrap; }
+.lead-table td { overflow: hidden; padding: 15px 16px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); text-overflow: ellipsis; white-space: nowrap; }
+.lead-table tbody td:not(:last-child) { border-right: 1px solid var(--lead-col-line); }
 .lead-table tbody tr:last-child td { border-bottom: 0; }
 .lead-table tbody:empty::after { content: "No leads found."; position: absolute; top: 50%; left: 50%; color: var(--ink-2); font-size: 13px; text-align: center; white-space: nowrap; transform: translate(-50%, -50%); }
 .lead-table tbody tr { cursor: pointer; outline: none; }
@@ -52,6 +55,17 @@
 .lead-table small { display: block; margin-top: 4px; color: var(--ink-2); font-size: 10px; }
 .lead-table-checkbox-col { width: 44px; min-width: 44px; max-width: 44px; padding: 12px 10px !important; text-align: center !important; }
 .lead-column-header { position: relative; cursor: grab; }
+.lead-column-header:has(.lead-column-resize-handle) { padding-right: 10px; }
+.lead-column-resize-handle { position: absolute; z-index: 3; top: 0; right: -5px; bottom: 0; width: 10px; padding: 0; border: 0; background: transparent; cursor: col-resize; touch-action: none; }
+.lead-column-resize-handle::after { position: absolute; top: 22%; bottom: 22%; left: 4px; width: 1px; border-radius: 1px; background: transparent; content: ""; opacity: .75; transition: width 120ms ease, background 120ms ease, opacity 120ms ease; }
+.lead-column-header:not(:last-child) .lead-column-resize-handle::after { background: var(--line); }
+.lead-column-header:not(:last-child):hover .lead-column-resize-handle::after, .lead-column-header:not(:last-child) .lead-column-resize-handle:hover::after, .lead-column-header:not(:last-child) .lead-column-resize-handle:focus-visible::after { width: 2px; background: var(--red); opacity: .6; }
+.lead-column-resize-handle[data-resizing="true"]::after { top: 0; bottom: 0; left: 3px; width: 2px; background: var(--red); opacity: 1; }
+.lead-column-header:last-child .lead-column-resize-handle { right: 0; }
+.lead-column-resize-guide { position: absolute; z-index: 4; width: 2px; background: var(--red); opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.lead-column-resize-guide.is-visible { opacity: 1; }
+.lead-column-resize-handle:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
+body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !important; }
 .lead-column-header.is-dragging { opacity: .5; }
 .lead-column-header.drop-before::before, .lead-column-header.drop-after::after { position: absolute; z-index: 2; top: 5px; bottom: 5px; width: 2px; background: var(--red); content: ""; }
 .lead-column-header.drop-before::before { left: 0; }
