@@ -101,6 +101,19 @@ function invalidLeadsQuery(res) {
   return json(res, 400, { error: "Invalid leads query." });
 }
 
+// Lead ownership is enforced on the server.  Hiding rows in the browser is not
+// sufficient because a user could otherwise request another lead directly.
+function canAccessAllLeads(actor) {
+  return ["owner", "admin", "super admin"].includes(String(actor?.role || "").trim().toLowerCase());
+}
+function leadAccessPredicate(actor, bind, column = "l.owner_user_id") {
+  return canAccessAllLeads(actor) ? null : `${column} = ${bind(actor.id)}`;
+}
+async function canAccessLead(db, actor, id) {
+  if (canAccessAllLeads(actor)) return Boolean((await db.query("SELECT id FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0]);
+  return Boolean((await db.query("SELECT id FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0]);
+}
+
 function leadView(view) {
   return LEAD_VIEWS[view] || null;
 }
@@ -220,9 +233,12 @@ async function tablePreferenceDelete(res, db, actor, preference) {
   return json(res, 200, { widths: null });
 }
 
-async function leadsCounts(res, db) {
+async function leadsCounts(res, db, actor) {
   const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE COALESCE(l.custom_values->>'archived','false') <> 'true' AND ${predicate})::int AS "${key}"`);
-  const result = await db.query(`SELECT ${expressions.join(", ")} FROM leads l`, []);
+  const params = [];
+  const bind = (value) => { params.push(value); return `$${params.length}`; };
+  const ownership = leadAccessPredicate(actor, bind);
+  const result = await db.query(`SELECT ${expressions.join(", ")} FROM leads l${ownership ? ` WHERE ${ownership}` : ""}`, params);
   const row = result.rows[0] || {};
   const counts = Object.fromEntries(Object.keys(LEAD_COUNT_VIEWS).map((key) => [key, Number.isFinite(Number(row[key])) ? Number(row[key]) : 0]));
   return json(res, 200, counts);
@@ -232,15 +248,27 @@ async function leadsList(req, res, db, url, actor) {
   const params = [];
   const where = ["COALESCE(l.custom_values->>'archived','false') <> 'true'"];
   const bind = (value) => { params.push(value); return `$${params.length}`; };
+  const ownership = leadAccessPredicate(actor, bind);
+  if (ownership) where.push(ownership);
   const q = String(url.searchParams.get("search") || url.searchParams.get("q") || "").trim();
   if (q) { const p = bind(`%${q}%`); where.push(`(l.name ILIKE ${p} OR l.email ILIKE ${p} OR l.company ILIKE ${p} OR l.phone ILIKE ${p} OR l.lead_no ILIKE ${p} OR l.external_id ILIKE ${p})`); }
   for (const [query, column] of [["stage", "l.stage"], ["permission", "l.permission"], ["owner", "l.owner_user_id"], ["lead_status", "l.lead_status"]]) {
     const value = String(url.searchParams.get(query) || "").trim(); if (value) where.push(`${column} = ${bind(value)}`);
   }
+  const assignmentStatus = String(url.searchParams.get("assignment_status") || "").trim();
+  if (assignmentStatus === "assigned") where.push("l.owner_user_id IS NOT NULL");
+  else if (assignmentStatus === "unassigned") where.push("l.owner_user_id IS NULL");
+  else if (assignmentStatus) return invalidLeadsQuery(res);
   const workQueue = String(url.searchParams.get("work_queue") || "");
   if (!["", "lead_master", "focused_calling"].includes(workQueue)) return invalidLeadsQuery(res);
   if (workQueue) where.push(`l.owner_user_id = ${bind(actor.id)}`);
-  if (workQueue === "focused_calling") where.push("l.next_follow_up_at >= CURRENT_DATE", "l.next_follow_up_at < CURRENT_DATE + INTERVAL '1 day'");
+  // Focussed Calling contains today's assigned work. A lead may have been
+  // imported earlier and assigned today, so check assignment history as well
+  // as leads created today.
+  if (workQueue === "focused_calling") {
+    const focusedOwner = bind(actor.id);
+    where.push(`(l.created_at >= CURRENT_DATE AND l.created_at < CURRENT_DATE + INTERVAL '1 day' OR EXISTS (SELECT 1 FROM lead_history lh WHERE lh.lead_id=l.id AND lh.field='owner_user_id' AND lh.to_value=${focusedOwner} AND lh.occurred_at >= CURRENT_DATE AND lh.occurred_at < CURRENT_DATE + INTERVAL '1 day'))`);
+  }
   const managedFilterFields = { lead_type: sqlExpression("leadTypeCode"), lead_stage: sqlExpression("stage"), permission: sqlExpression("permission"), business_category: sqlExpression("business_category"), calling_resolution: sqlExpression("calling_resolution"), rating: sqlExpression("rating"), lead_source: sqlExpression("leadSource"), products: null, product_stage: null };
   const managedRaw = url.searchParams.get("managed_filters");
   if (managedRaw) {
@@ -338,6 +366,7 @@ async function leadsList(req, res, db, url, actor) {
 }
 
 async function leadDetail(req, res, db, id, actor = null) {
+  if (!actor || !(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   if (actor?.id) {
     try {
       await db.query("UPDATE leads SET last_opened_at=now(),last_opened_by=$2 WHERE id=$1 AND (last_opened_at IS NULL OR last_opened_at < now() - interval '5 minutes')", [id, actor.id]);
@@ -377,7 +406,8 @@ function activityDate(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-async function activityList(res, db, id, kind, url) {
+async function activityList(res, db, actor, id, kind, url) {
+  if (!(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const { page, pageSize, offset } = activityPage(url);
   const definitions = {
     history: {
@@ -407,12 +437,12 @@ async function activityList(res, db, id, kind, url) {
   return json(res, 200, { items: rows.rows, page, page_size: pageSize, total: count.rows[0]?.total || 0 });
 }
 
-async function activityLeadExists(db, id) { return Boolean(await db.one?.("SELECT id FROM leads WHERE id=$1", [id]) || (await db.query("SELECT id FROM leads WHERE id=$1", [id])).rows[0]); }
+async function activityLeadExists(db, actor, id) { return canAccessLead(db, actor, id); }
 
 async function addLeadNote(req, res, db, actor, id) {
   const body = await readJson(req); const note = activityText(body.body);
   if (!note) return json(res, 400, { error: "Note body is required." });
-  if (!(await activityLeadExists(db, id))) return json(res, 404, { error: "Lead not found." });
+  if (!(await activityLeadExists(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const noteId = `lead-note-${crypto.randomUUID()}`;
   await db.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by) VALUES($1,$2,$3,'manual',$4)", [noteId, id, note, actor.id]);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.note_created", entityType: "lead", entityId: id, newValue: "manual_note", ip: req.socket.remoteAddress });
@@ -420,7 +450,9 @@ async function addLeadNote(req, res, db, actor, id) {
 }
 
 async function addLeadCall(req, res, db, actor, id) {
-  const lead = (await db.query("SELECT id,permission FROM leads WHERE id=$1", [id])).rows[0];
+  const lead = canAccessAllLeads(actor)
+    ? (await db.query("SELECT id,permission FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0]
+    : (await db.query("SELECT id,permission FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0];
   if (!lead) return json(res, 404, { error: "Lead not found." });
   if (lead.permission !== "Yes") return json(res, 403, { error: "Permission to Call is required before logging a call." });
   const body = await readJson(req); const happenedAt = activityDate(body.happened_at || body.happenedAt) || new Date().toISOString();
@@ -437,7 +469,7 @@ async function addLeadCall(req, res, db, actor, id) {
 async function addLeadFollowup(req, res, db, actor, id) {
   const body = await readJson(req); const dueAt = activityDate(body.due_at || body.dueAt); const note = body.note == null ? null : activityText(body.note);
   if (!dueAt || (body.note != null && note == null)) return json(res, 400, { error: "Invalid follow-up data." });
-  if (!(await activityLeadExists(db, id))) return json(res, 404, { error: "Lead not found." });
+  if (!(await activityLeadExists(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const followupId = `lead-followup-${crypto.randomUUID()}`;
   await db.query("INSERT INTO lead_followups(id,lead_id,assigned_to,due_at,status,note,created_at,created_by) VALUES($1,$2,$3,$4,'open',$5,now(),$3)", [followupId, id, actor.id, dueAt, note]);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_created", entityType: "lead", entityId: id, newValue: "followup", ip: req.socket.remoteAddress });
@@ -447,6 +479,7 @@ async function addLeadFollowup(req, res, db, actor, id) {
 async function rescheduleLeadFollowup(req, res, db, actor, id, followupId) {
   const body = await readJson(req); const dueAt = activityDate(body.due_at || body.dueAt);
   if (!dueAt) return json(res, 400, { error: "A valid due date is required." });
+  if (!(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const current = (await db.query("SELECT id,due_at FROM lead_followups WHERE id=$1 AND lead_id=$2", [followupId, id])).rows[0];
   if (!current) return json(res, 404, { error: "Follow-up not found." });
   await transaction(db, async (tx) => { await tx.query("UPDATE lead_followups SET due_at=$1,status='rescheduled' WHERE id=$2", [dueAt, followupId]); await tx.query("INSERT INTO lead_followup_events(id,followup_id,old_due_at,new_due_at,changed_by) VALUES($1,$2,$3,$4,$5)", [`followup-event-${crypto.randomUUID()}`, followupId, current.due_at, dueAt, actor.id]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.followup_rescheduled", entityType: "lead", entityId: id, newValue: "followup_rescheduled", ip: req.socket.remoteAddress }); });
@@ -454,6 +487,7 @@ async function rescheduleLeadFollowup(req, res, db, actor, id, followupId) {
 }
 
 async function completeLeadFollowup(req, res, db, actor, id, followupId) {
+  if (!(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const result = await db.query("UPDATE lead_followups SET status='done',completed_at=now() WHERE id=$1 AND lead_id=$2 RETURNING id", [followupId, id]);
   if (!result.rows[0]) return json(res, 404, { error: "Follow-up not found." });
   await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_completed", entityType: "lead", entityId: id, newValue: "followup_completed", ip: req.socket.remoteAddress });
@@ -533,7 +567,10 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
   const definition = INLINE_EDITABLE_FIELDS.get(requested) || (configuredField ? { ...configuredField, input: configuredField.type === "boolean" ? "boolean" : configuredField.type === "date" ? "date" : configuredField.type === "dropdown" ? "dropdown" : "text", editable: true, storage: { kind: "custom", key: configuredField.key } } : null);
   if (!definition) return json(res, 400, { error: "This lead field is not editable." });
   const canonical = definition.aliasOf ? INLINE_COLUMNS.get(definition.aliasOf) || definition : definition;
-  const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." });
+  const current = canAccessAllLeads(actor)
+    ? (await db.query("SELECT * FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0]
+    : (await db.query("SELECT * FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0];
+  if (!current) return json(res, 404, { error: "Lead not found." });
   if (canonical.storage.kind === "column" && canonical.storage.key === "permission" && body.value !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
   let value = body.value;
   try {
@@ -592,7 +629,7 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
 }
 
 async function updateLead(req, res, db, actor, id, parsedBody = null) {
-  const body = parsedBody || await readJson(req); const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); const explicitPermission = String(body.permission ?? "").trim(); const nextPermission = explicitPermission || String(current.permission || "Pending"); if (explicitPermission && nextPermission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const merged = { ...current, ...body, lead_type: body.lead_type || current.lead_type || "DL", stage: body.stage || current.stage || "lead", permission: nextPermission, custom_values: body.custom_values ?? current.custom_values }; if (body.first_name !== undefined || body.last_name !== undefined) merged.name = `${String(body.first_name ?? current.first_name ?? "").trim()} ${String(body.last_name ?? current.last_name ?? "").trim()}`.trim(); const fields = leadFields(merged); if (!fields) return invalidLead(res, "Lead name and lead type are required."); const currentType = leadTypeValue(current.lead_type); const explicitType = String(body.lead_type ?? "").trim(); const explicitStage = String(body.stage ?? "").trim(); const typeChanged = Boolean(explicitType) && fields.lead_type !== currentType; const stageChanged = Boolean(explicitStage) && fields.stage !== String(current.stage || ""); const permissionChanged = Boolean(explicitPermission) && fields.permission !== String(current.permission || ""); if (typeChanged && !(await validDropdownValue(db, "lead_type", fields.lead_type))) return invalidLead(res, "The selected lead type is no longer available."); if (stageChanged && !(await validDropdownValue(db, "lead_stage", fields.stage))) return invalidLead(res, "The selected lead stage is no longer available."); if (permissionChanged && !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res, "The selected permission value is no longer available."); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,first_name=$3,last_name=$4,email=$5,phone=$6,company=$7,designation=$8,team=$9,lead_type=$10,priority=$11,stage=$12,permission=$13,lead_status=$14,owner_user_id=$15,pso_date=$16,custom_values=$17,legacy_finance=$18,updated_at=now() WHERE id=$1", [id, fields.name, fields.first_name, fields.last_name, fields.email, fields.phone, fields.company, fields.designation, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch (error) { console.error(`lead update failed code=${error?.code || "unknown"} status=${error?.status || "none"} constraint=${error?.constraint || "none"}`); return json(res, 500, { error: "Unable to save lead." }); }
+  const body = parsedBody || await readJson(req); const current = canAccessAllLeads(actor) ? (await db.query("SELECT * FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0] : (await db.query("SELECT * FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); const explicitPermission = String(body.permission ?? "").trim(); const nextPermission = explicitPermission || String(current.permission || "Pending"); if (explicitPermission && nextPermission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const merged = { ...current, ...body, lead_type: body.lead_type || current.lead_type || "DL", stage: body.stage || current.stage || "lead", permission: nextPermission, custom_values: body.custom_values ?? current.custom_values }; if (body.first_name !== undefined || body.last_name !== undefined) merged.name = `${String(body.first_name ?? current.first_name ?? "").trim()} ${String(body.last_name ?? current.last_name ?? "").trim()}`.trim(); const fields = leadFields(merged); if (!fields) return invalidLead(res, "Lead name and lead type are required."); const currentType = leadTypeValue(current.lead_type); const explicitType = String(body.lead_type ?? "").trim(); const explicitStage = String(body.stage ?? "").trim(); const typeChanged = Boolean(explicitType) && fields.lead_type !== currentType; const stageChanged = Boolean(explicitStage) && fields.stage !== String(current.stage || ""); const permissionChanged = Boolean(explicitPermission) && fields.permission !== String(current.permission || ""); if (typeChanged && !(await validDropdownValue(db, "lead_type", fields.lead_type))) return invalidLead(res, "The selected lead type is no longer available."); if (stageChanged && !(await validDropdownValue(db, "lead_stage", fields.stage))) return invalidLead(res, "The selected lead stage is no longer available."); if (permissionChanged && !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res, "The selected permission value is no longer available."); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,first_name=$3,last_name=$4,email=$5,phone=$6,company=$7,designation=$8,team=$9,lead_type=$10,priority=$11,stage=$12,permission=$13,lead_status=$14,owner_user_id=$15,pso_date=$16,custom_values=$17,legacy_finance=$18,updated_at=now() WHERE id=$1", [id, fields.name, fields.first_name, fields.last_name, fields.email, fields.phone, fields.company, fields.designation, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch (error) { console.error(`lead update failed code=${error?.code || "unknown"} status=${error?.status || "none"} constraint=${error?.constraint || "none"}`); return json(res, 500, { error: "Unable to save lead." }); }
 }
 async function reassignLeadRoundRobin(req, res, db, actor, id) {
   const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0];
@@ -698,6 +735,17 @@ async function userRoleUpdate(req, res, db, actor, id) {
   } catch { return userWriteError(res, 500, "Unable to update member role."); }
 }
 async function memberRoleCreate(req, res, db, actor) { let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid role data."); } const name = String(body.name || "").trim(); const accessRole = String(body.access_role || "").trim(); if (!name || name.length > 80 || !/^[\p{L}][\p{L}0-9 _-]*$/u.test(name) || !["Sales", "Viewer", "Admin"].includes(accessRole)) return userWriteError(res, 400, "Invalid role data."); if (actor.role !== "Owner" && accessRole === "Admin") return userWriteError(res, 403, "Only Owner may create Admin-level roles."); const id = `member-role-${crypto.randomUUID()}`; try { await db.query("INSERT INTO member_roles(id,name,access_role) VALUES($1,$2,$3)", [id, name, accessRole]); await writeAudit(db, { actorUserId: actor.id, action: "member_role.created", entityType: "member_role", entityId: id, newValue: name, ip: req.socket.remoteAddress }); return json(res, 201, { id, name, access_role: accessRole }); } catch (error) { if (error.code === "23505") return userWriteError(res, 409, "That role already exists."); throw error; } }
+async function memberRoleDelete(res, db, actor, id, ip) {
+  const role = (await db.query("SELECT id,name,access_role FROM member_roles WHERE id=$1 AND active=true", [id])).rows[0];
+  if (!role) return userWriteError(res, 404, "Role not found.");
+  if (role.name === "Admin") return userWriteError(res, 400, "The Admin role cannot be deleted.");
+  if (!canManageRole(actor.role, role.access_role)) return userWriteError(res, 403, "You do not have permission to delete this role.");
+  try {
+    await db.query("UPDATE member_roles SET active=false WHERE id=$1", [id]);
+    await writeAudit(db, { actorUserId: actor.id, action: "member_role.deleted", entityType: "member_role", entityId: id, oldValue: role.name, newValue: "inactive", ip });
+    return json(res, 200, { id, deleted: true });
+  } catch { return userWriteError(res, 500, "Unable to delete role."); }
+}
 async function departmentsList(res, db) { const rows = await db.query("SELECT id,name FROM departments WHERE active=true UNION SELECT 'department-team-' || md5(btrim(team)), btrim(team) FROM employee_profiles WHERE team IS NOT NULL AND btrim(team) <> '' ORDER BY name,id"); return json(res, 200, { departments: rows.rows }); }
 async function departmentCreate(req, res, db, actor) { let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid department data."); } const name = String(body.name || "").trim(); if (!name || name.length > 80 || !/^[\p{L}][\p{L}0-9 _-]*$/u.test(name)) return userWriteError(res, 400, "Invalid department data."); const id = `department-${crypto.randomUUID()}`; try { await db.query("INSERT INTO departments(id,name) VALUES($1,$2)", [id, name]); await writeAudit(db, { actorUserId: actor.id, action: "department.created", entityType: "department", entityId: id, newValue: name, ip: req.socket.remoteAddress }); return json(res, 201, { id, name }); } catch (error) { if (error.code === "23505") return userWriteError(res, 409, "That department already exists."); throw error; } }
 async function usersDeactivate(req, res, db, actor, id, offboard = false) {
@@ -708,6 +756,60 @@ async function usersDeactivate(req, res, db, actor, id, offboard = false) {
   try {
     await transaction(db, async (tx) => { await tx.query("DELETE FROM credentials WHERE user_id = $1", [id]); await tx.query("DELETE FROM sessions WHERE user_id = $1", [id]); await tx.query("UPDATE users SET active = false, offboarded = $2 WHERE id = $1", [id, offboard]); await writeAudit(tx, { actorUserId: actor.id, action: offboard ? "member.offboarded" : "member.deactivated", entityType: "user", entityId: id, oldValue: "active", newValue: offboard ? "offboarded" : "inactive", ip: req.socket.remoteAddress }); }); await clearUserWriteThrottle(db, actor); return json(res, 200, { user: publicMember({ ...target, active: false, offboarded: offboard }) });
   } catch { return userWriteError(res, 500, "Unable to manage users."); }
+}
+async function userSuspend(req, res, db, actor, id) {
+  let body;
+  try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid account status."); }
+  if (typeof body.active !== "boolean") return userWriteError(res, 400, "Invalid account status.");
+  const active = body.active;
+  if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
+  const target = await db.userById(id);
+  if (!target) return userWriteError(res, 404, "User not found.");
+  if (target.id === actor.id || target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user's sign-in cannot be changed.");
+  try {
+    await transaction(db, async (tx) => {
+      await tx.query("UPDATE users SET active=$2,offboarded=false WHERE id=$1", [id, active]);
+      if (!active) await tx.query("DELETE FROM sessions WHERE user_id=$1", [id]);
+      await tx.query("UPDATE employee_profiles SET active=$2 WHERE user_id=$1", [id, active]);
+      await writeAudit(tx, { actorUserId: actor.id, action: active ? "member.reactivated" : "member.suspended", entityType: "user", entityId: id, oldValue: target.active ? "active" : "suspended", newValue: active ? "active" : "suspended", ip: req.socket.remoteAddress });
+    });
+    await clearUserWriteThrottle(db, actor);
+    return json(res, 200, { user: publicMember({ ...target, active, offboarded: false }) });
+  } catch { return userWriteError(res, 500, "Unable to update account status."); }
+}
+async function userDelete(req, res, db, actor, id) {
+  if (!await userWriteAllowed(db, req, actor)) return userWriteError(res, 429, "Too many requests.");
+  const target = await db.userById(id);
+  if (!target) return userWriteError(res, 404, "User not found.");
+  if (target.id === actor.id || target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user cannot be deleted.");
+  try {
+    await transaction(db, async (tx) => {
+      await tx.query("DELETE FROM employee_profiles WHERE user_id=$1", [id]);
+      // Keep CRM history intact while removing this person's references. The
+      // database catalogue gives us every nullable foreign key to users, so
+      // this remains correct as further CRM modules add user references.
+      const references = await tx.query(`SELECT ns.nspname AS schema_name, cls.relname AS table_name, att.attname AS column_name
+        FROM pg_constraint con
+        JOIN pg_class cls ON cls.oid=con.conrelid
+        JOIN pg_namespace ns ON ns.oid=cls.relnamespace
+        JOIN unnest(con.conkey) AS key(attnum) ON true
+        JOIN pg_attribute att ON att.attrelid=con.conrelid AND att.attnum=key.attnum
+        WHERE con.contype='f' AND con.confrelid='public.users'::regclass
+          AND con.confdeltype NOT IN ('c','n') AND NOT att.attnotnull
+          AND NOT (ns.nspname='public' AND cls.relname='employee_profiles' AND att.attname='user_id')`, []);
+      for (const reference of references.rows) {
+        const quote = (value) => `"${String(value).replace(/"/g, '""')}"`;
+        await tx.query(`UPDATE ${quote(reference.schema_name)}.${quote(reference.table_name)} SET ${quote(reference.column_name)}=NULL WHERE ${quote(reference.column_name)}=$1`, [id]);
+      }
+      await tx.query("DELETE FROM users WHERE id=$1", [id]);
+      await writeAudit(tx, { actorUserId: actor.id, action: "member.deleted", entityType: "user", entityId: id, oldValue: target.email, newValue: "deleted", ip: req.socket.remoteAddress });
+    });
+    await clearUserWriteThrottle(db, actor);
+    return json(res, 200, { id, deleted: true });
+  } catch (error) {
+    if (error?.code === "23503") return userWriteError(res, 409, "This user still has a protected linked record and cannot be deleted.");
+    return userWriteError(res, 500, "Unable to delete user.");
+  }
 }
 async function usersResetPassword(req, res, db, actor, id) {
   let body;
@@ -970,8 +1072,12 @@ async function route(req, res, db) {
     if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
     return safeUserOperation(res, () => usersCreate(req, res, db, user));
   }
+  const userDeleteMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/);
+  if (userDeleteMatch && req.method === "DELETE") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users."); return safeUserOperation(res, () => userDelete(req, res, db, user, decodeURIComponent(userDeleteMatch[1]))); }
   if (url.pathname === "/api/member-roles" && req.method === "GET") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRolesList(res, db)); }
   if (url.pathname === "/api/member-roles" && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRoleCreate(req, res, db, user)); }
+  const memberRoleMatch = url.pathname.match(/^\/api\/member-roles\/([^/]+)$/);
+  if (memberRoleMatch && req.method === "DELETE") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRoleDelete(res, db, user, decodeURIComponent(memberRoleMatch[1]), req.socket.remoteAddress)); }
   if (url.pathname === "/api/departments" && req.method === "GET") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage departments."); return safeUserOperation(res, () => departmentsList(res, db)); }
   if (url.pathname === "/api/departments" && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage departments."); return safeUserOperation(res, () => departmentCreate(req, res, db, user)); }
   if (url.pathname === "/api/integrations" && req.method === "GET") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage integrations."); return safeUserOperation(res, () => Integrations.listConnections(res, db, req)); }
@@ -982,6 +1088,8 @@ async function route(req, res, db) {
   if (accessMatch && ["GET", "POST"].includes(req.method)) { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user access."); const targetId = decodeURIComponent(accessMatch[1]); return safeUserOperation(res, () => req.method === "GET" ? userAccessList(res, db, user, targetId) : userAccessWrite(req, res, db, user, targetId)); }
   const userRoleMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/role$/);
   if (userRoleMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user roles."); return userRoleUpdate(req, res, db, user, decodeURIComponent(userRoleMatch[1])); }
+  const userStatusMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/status$/);
+  if (userStatusMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users."); return safeUserOperation(res, () => userSuspend(req, res, db, user, decodeURIComponent(userStatusMatch[1]))); }
   const userMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/(deactivate|offboard|reset-password)$/);
   if (userMatch && req.method === "POST") {
     if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
@@ -1041,7 +1149,7 @@ async function route(req, res, db) {
   if (quickFilterMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterUpdate(req, res, db, user, decodeURIComponent(quickFilterMatch[1])); }
   if (quickFilterMatch && req.method === "DELETE") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return quickFilterDelete(res, db, user, decodeURIComponent(quickFilterMatch[1])); }
   const activityMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/activity\/(history|calls|followups|messages|notes)$/);
-  if (activityMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." }); return activityList(res, db, decodeURIComponent(activityMatch[1]), activityMatch[2], url); }
+  if (activityMatch && req.method === "GET") { if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." }); return activityList(res, db, user, decodeURIComponent(activityMatch[1]), activityMatch[2], url); }
   const noteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/notes$/);
   if (noteMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadNote(req, res, db, user, decodeURIComponent(noteMatch[1])); }
   const callMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/calls$/);
@@ -1056,7 +1164,7 @@ async function route(req, res, db) {
   }
   if (url.pathname === "/api/leads/counts" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
-    try { return await leadsCounts(res, db); } catch { return json(res, 500, { error: "Unable to load lead counts." }); }
+    try { return await leadsCounts(res, db, user); } catch { return json(res, 500, { error: "Unable to load lead counts." }); }
   }
   if (url.pathname === "/api/leads/import/preview" && req.method === "POST") {
     if (!requireCapability("leads.import", user)) return json(res, 403, { error: "You do not have permission to import leads." });
@@ -1078,7 +1186,7 @@ async function route(req, res, db) {
   const roundRobinMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/round-robin$/);
   if (roundRobinMatch && req.method === "POST") { if (!requireCapability("leads.assign", user)) return json(res, 403, { error: "You do not have permission to assign leads." }); return reassignLeadRoundRobin(req, res, db, user, decodeURIComponent(roundRobinMatch[1])); }
   const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);
-  if (leadWriteMatch && req.method === "POST") { const id = decodeURIComponent(leadWriteMatch[1]); if (leadWriteMatch[2] === "permission") { if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." }); return changeLeadPermission(req, res, db, user, id); } if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id); }
+  if (leadWriteMatch && req.method === "POST") { const id = decodeURIComponent(leadWriteMatch[1]); if (!(await canAccessLead(db, user, id))) return json(res, 404, { error: "Lead not found." }); if (leadWriteMatch[2] === "permission") { if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." }); return changeLeadPermission(req, res, db, user, id); } if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id); }
   const leadUpdateMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
   if (leadUpdateMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const id = decodeURIComponent(leadUpdateMatch[1]); const body = await readJson(req); if (body.field !== undefined) return updateInlineLeadField(req, res, db, user, id, body); return updateLead(req, res, db, user, id, body); }
   const leadMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);

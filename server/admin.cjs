@@ -2,7 +2,7 @@
 
 const ADMIN_SCREENS = new Set([
   "dashboard", "call-history", "analytics", "assignment", "panel", "templates",
-  "import-export", "integrations", "audit", "process-flow", "reports", "database-status",
+  "import-export", "integrations", "audit", "process-flow", "reports", "database-status", "user-management",
 ]);
 
 async function optionalRows(db, text, params = []) {
@@ -48,6 +48,7 @@ async function adminData(db, screen) {
     return { metrics: pool, rows: users, rules };
   }
   if (screen === "panel") return { rows: await optionalRows(db, `SELECT u.id,u.name,u.email,COALESCE(mr.name,ep.role_label,u.role) AS role,u.role AS access_level,u.member_role_id,ep.team AS department,u.active,u.created_at FROM users u LEFT JOIN employee_profiles ep ON ep.user_id=u.id LEFT JOIN member_roles mr ON mr.id=u.member_role_id ORDER BY u.name ASC,u.id ASC`) };
+  if (screen === "user-management") return { rows: await optionalRows(db, `SELECT u.id,u.name,u.email,COALESCE(mr.name,ep.role_label,u.role) AS role,u.role AS access_level,u.member_role_id,ep.team AS department,u.active,u.created_at FROM users u LEFT JOIN employee_profiles ep ON ep.user_id=u.id LEFT JOIN member_roles mr ON mr.id=u.member_role_id ORDER BY u.name ASC,u.id ASC`) };
   if (screen === "templates") return { rows: await optionalRows(db, `SELECT source_id, category, sequence, channel, subject, language, active FROM admin_templates ORDER BY category ASC, sequence ASC, source_id ASC`) };
   if (screen === "integrations") return { rows: await optionalRows(db, `SELECT source_id, name, enabled FROM integration_catalog ORDER BY name ASC, source_id ASC`) };
   if (screen === "audit") return { rows: await optionalRows(db, `SELECT id, occurred_at, actor_id, action, entity, entity_id, field FROM lead_history ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT $1`, [100]) };

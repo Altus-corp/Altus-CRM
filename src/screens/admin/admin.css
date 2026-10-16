@@ -112,6 +112,26 @@
 .admin-password-toggle { display: flex !important; grid-template-columns: auto 1fr !important; align-items: center; gap: 6px; font-weight: 500 !important; }
 .admin-member-form button { justify-self: start; min-height: 36px; padding: 0 14px; border: 1px solid var(--red); border-radius: var(--radius-sm); background: var(--red); color: var(--bg); cursor: pointer; font-weight: 700; }
 .admin-member-form button:disabled { cursor: not-allowed; opacity: .5; }
+.user-management { display: grid; gap: 18px; }
+.user-management-reference { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.user-management-reference .admin-member-option-form { max-width: none; margin: 0; }
+.user-management-roles { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-1); }
+.user-role-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.user-role-list > span { display: grid; gap: 2px; min-width: 150px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); }
+.user-role-list strong { color: var(--ink); font-size: 13px; }
+.user-role-list small, .user-role-list p { color: var(--ink-2); font-size: 11px; }
+.user-role-list button { justify-self: start; min-height: 26px; padding: 0 8px; border: 1px solid var(--red-200); border-radius: 5px; background: var(--panel); color: var(--red); cursor: pointer; font-size: 11px; font-weight: 700; }
+.user-role-list button:hover:not(:disabled) { background: var(--red); color: var(--bg); }
+.user-role-list button:disabled { opacity: .5; cursor: not-allowed; }
+.user-status { display: inline-flex; align-items: center; min-height: 24px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.user-status-active { background: var(--pos-bg); color: var(--pos); }
+.user-status-suspended { background: var(--neg-bg); color: var(--red); }
+.user-status-action { min-width: 86px; }
+.user-status-action.danger { border-color: var(--red); color: var(--red); }
+.user-status-action.danger:hover:not(:disabled) { background: var(--red); color: var(--bg); }
+.user-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.user-delete-action { min-width: 70px; border-color: var(--red) !important; background: var(--red) !important; color: var(--bg) !important; }
+.user-delete-action:hover:not(:disabled) { filter: brightness(.9); }
 .admin-field-delete { min-height: 34px; padding: 0 12px; border: 1px solid var(--red); border-radius: var(--radius-sm); background: var(--panel); color: var(--red); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
 .admin-field-delete:hover:not(:disabled) { background: var(--red); color: var(--bg); }
 .admin-field-delete:disabled { cursor: not-allowed; opacity: .5; }
@@ -306,9 +326,30 @@
 .assignment-selected-leads { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 7px; min-height: 30px; }
 .assignment-selected-leads button { padding: 5px 9px; border: 1px solid var(--red-200); border-radius: 999px; background: var(--red-tint); color: var(--red); font-size: 12px; font-weight: 700; cursor: pointer; }
 .assignment-selected-leads span { color: var(--ink-2); font-size: 12px; }
+.assignment-workspace { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); }
+.assignment-filter-row { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; }
+.assignment-filter-row label, .assignment-action-bar label { display: grid; gap: 6px; color: var(--ink-1); font-size: 12px; font-weight: 700; }
+.assignment-filter-row input, .assignment-filter-row select, .assignment-action-bar select { min-height: 38px; width: 100%; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); font: inherit; }
+.assignment-filter-actions, .assignment-action-bar, .assignment-pagination { display: flex; align-items: center; gap: 8px; }
+.assignment-filter-actions button, .assignment-action-bar > button, .assignment-pagination button { min-height: 38px; padding: 0 12px; }
+.assignment-action-bar { justify-content: flex-end; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.assignment-action-bar > strong { margin-right: auto; color: var(--ink); }
+.assignment-action-bar label { min-width: 200px; }
+.assignment-lead-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.assignment-lead-table { width: 100%; min-width: 780px; border-collapse: collapse; }
+.assignment-lead-table th, .assignment-lead-table td { padding: 10px 12px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); font-size: 13px; text-align: left; vertical-align: middle; }
+.assignment-lead-table th { color: var(--ink); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; background: var(--bg-1); }
+.assignment-lead-table tr:last-child td { border-bottom: 0; }
+.assignment-lead-table td:nth-child(4) { display: grid; gap: 2px; }
+.assignment-lead-table td small { color: var(--ink-2); }
+.assignment-pagination { justify-content: flex-end; color: var(--ink-2); font-size: 12px; }
+.assignment-pagination span:first-child { margin-right: auto; }
 @media (max-width: 760px) { .assignment-manual-form { grid-template-columns: 1fr; } .assignment-selected-leads { grid-column: auto; } }
+@media (max-width: 1000px) { .assignment-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .assignment-filter-actions { justify-content: flex-end; } }
+@media (max-width: 760px) { .assignment-filter-row { grid-template-columns: 1fr; } .assignment-action-bar { align-items: stretch; flex-direction: column; } .assignment-action-bar > strong { margin-right: 0; } .assignment-action-bar label { min-width: 0; } .assignment-pagination { justify-content: space-between; flex-wrap: wrap; } .assignment-pagination span:first-child { width: 100%; } }
 @media (max-width: 760px) { .assignment-rule-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .assignment-rule-form { grid-template-columns: 1fr; } .assignment-rule-list article { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 760px) { .admin-member-grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); } .admin-member-form-heading { flex-direction: column; gap: 6px; } .admin-form-hint { white-space: normal; } }
+@media (max-width: 760px) { .user-management-reference { grid-template-columns: 1fr; } }
 @media (max-width: 480px) { .admin-member-grid { grid-template-columns: 1fr; } .admin-member-actions button { flex: 1 1 100%; } }
 @media (max-width: 620px) { .admin-heading { flex-direction: column; } .admin-heading .day-chip { align-self: flex-start; } }

@@ -29,18 +29,18 @@ function MasterSidebar({
   theme: "light" | "dark";
   hideMasterNavigation: boolean;
 }) {
-  const leadMasterActive = currentHref.startsWith("/leads");
+  const leadMasterActive = currentHref.startsWith("/lead-master");
 
   return <aside className="sidebar master-sidebar">
     <div className="master-sidebar-brand">
-      <Link className="topbar-logo" to="/leads" aria-label="Go to Leads">
+      <Link className="topbar-logo" to="/lead-master" aria-label="Go to Lead Master">
         <img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" />
         <span>Altus <b>CRM</b></span>
       </Link>
     </div>
     <nav className="master-navigation" aria-label="Master navigation">
       {!hideMasterNavigation && <NavLink
-          to="/leads?work_queue=lead_master"
+          to="/lead-master"
           end
           className={leadMasterActive ? "master-navigation-toggle master-navigation-parent active" : "master-navigation-toggle master-navigation-parent"}
         >
@@ -132,7 +132,8 @@ export function AppShell() {
   const navbarController = navbarControllerRef.current;
   function openKeyboardNavigation(origin?: HTMLElement | null) { previousNavigationFocusRef.current = origin || document.activeElement as HTMLElement | null; navbarController.open(); requestAnimationFrame(() => focusFirstNavigationLink(firstNavigationLinkRef.current)); }
   const canImportLeads = usePermission("leads.import");
-  const isLeadsScreen = location.pathname === "/leads";
+  const isLeadsScreen = ["/leads", "/lead-master"].includes(location.pathname);
+  const homeHref = showAdminNav ? "/leads" : "/lead-master";
   const currentHref = `${location.pathname}${location.search}`;
   const topbarModules = visibleTopbarModules(authLoading ? false : showAdminNav);
   useEffect(() => {
@@ -159,7 +160,7 @@ export function AppShell() {
     <MasterSidebar currentHref={currentHref} showAdmin={showAdminNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole || location.pathname.startsWith("/admin/")} />
     <main className="main">
       <header ref={topbarRef} className="topbar topbar-without-navigation">
-        <Link className="topbar-logo" to="/leads" aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
+        <Link className="topbar-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
         <div className="navbar-hover-zone" aria-hidden="true" />
         <nav id="topbar-module-links" inert={!navbarOpen} className={navbarOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation" onPointerEnter={() => navbarController.enter()} onPointerLeave={() => navbarController.leave()} onFocusCapture={(event) => navbarController.setFocusHeld((event.target as HTMLElement).matches(":focus-visible"))} onBlurCapture={() => navbarController.setFocusHeld(false)}>{topbarModules.map((module, index) => <NavLink ref={index === 0 ? firstNavigationLinkRef : undefined} key={module.id} to={module.path} aria-label={module.label} title={module.label} onPointerUp={(event) => { if (event.pointerType === "touch") navbarController.navigationSelected(); }} onClick={(event) => { if (event.detail === 0) navbarController.navigationSelected(); }}><span>{module.label}</span></NavLink>)}</nav>
         <div className="topbar-right">

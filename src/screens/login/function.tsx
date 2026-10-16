@@ -12,7 +12,7 @@ export function useLoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(""); setLoading(true);
-    try { await login(email, password); navigate("/leads"); }
+    try { const user = await login(email, password); const isAdmin = ["owner", "admin", "super admin"].includes(String(user.role || "").trim().toLowerCase()); navigate(isAdmin ? "/leads" : "/lead-master"); }
     catch (error) { setError(error instanceof Error ? error.message : "Sign-in failed."); }
     finally { setLoading(false); }
   }
