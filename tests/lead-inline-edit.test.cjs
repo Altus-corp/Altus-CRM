@@ -59,6 +59,13 @@ test("every server-sortable lead header has the shared icon path and the checkbo
   assert.match(pageSource, /function LeadTableHeader[\s\S]*?<th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">\{selectAll\}<\/label><\/th>\{fields\.map/);
 });
 
+test("lead row selection control stays before the drag grip in the fixed first column", () => {
+  assert.match(pageSource, /const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 72;/);
+  assert.match(pageSource, /leadTableWidth = LEAD_TABLE_SELECTION_COLUMN_WIDTH/);
+  assert.match(pageSource, /<label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox"[\s\S]*?<button type="button" className="lead-row-drag-grip"/);
+  assert.match(pageSource, /<td className="lead-table-checkbox-col" onClick=\{\(event\) => \{ event\.stopPropagation\(\); \}\}/);
+});
+
 
 test("migration adds last-opened columns and idempotent dropdown seeds", () => {
   const migration = fs.readFileSync(path.join(root, "migrations", "018_lead_last_opened_and_inline_dropdowns.sql"), "utf8");
