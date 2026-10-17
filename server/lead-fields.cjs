@@ -48,7 +48,7 @@ function normalizeDefinitions(value, fallback = DEFAULT_FIELDS) {
     seen.add(key);
     const options = Array.isArray(raw?.options) ? [...new Map(raw.options.map((option) => text(option)).filter((option) => option && option.length <= 80).map((option) => [option.toLowerCase(), option])).values()] : [];
     const productResolutions = key === "calling_resolution" && raw?.product_resolutions === true;
-    if (type === "dropdown" && !options.length && !productResolutions) continue;
+    if (type === "dropdown" && !options.length && !productResolutions && key !== "activity") continue;
     fields.push({ key, label, type, options, product_resolutions: productResolutions, active: raw?.active !== false, detail_visible: raw?.detail_visible !== false, order: Number.isFinite(Number(raw?.order)) ? Number(raw.order) : index });
   }
   return fields.sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
@@ -83,8 +83,24 @@ function normalizeValues(input, definitions, { allowEmpty = false } = {}) {
 }
 
 function mergeLeadValues(existing, incoming, definitions) {
+  return mergeActiveLeadValues(existing, incoming, definitions);
+}
+
+function validateActiveValues(input, definitions) {
+  const source = plain(input); const active = definitions.filter((field) => field.active !== false); const byKey = new Map(active.map((field) => [field.key, field])); const values = {};
+  for (const [key, raw] of Object.entries(source)) {
+    const field = byKey.get(key);
+    if (!field) throw Object.assign(new Error(`Lead field "${key}" is inactive or no longer exists.`), { status: 400 });
+    const normalized = normalizeValues({ [key]: raw }, [field], { allowEmpty: true });
+    if (!Object.prototype.hasOwnProperty.call(normalized, key)) throw Object.assign(new Error(`Invalid ${field.label}.`), { status: 400 });
+    values[key] = normalized[key];
+  }
+  return values;
+}
+
+function mergeActiveLeadValues(existing, incoming, definitions) {
   const base = plain(existing); const current = plain(base.lead_fields);
-  return { ...base, lead_fields: { ...current, ...normalizeValues(incoming, definitions, { allowEmpty: true }) } };
+  return { ...base, lead_fields: { ...current, ...validateActiveValues(incoming, definitions) } };
 }
 
 async function saveDefinitions(db, actor, raw, ip) {
@@ -107,10 +123,9 @@ async function deleteDefinition(db, actor, key, ip) {
   await db.transaction(async (tx) => {
     const previous = (await tx.query("SELECT value FROM workspace_settings WHERE setting_key=$1", [SETTING_KEY])).rows[0]?.value ?? null;
     await tx.query("INSERT INTO workspace_settings(setting_key,value,active,updated_by,updated_at) VALUES($1,$2::jsonb,true,$3,now()) ON CONFLICT(setting_key) DO UPDATE SET value=EXCLUDED.value,active=true,updated_by=EXCLUDED.updated_by,updated_at=now()", [SETTING_KEY, JSON.stringify(remaining), actor.id]);
-    await tx.query("UPDATE leads SET custom_values = CASE WHEN custom_values ? 'lead_fields' THEN jsonb_set(custom_values, '{lead_fields}', COALESCE(custom_values->'lead_fields','{}'::jsonb) - $1::text, true) ELSE custom_values END, updated_at=now() WHERE custom_values ? 'lead_fields'", [fieldKey]);
     await writeAudit(tx, { actorUserId: actor.id, action: "lead_field.deleted", entityType: "workspace_setting", entityId: fieldKey, oldValue: JSON.stringify(removed), newValue: JSON.stringify(remaining), ip });
   });
   return remaining;
 }
 
-module.exports = { SETTING_KEY, DEFAULT_FIELDS, getDefinitions, normalizeDefinitions, normalizeValues, mergeLeadValues, saveDefinitions, deleteDefinition };
+module.exports = { SETTING_KEY, DEFAULT_FIELDS, getDefinitions, normalizeDefinitions, normalizeValues, mergeLeadValues, validateActiveValues, mergeActiveLeadValues, saveDefinitions, deleteDefinition };

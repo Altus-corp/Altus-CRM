@@ -22,8 +22,12 @@ function dbFor(current = null) {
     query: async (text) => {
       sql.push(text);
       if (text.includes("SELECT * FROM leads WHERE id=$1")) return { rows: current ? [current] : [] };
+      if (text.includes("SELECT id FROM leads WHERE id=$1")) return { rows: current ? [current] : [{ id: "lead-1" }] };
       if (text.includes("SELECT id FROM leads WHERE")) return { rows: [] };
       if (text.includes("SELECT stage FROM leads WHERE id=$1")) return { rows: current ? [{ stage: current.stage }] : [] };
+      if (text.includes("dropdown_options") || text.includes("dropdowns")) return { rows: [{ id: "opt-1", label: "pool", value: "pool", is_active: true }, { id: "opt-2", label: "duringpso", value: "duringpso", is_active: true }, { id: "opt-3", label: "completed", value: "completed", is_active: true }, { id: "opt-4", label: "DL", value: "DL", is_active: true }, { id: "opt-5", label: "Pending", value: "Pending", is_active: true }] };
+      if (text.includes("lead_fields") || text.includes("crm_settings")) return { rows: [{ value: [] }] };
+      if (text.includes("master_values")) return { rows: [{ code: "pool", label: "pool", active: true }, { code: "duringpso", label: "duringpso", active: true }, { code: "completed", label: "completed", active: true }, { code: "DL", label: "DL", active: true }, { code: "lead", label: "lead", active: true }] };
       return { rows: [] };
     },
     transaction: async (work) => work({ query: async (text) => { sql.push(text); if (text.includes("SELECT stage FROM leads WHERE id=$1")) return { rows: current ? [{ stage: current.stage }] : [] }; return { rows: [] }; } }),
@@ -65,7 +69,7 @@ test("stage endpoint accepts all three new stages", async () => {
 test("import validation accepts all three new stages with fixture data", async () => {
   for (const stage of requestedStages) {
     const data = Buffer.from(`name,email,stage\nFixture ${stage},${stage}@example.test,${stage}\n`);
-    const analysis = await analyzeUpload(data, `${stage}.csv`, { query: async (sql) => sql.includes("FROM users") ? { rows: [] } : { rows: [] } });
+    const analysis = await analyzeUpload(data, `${stage}.csv`, { query: async (sql) => sql.includes("workspace_settings") || sql.includes("crm_settings") ? { rows: [{ value: [] }] } : { rows: [{ code: stage, label: stage, active: true }, { code: "DL", label: "DL", active: true }] } });
     assert.equal(analysis.errors.length, 0, stage);
     assert.equal(analysis.valid[0].values.stage, stage);
   }

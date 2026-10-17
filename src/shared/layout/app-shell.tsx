@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Navbar, NAV_ITEMS } from "./nav";
 import { useLeadNavCounts, useNavGroupState } from "./function";
 import { useAuth } from "../auth/auth";
@@ -7,9 +7,9 @@ import { displayRole, usePermission } from "../auth/permissions";
 import { signOut } from "../auth/sign-out";
 import { api } from "../api/client";
 import { getTheme, setTheme } from "../theme/theme";
-import { Moon, Plus, Search, Sun, Upload } from "lucide-react";
+import { Bell, ChevronDown, ChevronLeft, ChevronRight, Moon, Plus, Search, Sun, Upload } from "lucide-react";
 import { LeadNavbarActionsContext, type LeadNavbarActions } from "./lead-navbar-actions";
-import { focusFirstNavigationLink, NavbarAutoHideController, restoreNavigationFocus, shouldOpenNavigationShortcut } from "./navbar-auto-hide";
+import { focusFirstNavigationLink, restoreNavigationFocus, shouldOpenNavigationShortcut } from "./navbar-auto-hide";
 import { visibleTopbarModules } from "./nav-access";
 import "./app-shell.css";
 
@@ -82,12 +82,21 @@ function AccountMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onTogg
   function handleSignOut() { closeMenu(); void signOut(logout, navigate); }
   const roleLabel = user?.role_label || displayRole(user?.role);
   const accountName = user?.name && user.name !== roleLabel ? user.name : "";
-  const userInitial = user?.name ? user.name.trim().charAt(0).toUpperCase() : (user?.email ? user.email.trim().charAt(0).toUpperCase() : "U");
+  const userInitials = useMemo(() => {
+    if (user?.name) {
+      const parts = user.name.trim().split(/\s+/);
+      if (parts.length >= 2) return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    if (user?.email) return user.email.slice(0, 2).toUpperCase();
+    return "OP";
+  }, [user?.name, user?.email]);
   return <div className="account-menu-wrap" ref={menuRef}>
     <button ref={buttonRef} className="account-menu-button avatar-menu-button" type="button" aria-haspopup="menu" aria-expanded={open} aria-label="Account menu" title={user?.name || roleLabel} onClick={() => open ? closeMenu() : openMenu()} onKeyDown={buttonKeyDown}>
-      <span className="user-avatar-badge">{userInitial}</span>
+      <span className="user-avatar-badge">{userInitials}</span>
+      <ChevronDown size={14} className="avatar-menu-caret" aria-hidden="true" />
     </button>
-    {open && <div className="account-menu" role="menu" aria-label="Account menu"><div className="account-menu-identity"><strong>{user?.name || roleLabel}</strong><span>{user?.email || ""}</span><span className="role-badge">{roleLabel}</span></div><button ref={(element) => { itemRefs.current[0] = element; }} role="menuitem" type="button" onClick={goAccount} onKeyDown={(event) => itemKeyDown(event, 0)}>Account</button><button ref={(element) => { itemRefs.current[1] = element; }} role="menuitem" type="button" onClick={onToggleTheme} onKeyDown={(event) => itemKeyDown(event, 1)}>Theme: {theme === "light" ? "Light" : "Dark"}</button><button ref={(element) => { itemRefs.current[2] = element; }} role="menuitem" type="button" onClick={handleSignOut} onKeyDown={(event) => itemKeyDown(event, 2)}>Sign out</button></div>}
+    {open && <div className="account-menu" role="menu" aria-label="Account menu"><div className="account-menu-identity"><strong>{user?.name || roleLabel}</strong><span>{user?.email || ""}</span>{user?.name !== roleLabel && <span className="role-badge">{roleLabel}</span>}</div><button ref={(element) => { itemRefs.current[0] = element; }} role="menuitem" type="button" onClick={goAccount} onKeyDown={(event) => itemKeyDown(event, 0)}>Account</button><button ref={(element) => { itemRefs.current[1] = element; }} role="menuitem" type="button" onClick={onToggleTheme} onKeyDown={(event) => itemKeyDown(event, 1)}>Theme: {theme === "light" ? "Light" : "Dark"}</button><button ref={(element) => { itemRefs.current[2] = element; }} role="menuitem" type="button" onClick={handleSignOut} onKeyDown={(event) => itemKeyDown(event, 2)}>Sign out</button></div>}
   </div>;
 }
 
@@ -124,35 +133,22 @@ export function AppShell() {
   const { collapsedGroups, toggleNavGroup } = useNavGroupState();
   const [theme, setCurrentTheme] = useState(getTheme);
   const [leadNavbarActions, setLeadNavbarActions] = useState<LeadNavbarActions | null>(null);
-  const [navbarOpen, setNavbarOpen] = useState(false);
-  const navbarControllerRef = useRef<NavbarAutoHideController | null>(null);
+  const [topbarModulesOpen, setTopbarModulesOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null); const topbarRef = useRef<HTMLElement>(null);
   const openNavigationRef = useRef<HTMLButtonElement>(null); const firstNavigationLinkRef = useRef<HTMLAnchorElement>(null); const previousNavigationFocusRef = useRef<HTMLElement | null>(null);
-  if (!navbarControllerRef.current) navbarControllerRef.current = new NavbarAutoHideController(setNavbarOpen);
-  const navbarController = navbarControllerRef.current;
-  function openKeyboardNavigation(origin?: HTMLElement | null) { previousNavigationFocusRef.current = origin || document.activeElement as HTMLElement | null; navbarController.open(); requestAnimationFrame(() => focusFirstNavigationLink(firstNavigationLinkRef.current)); }
+  function openKeyboardNavigation(origin?: HTMLElement | null) { previousNavigationFocusRef.current = origin || document.activeElement as HTMLElement | null; setTopbarModulesOpen(true); requestAnimationFrame(() => focusFirstNavigationLink(firstNavigationLinkRef.current)); }
   const canImportLeads = usePermission("leads.import");
   const isLeadsScreen = ["/leads", "/lead-master"].includes(location.pathname);
   const homeHref = showAdminNav ? "/leads" : "/lead-master";
   const currentHref = `${location.pathname}${location.search}`;
   const topbarModules = visibleTopbarModules(authLoading ? false : showAdminNav);
+  useEffect(() => { setTopbarModulesOpen(false); }, [location.pathname]);
   useEffect(() => {
-    const openAtTopEdge = (event: PointerEvent) => { if (event.clientY <= 10) navbarController.open(); };
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape" && navbarOpen) { navbarController.clear(); setNavbarOpen(false); restoreNavigationFocus(previousNavigationFocusRef.current, document.body); } else if (shouldOpenNavigationShortcut(event)) { event.preventDefault(); openKeyboardNavigation(); } };
-    document.addEventListener("pointermove", openAtTopEdge); document.addEventListener("pointerdown", openAtTopEdge);
+    if (!topbarModulesOpen) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { setTopbarModulesOpen(false); restoreNavigationFocus(previousNavigationFocusRef.current, document.body); } else if (shouldOpenNavigationShortcut(event)) { event.preventDefault(); openKeyboardNavigation(); } };
     document.addEventListener("keydown", closeOnEscape);
-    return () => { document.removeEventListener("pointermove", openAtTopEdge); document.removeEventListener("pointerdown", openAtTopEdge); document.removeEventListener("keydown", closeOnEscape); navbarController.dispose(); };
-  }, [navbarController, navbarOpen]);
-  useEffect(() => {
-    const shell = shellRef.current; const topbar = topbarRef.current;
-    if (!shell || !topbar) return;
-    const syncOverlayTop = () => shell.style.setProperty("--nav-topbar-offset", `${topbar.getBoundingClientRect().bottom}px`);
-    syncOverlayTop();
-    const observer = new ResizeObserver(syncOverlayTop);
-    observer.observe(topbar); window.addEventListener("resize", syncOverlayTop); window.addEventListener("scroll", syncOverlayTop, true);
-    return () => { observer.disconnect(); window.removeEventListener("resize", syncOverlayTop); window.removeEventListener("scroll", syncOverlayTop, true); };
-  }, []);
-  useEffect(() => { if (navbarOpen) document.querySelector<HTMLElement>("#topbar-module-links a.active")?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [location.pathname, navbarOpen, showAdminNav]);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [topbarModulesOpen]);
   function toggleTheme() { const next = theme === "light" ? "dark" : "light"; setTheme(next); setCurrentTheme(next); }
   const adminNavbar = <Navbar collapsed={false} showAdmin={showAdminNav} includeCore={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
   return <LeadNavbarActionsContext.Provider value={setLeadNavbarActions}><div ref={shellRef} className={showAdminNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
@@ -161,12 +157,13 @@ export function AppShell() {
     <main className="main">
       <header ref={topbarRef} className="topbar topbar-without-navigation">
         <Link className="topbar-logo topbar-brand-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
-        <div className="navbar-hover-zone" aria-hidden="true" />
-        <nav id="topbar-module-links" inert={!navbarOpen} className={navbarOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation" onPointerEnter={() => navbarController.enter()} onPointerLeave={() => navbarController.leave()} onFocusCapture={(event) => navbarController.setFocusHeld((event.target as HTMLElement).matches(":focus-visible"))} onBlurCapture={() => navbarController.setFocusHeld(false)}>{topbarModules.map((module, index) => <NavLink ref={index === 0 ? firstNavigationLinkRef : undefined} key={module.id} to={module.path} aria-label={module.label} title={module.label} onPointerUp={(event) => { if (event.pointerType === "touch") navbarController.navigationSelected(); }} onClick={(event) => { if (event.detail === 0) navbarController.navigationSelected(); }}><span>{module.label}</span></NavLink>)}</nav>
+        <nav id="topbar-module-links" className={topbarModulesOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation">{topbarModules.map((module, index) => <NavLink ref={index === 0 ? firstNavigationLinkRef : undefined} key={module.id} to={module.path} aria-label={module.label} title={module.label} onClick={() => setTopbarModulesOpen(false)}><span>{module.label}</span></NavLink>)}</nav>
         <div className="topbar-right">
           <div className="top-actions">
-            {isLeadsScreen && <div className="navbar-lead-actions"><GlobalSearch /><button className="navbar-action-button" type="button" disabled={!canImportLeads || !leadNavbarActions} onClick={() => leadNavbarActions?.openBulkUpload()} aria-label="Bulk upload leads" title="Bulk upload leads"><Upload size={18} aria-hidden="true" /></button>{canCreateLead && <button className="navbar-action-button navbar-action-button--beige" type="button" disabled={!leadNavbarActions} onClick={() => leadNavbarActions?.openNewLead()} aria-label="Add new lead" title="Add new lead"><Plus size={18} strokeWidth={2.5} aria-hidden="true" /></button>}</div>}
-            <button className="top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`} title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}</button>
+            <button className="navbar-action-button topbar-module-toggle" type="button" aria-label={topbarModulesOpen ? "Hide quick navigation" : "Show quick navigation"} aria-expanded={topbarModulesOpen} aria-controls="topbar-module-links" onClick={() => setTopbarModulesOpen((open) => !open)}>{topbarModulesOpen ? <ChevronLeft size={18} aria-hidden="true" /> : <ChevronRight size={18} aria-hidden="true" />}</button>
+            {isLeadsScreen && <div className="navbar-lead-actions"><GlobalSearch /><button className="navbar-action-button navbar-action-button--round" type="button" disabled={!canImportLeads || !leadNavbarActions} onClick={() => leadNavbarActions?.openBulkUpload()} aria-label="Bulk upload leads" title="Bulk upload leads"><Upload size={18} aria-hidden="true" /></button>{canCreateLead && <button className="navbar-action-button navbar-action-button--round" type="button" disabled={!leadNavbarActions} onClick={() => leadNavbarActions?.openNewLead()} aria-label="Add new lead" title="Add new lead"><Plus size={18} strokeWidth={2.5} aria-hidden="true" /></button>}</div>}
+            <button className="navbar-action-button navbar-action-button--round top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`} title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}</button>
+            <button className="navbar-action-button navbar-action-button--round topbar-notification-btn" type="button" aria-label="Notifications" title="Notifications"><Bell size={18} aria-hidden="true" /></button>
             <AccountMenu theme={theme} onToggleTheme={toggleTheme} />
           </div>
         </div>

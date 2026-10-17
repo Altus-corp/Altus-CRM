@@ -18,7 +18,7 @@ const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
 const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 72;
-const LEAD_TABLE_WIDTH_DEFAULTS: Record<string, number> = { leadNo: 110, leadTypeCode: 150, name: 180, company: 180, cellNo: 135, designation: 160, businessCategory: 170, leadSource: 150, rating: 110, permission: 135, lead_status: 140 };
+const LEAD_TABLE_WIDTH_DEFAULTS: Record<string, number> = { leadNo: 110, leadTypeCode: 150, name: 180, company: 180, cellNo: 135, designation: 160, businessCategory: 170, leadSource: 150, rating: 110, permission: 135, activity: 185, lead_status: 140 };
 const CORE_TABLE_COLUMN_KEYS = new Set(["leadNo", "leadTypeCode", "name", "cellNo", "permission", "created_at", "updated_at", "last_opened_at"]);
 const CORE_TABLE_DATA_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", cellNo: "phone", permission: "permission", stage: "stage", owner: "owner", created_at: "created_at", updated_at: "updated_at", last_opened_at: "last_opened_at" };
 const LEAD_SORT_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", first_name: "first_name", last_name: "last_name", company: "company", cellNo: "cell_no", email: "email", designation: "designation", businessCategory: "business_category", business_category: "business_category", leadSource: "lead_source", rating: "rating", permission: "permission", lastCalledOn: "last_call_at", last_called_on: "last_call_at", lead_acquisition_date: "lead_acquisition_date", nature_of_business: "nature_of_business", proposed_solution: "proposed_solution", invite_sent_by_introducer: "invite_sent_by_introducer", invite_date_sent: "invite_date_sent", introducer_call_done: "introducer_call_done", introducer_call_date: "introducer_call_date", introducer_feedback: "introducer_feedback", introducer_name: "introducer_name", employee_name: "employee_name", association_network_name: "association_network_name", chapter_name: "chapter_name", calling_resolution: "calling_resolution", next_call_on: "next_call_on", calling_remarks: "calling_remarks", intro_video_sent: "intro_video_sent", email_sent: "email_sent", whatsapp_message_sent: "whatsapp_message_sent", extra_notes: "extra_notes", created_at: "created_at", updated_at: "updated_at", city: "city", sourceSystem: "source_system", leadAcquiredDate: "lead_acquisition_date", natureOfBusiness: "nature_of_business", service: "service", owner: "owner", callingResolution: "calling_resolution", priority: "priority", callingRemarks: "calling_remarks", psoDate: "pso_date", registrationTime: "registration_time", approvalStatus: "approval_status", zoomOrPhysical: "zoom_or_physical", confirmationCallStatus: "confirmation_call_status", zoomLinkSent: "zoom_link_sent", attendanceStatus: "attendance_status", salesFollowUpBy: "sales_follow_up_by", salesResolution: "sales_resolution", cameraOn: "camera_on", photoTaken: "photo_taken", salesNotes: "sales_notes", leftHalfway: "left_halfway", nextFollowUpAt: "next_follow_up_at", totalPayable: "total_payable", amountPaid: "amount_paid", balanceReceivable: "balance_receivable", targetDate: "target_date" };
@@ -433,17 +433,7 @@ function VerticalDotsIcon() {
   );
 }
 
-const ACTIVITY_TYPE_PRESENTATION: Record<string, { icon: React.ComponentType<{ color?: string }>; placeholder: string }> = {
-  phone_call: { icon: CallIcon, placeholder: "Interested in a product walkthrough next week. Asked to share the proposal before the demo." },
-  meeting_demo: { icon: CalendarIcon, placeholder: "Met with client team. Discussed requirements, timeline, and next steps." },
-  email_follow_up: { icon: EmailIcon, placeholder: "Sent follow-up email with product deck and case studies." },
-  whatsapp_message: { icon: WhatsAppIcon, placeholder: "Sent WhatsApp message with Productivity Shastra overview." },
-  site_visit: { icon: BuildingIcon, placeholder: "Conducted on-site inspection and met operational managers." },
-  proposal_review: { icon: NoteIcon, placeholder: "Shared revised commercial proposal with pricing breakdown." },
-  product_walkthrough: { icon: GlobeIcon, placeholder: "Walked client through core platform modules and answered questions." },
-  internal_note: { icon: HandoffIcon, placeholder: "Internal coordination note for sales and delivery team." },
-};
-const DEFAULT_ACTIVITY_TYPE_PRESENTATION = { icon: NoteIcon, placeholder: "Add activity details." };
+const ACTIVITY_DETAILS_PLACEHOLDER = "Add activity details.";
 
 type LeadDetailTab = "activity" | "details" | "notes" | "follow-up";
 
@@ -496,7 +486,7 @@ type TimelineEntry = { id: string; date: string | null; title: string; subtitle:
 function LeadTimeline({ detail, leadName, ownerName }: { detail: any; leadName: string; ownerName: string }) {
   const entries: TimelineEntry[] = [
     ...(detail.followups || []).map((item: any) => ({ id: `followup-${item.id}`, date: item.created_at || item.due_at, title: item.status === "done" ? "Follow-up completed" : "Follow-up scheduled", subtitle: item.due_at ? new Date(item.due_at).toLocaleString() : "Follow-up", body: item.note || "No follow-up note.", kind: "followup" as const, badge: item.status === "done" ? "Completed" : "Upcoming" })),
-    ...(detail.notes || []).map((item: any) => ({ id: `note-${item.id}`, date: item.created_at, title: item.activity_type_display_label || item.activity_type_label || `Note added by ${item.author_name || ownerName}`, subtitle: item.created_at ? new Date(item.created_at).toLocaleString() : "Note", body: item.body || "No note body.", kind: "note" as const })),
+    ...(detail.notes || []).map((item: any) => ({ id: `note-${item.id}`, date: item.created_at, title: `Note added by ${item.author_name || ownerName}`, subtitle: item.created_at ? new Date(item.created_at).toLocaleString() : "Note", body: item.body || "No note body.", kind: "note" as const })),
     ...(detail.calls || []).map((item: any) => ({ id: `call-${item.id}`, date: item.happened_at, title: `${item.caller_name || ownerName} called ${leadName}`, subtitle: `${item.happened_at ? new Date(item.happened_at).toLocaleString() : "Call"}${item.duration_seconds != null ? ` · ${Math.floor(Number(item.duration_seconds) / 60)}:${String(Number(item.duration_seconds) % 60).padStart(2, "0")} min` : ""}`, body: [item.resolution ? `Outcome: ${item.resolution}` : "", item.note || ""].filter(Boolean).join(" · ") || "Call activity recorded.", kind: "call" as const, badge: item.resolution === "Connected" ? "Connected" : undefined })),
     ...(detail.messages || []).map((item: any) => ({ id: `message-${item.id}`, date: item.sent_at, title: `${item.channel || "Message"} message sent`, subtitle: item.sent_at ? new Date(item.sent_at).toLocaleString() : "Message", body: item.body || "Message activity recorded.", kind: "message" as const })),
     ...(detail.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action))).map((item: any) => ({ id: `history-${item.id}`, date: item.occurred_at, title: item.action === "lead.round_robin_assigned" ? (item.note || `Lead round-robined to ${item.to_name || item.to_value || "an owner"}.`) : `Lead manually assigned to ${item.to_name || item.to_value || "an owner"}`, subtitle: item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "Assignment recorded", body: "", kind: "assignment" as const, badge: "Assigned" })),
@@ -708,7 +698,6 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   // Add Note composer state matching reference design
   const [noteType, setNoteType] = useState<"general" | "call" | "meeting" | "handoff">("general");
   const [noteText, setNoteText] = useState("");
-  const [relatedActivity, setRelatedActivity] = useState("");
   const [noteTags, setNoteTags] = useState<string[]>([]);
   const [noteVisibility, setNoteVisibility] = useState("");
   const [pinToLead, setPinToLead] = useState(true);
@@ -737,14 +726,33 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [activityTypeOptionId, setActivityTypeOptionId] = useState("");
   const [activityTypeSearch, setActivityTypeSearch] = useState("");
   const [activityTypeDropdownOpen, setActivityTypeDropdownOpen] = useState(false);
+  const [activityDetailsText, setActivityDetailsText] = useState("");
   const activityTypePickerRef = useRef<HTMLDivElement>(null);
-  const activityTypes = screen.dropdownOptions.activityType.filter((item) => item.is_active);
+  const activityField = screen.leadFields.find((field) => field.key === "activity");
+  const activitySetupMessage = screen.leadFieldsLoading
+    ? "Loading activity options..."
+    : screen.leadFieldsError
+      ? "Couldn't load activity options. Try again."
+      : !activityField
+        ? "Activity options aren't set up. Ask an administrator to add an Activity dropdown in Lead fields."
+        : !activityField.active
+          ? "The Activity lead field is inactive. Ask an administrator to activate it."
+          : activityField.type !== "dropdown"
+            ? "The Activity lead field must be a dropdown."
+            : !(activityField.options || []).length
+              ? "The Activity lead field has no options. Ask an administrator to add options."
+              : "";
+  const activityTypes = useMemo(() => activitySetupMessage ? [] : (activityField?.options || []).map((option) => ({ id: option, value: option, label: option })), [activityField?.options, activitySetupMessage]);
   const selectedActivityType = activityTypes.find((item) => item.id === activityTypeOptionId) || null;
-  const selectedActivityPresentation = selectedActivityType ? ACTIVITY_TYPE_PRESENTATION[selectedActivityType.value] || DEFAULT_ACTIVITY_TYPE_PRESENTATION : DEFAULT_ACTIVITY_TYPE_PRESENTATION;
+  const matchingActivityTypes = activityTypes.filter((item) =>
+    item.label.toLowerCase().includes(activityTypeSearch.toLowerCase())
+  );
+  const activitySaveDisabled = !activityDetailsText.trim() || !selectedActivityType || !!activitySetupMessage;
+  const activitySaveHint = screen.activityError || activitySetupMessage || (!selectedActivityType ? "Select an activity type to save." : !activityDetailsText.trim() ? "Enter activity details to save." : "");
 
   useEffect(() => {
-    if (activityTypes.some((item) => item.id === activityTypeOptionId)) return;
-    setActivityTypeOptionId(activityTypes[0]?.id || "");
+    const selectionIsActive = activityTypes.some((item) => item.id === activityTypeOptionId);
+    if (activityTypeOptionId && !selectionIsActive) setActivityTypeOptionId("");
   }, [activityTypeOptionId, activityTypes]);
 
   useEffect(() => {
@@ -769,7 +777,6 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     };
   }, [activityTypeDropdownOpen]);
 
-  const [activityDetailsText, setActivityDetailsText] = useState("");
   const [activityAttachments, setActivityAttachments] = useState<string[]>([]);
   const [addFollowUpTask, setAddFollowUpTask] = useState(true);
   const [followUpTitle, setFollowUpTitle] = useState("");
@@ -780,12 +787,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [notifyMe, setNotifyMe] = useState(true);
   const [notifyBefore, setNotifyBefore] = useState("");
   useEffect(() => {
-    if (!relatedActivity && screen.dropdownOptions.relatedActivity[0]) setRelatedActivity(screen.dropdownOptions.relatedActivity[0].value);
     if (!noteVisibility && screen.dropdownOptions.noteVisibility[0]) setNoteVisibility(screen.dropdownOptions.noteVisibility[0].value);
     if (!reminderNotify && screen.userOptions[0]) setReminderNotify(screen.userOptions[0].value);
     if (!followUpAssignee && screen.userOptions[0]) setFollowUpAssignee(screen.userOptions[0].value);
     if (!notifyBefore && screen.dropdownOptions.notifyBefore[0]) setNotifyBefore(screen.dropdownOptions.notifyBefore[0].value);
-  }, [followUpAssignee, noteVisibility, notifyBefore, relatedActivity, reminderNotify, screen.dropdownOptions, screen.userOptions]);
+  }, [followUpAssignee, noteVisibility, notifyBefore, reminderNotify, screen.dropdownOptions, screen.userOptions]);
   const [notifyViaApp, setNotifyViaApp] = useState(true);
   const [notifyViaEmail, setNotifyViaEmail] = useState(false);
 
@@ -2604,18 +2610,8 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     </div>
                   </div>
 
-                  {/* 3-Column Metadata Row: Related activity, Tags, Visibility */}
+                  {/* Metadata Row: Tags and Visibility */}
                   <div className="lead-note-meta-grid">
-                    <div className="lead-note-meta-field">
-                      <label className="lead-note-input-label" htmlFor="lead-note-related-activity">
-                        Related activity
-                      </label>
-                      <div className="lead-note-select-wrap">
-                        <DropdownSelect dropdownKey="related_activity" options={screen.dropdownOptions.relatedActivity} id="lead-note-related-activity" className="lead-note-select" value={relatedActivity} onValueChange={setRelatedActivity} />
-                        <ChevronDownIcon />
-                      </div>
-                    </div>
-
                     <div className="lead-note-meta-field">
                       <label className="lead-note-input-label">Tags</label>
                       <div className="lead-note-tags-input-container">
@@ -3209,10 +3205,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                   aria-expanded={activityTypeDropdownOpen}
                 >
                   <div className="lead-add-activity-select-left">
-                    {(() => {
-                      const Icon = selectedActivityPresentation.icon;
-                      return <Icon color="var(--ink)" />;
-                    })()}
+                    <NoteIcon color="var(--ink)" />
                     <span className="selected-type-label">{selectedActivityType?.label || "Select activity type"}</span>
                   </div>
                   <div className="lead-add-activity-select-right">
@@ -3235,10 +3228,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                       />
                     </div>
                     <div className="dropdown-items-scroll">
-                      {activityTypes.filter((item) =>
-                        item.label.toLowerCase().includes(activityTypeSearch.toLowerCase())
-                      ).map((item) => {
-                        const ItemIcon = (ACTIVITY_TYPE_PRESENTATION[item.value] || DEFAULT_ACTIVITY_TYPE_PRESENTATION).icon;
+                      {activitySetupMessage ? (
+                        <p className="lead-add-activity-helper" role={screen.leadFieldsError ? "alert" : "status"}>{activitySetupMessage}</p>
+                      ) : !matchingActivityTypes.length ? (
+                        <p className="lead-add-activity-helper">No matching activity types.</p>
+                      ) : matchingActivityTypes.map((item) => {
                         const isSelected = item.id === activityTypeOptionId;
                         return (
                           <button
@@ -3251,12 +3245,12 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                               setActivityTypeOptionId(item.id);
                               setActivityTypeDropdownOpen(false);
                               setActivityTypeSearch("");
-                              if (!activityDetailsText || Object.values(ACTIVITY_TYPE_PRESENTATION).some((presentation) => presentation.placeholder === activityDetailsText)) {
-                                setActivityDetailsText((ACTIVITY_TYPE_PRESENTATION[item.value] || DEFAULT_ACTIVITY_TYPE_PRESENTATION).placeholder);
+                              if (!activityDetailsText || activityDetailsText === ACTIVITY_DETAILS_PLACEHOLDER) {
+                                setActivityDetailsText(ACTIVITY_DETAILS_PLACEHOLDER);
                               }
                             }}
                           >
-                            <ItemIcon color={isSelected ? "var(--red)" : "var(--ink-2)"} />
+                            <NoteIcon color={isSelected ? "var(--red)" : "var(--ink-2)"} />
                             <span>{item.label}</span>
                           </button>
                         );
@@ -3265,7 +3259,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                   </div>
                 )}
               </div>
-              <span className="lead-add-activity-helper">Activity types are managed by your administrator.</span>
+              <span className="lead-add-activity-helper">Activity options are managed in Lead fields.</span>
             </div>
 
             {/* Activity details: generic multiline input */}
@@ -3477,6 +3471,8 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
             <button
               type="button"
               className="lead-add-activity-save-btn"
+              disabled={activitySaveDisabled}
+              aria-describedby="lead-activity-save-hint"
               onClick={() => {
                 if (!activityDetailsText.trim() || !selectedActivityType) return;
                 const newNote = {
@@ -3488,7 +3484,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                   createdAt: "Just now",
                   attachments: [...activityAttachments],
                 };
-                void screen.addActivity("note", { body: activityDetailsText.trim(), activity_type_option_id: selectedActivityType.id }).then((saved) => {
+                void screen.addActivity("note", { body: activityDetailsText.trim(), activity: selectedActivityType.label }).then((saved) => {
                   if (!saved) return;
                   setSavedNotesList((prev) => [newNote, ...prev]);
                   setShowAddActivityDrawer(false);
@@ -3499,6 +3495,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
             >
               Save activity
             </button>
+            {activitySaveHint && (
+              <span id="lead-activity-save-hint" className="lead-add-activity-helper" role="status">
+                {activitySaveHint}
+              </span>
+            )}
           </div>
         </aside>
       </div>

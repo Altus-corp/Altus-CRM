@@ -4,8 +4,7 @@ const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const { writeAudit } = require("./audit.cjs");
 const LeadFields = require("./lead-fields.cjs");
-const LEAD_STAGE_OPTIONS = require("../shared/lead-stages.json");
-const LEAD_STAGES = new Set(LEAD_STAGE_OPTIONS.map(({ value }) => value));
+const { assignLeadRoundRobin } = require("./lead-assignment.cjs");
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 5000;
@@ -13,6 +12,16 @@ const MAX_COLUMNS = 50;
 const MAX_CELL_LENGTH = 2000;
 const MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([".csv", ".xlsx"]);
+const TEMPLATE_HEADERS = Object.freeze([
+  "Lead No", "Lead Acquisition Date", "First Name", "Last Name", "Company Name", "Cell No", "Email ID", "Designation",
+  "Business Category", "Nature of Business", "Proposed Solution", "Invite Sent by Introducer", "Invite Date Sent",
+  "Introducer Call Done", "Introducer Call Date", "Introducer Feedback", "Introducer Name", "Employee Name",
+  "Association/Network Name", "Chapter Name", "Extra Notes", "Last Called On", "Calling Resolution", "Next Call On",
+  "Calling Remarks", "2 Mins Intro Video Sent", "Email Sent", "Msg Sent on Whatsapp"
+]);
+const TEMPLATE_ROWS = Object.freeze([
+  ["SAMPLE-001", "2026-01-15", "Sample", "Lead 1", "Sample Company", "0000000001", "sample1@example.test", "Sample Role", "Business", "Services", "PSO", "No", "", "No", "", "", "Sample Introducer", "Sample Employee", "Sample Network", "Sample Chapter", "Sample note", "2026-01-20", "Ringing", "", "Sample remark", "Yes", "No", "Yes"],
+]);
 const TEMPLATE_CORE_HEADERS = Object.freeze(["Lead No", "First Name", "Last Name", "Company Name", "Cell No", "Email ID", "Designation"]);
 const LEAD_TYPES = Object.freeze({ DL: "P3", L: "P3", QDL: "P3", QL: "P2", R: "P1" });
 
@@ -216,9 +225,6 @@ function mapHeaders(values, leadFields = []) {
   // Keep the historical generic `name` upload working, but tracking-sheet rows
   // must identify the lead with Lead No; First Name alone is not a substitute.
   if (!seen.has("lead_no") && !seen.has("name")) throw new ImportError("The file must contain a Lead No column.");
-  const missingFields = activeFields.filter((field) => !seen.has(`custom:${field.key}`)).map((field) => field.label);
-  if (missingFields.length) throw new ImportError(`The file is missing active Lead Field column(s): ${missingFields.join(", ")}. Download the latest sample file and use its headers.`);
-  if (ignored.length) throw new ImportError(`The file contains unrecognised or duplicate column(s): ${ignored.join(", ")}. Download the latest sample file and use its headers.`);
   return { columns, ignored };
 }
 
@@ -230,10 +236,10 @@ function isSheetFillerRow(row) {
   return cells.slice(1).every((value) => ["auto", "fill", "autofill"].includes(value));
 }
 
-function importCustomValues(rawCustom) {
+function importCustomValues(rawCustom, activeKeys = new Set()) {
   const values = {};
   for (const [key, raw] of Object.entries(rawCustom)) {
-    if (!Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, key) || !activeKeys.has(key)) continue;
     const value = text(raw); if (!value) continue;
     if (SOURCE_CUSTOM_FIELDS[key] === "boolean") {
       const normalized = value.toLowerCase();
@@ -252,25 +258,27 @@ function rowValues(row, columns, reference, rowNumber) {
   const phoneRaw = values.phone == null ? "" : text(values.phone); const normalizedPhone = normalizePhone(phoneRaw); const phone = normalizedPhone;
   if (phoneRaw && !normalizedPhone) errors.push("phone: must contain digits.");
   const leadType = text(values.lead_type || "DL").toUpperCase(); if (!Object.prototype.hasOwnProperty.call(LEAD_TYPES, leadType) || !masterHas(reference, ["leadtype", "lead_type"], leadType)) errors.push("lead_type: invalid master value.");
-  const stage = text(values.stage || "lead").toLowerCase(); if (!LEAD_STAGES.has(stage) || !masterHas(reference, ["stage", "leadstage"], stage)) errors.push("stage: invalid master value.");
+  const stage = text(values.stage || "lead").toLowerCase(); if (!masterHas(reference, ["stage", "leadstage"], stage)) errors.push("stage: invalid master value.");
   const permission = text(values.permission || "Pending"); if (!["Yes", "No", "Pending"].includes(permission)) errors.push("permission: must be Yes, No, or Pending.");
   const status = text(values.lead_status); if (status && !masterHas(reference, ["leadstatus", "status"], status)) errors.push("lead_status: invalid master value.");
   const psoDate = parseDate(values.pso_date, "pso_date"); if (values.pso_date && !psoDate) errors.push("pso_date: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.");
   const nextFollowup = parseDate(values.next_follow_up_at, "next_follow_up_at"); if (values.next_follow_up_at && !nextFollowup) errors.push("next_follow_up_at: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.");
   let ownerId = null; const owner = normalizeEmail(values.owner); if (owner) { ownerId = reference.users.get(owner)?.id || null; if (!ownerId) errors.push("owner: no active user matches that email."); }
   const rawCustom = Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("custom:")).map(([key, value]) => [key.slice(7), value]));
+  const activeLeadFields = (reference.leadFields || []).filter((field) => field.active !== false);
+  const activeLeadFieldKeys = new Set(activeLeadFields.map((field) => field.key));
   for (const [key, type] of Object.entries(SOURCE_CUSTOM_FIELDS)) {
-    if (!rawCustom[key]) continue;
+    if (!activeLeadFieldKeys.has(key) || !rawCustom[key]) continue;
     if (type === "date" && !parseDate(rawCustom[key], key)) errors.push(`${key}: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.`);
     if (type === "boolean" && !["yes", "true", "1", "no", "false", "0"].includes(text(rawCustom[key]).toLowerCase())) errors.push(`${key}: invalid boolean; use Yes or No.`);
   }
-  for (const field of reference.leadFields || []) {
+  for (const field of activeLeadFields) {
     if (Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, field.key) || !rawCustom[field.key]) continue;
     if (field.type === "date" && !parseDate(rawCustom[field.key], field.key)) errors.push(`${field.label}: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.`);
     if (field.type === "dropdown" && !(field.options || []).some((option) => text(option).toLowerCase() === text(rawCustom[field.key]).toLowerCase())) errors.push(`${field.label}: choose one of ${Array.from(field.options || []).join(", ")}.`);
   }
-  const custom_fields = { ...LeadFields.normalizeValues(Object.fromEntries(Object.entries(rawCustom).filter(([key]) => !Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, key))), reference.leadFields || []), ...importCustomValues(rawCustom) };
-  return { rowNumber, errors, values: { name, first_name: firstName || null, last_name: lastName || null, email, phone: phone || null, cell_no_raw: phoneRaw || null, cell_no_alt: phone || null, normalizedPhone, company: text(values.company) || null, lead_type: leadType, priority: LEAD_TYPES[leadType], stage, permission, lead_status: status || null, owner_user_id: ownerId, pso_date: psoDate, next_follow_up_at: nextFollowup, city: text(values.city) || null, designation: text(values.designation) || null, lead_no: leadNo || null, source_ref: text(values.source_ref) || null, custom_fields } };
+  const custom_fields = { ...LeadFields.normalizeValues(Object.fromEntries(Object.entries(rawCustom).filter(([key]) => !Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, key))), activeLeadFields), ...importCustomValues(rawCustom, activeLeadFieldKeys) };
+  return { rowNumber, errors, values: { name, first_name: firstName || null, last_name: lastName || null, email, phone: phone || null, cell_no_raw: phoneRaw || null, cell_no_alt: phone || null, normalizedPhone, company: text(values.company) || null, team: text(values.team) || null, lead_type: leadType, priority: LEAD_TYPES[leadType], stage, permission, lead_status: status || null, owner_user_id: ownerId, pso_date: psoDate, next_follow_up_at: nextFollowup, city: text(values.city) || null, designation: text(values.designation) || null, lead_no: leadNo || null, source_ref: text(values.source_ref) || null, custom_fields } };
 }
 
 function classifyRows(rows, reference, fileHash, allowDuplicates) {
@@ -308,16 +316,18 @@ function publicAnalysis(analysis) {
 
 function csvCell(value) { const cell = String(value ?? ""); return /[",\r\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell; }
 async function template(format, leadFields = LeadFields.DEFAULT_FIELDS) {
+  const isDefault = leadFields === LeadFields.DEFAULT_FIELDS;
   const activeFields = leadFields.filter((field) => field.active !== false && !isCoreLeadHeader(field));
-  const headers = [...TEMPLATE_CORE_HEADERS, ...activeFields.map((field) => field.label)];
+  const headers = isDefault ? [...TEMPLATE_HEADERS] : [...TEMPLATE_CORE_HEADERS, ...activeFields.map((field) => field.label)];
   const sampleByHeader = { "Lead No": "SAMPLE-001", "First Name": "Sample", "Last Name": "Lead", "Company Name": "Sample Company", "Cell No": "0000000001", "Email ID": "sample1@example.test", "Designation": "Sample Role" };
-  const sample = headers.map((header) => sampleByHeader[header] || activeFields.find((field) => field.label === header && field.type === "dropdown")?.options?.[0] || "");
-  if (format === "csv") return { body: Buffer.from([headers, sample].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n", "utf8"), contentType: "text/csv; charset=utf-8", filename: "altus-leads-sample.csv" };
+  const sample = isDefault ? TEMPLATE_ROWS[0] : headers.map((header) => sampleByHeader[header] || activeFields.find((field) => field.label === header && field.type === "dropdown")?.options?.[0] || "");
+  const rows = isDefault ? TEMPLATE_ROWS : [sample];
+  if (format === "csv") return { body: Buffer.from([headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n", "utf8"), contentType: "text/csv; charset=utf-8", filename: "altus-leads-sample.csv" };
   if (format !== "xlsx") throw new ImportError("Template format must be xlsx or csv.");
   const workbook = new ExcelJS.Workbook();
   const leads = workbook.addWorksheet("Leads");
   leads.addRow(headers);
-  for (const values of [sample]) {
+  for (const values of rows) {
     const row = leads.addRow(values);
     row.getCell(headers.indexOf("Cell No") + 1).numFmt = "@";
     row.getCell(headers.indexOf("Cell No") + 1).value = String(values[headers.indexOf("Cell No")]);
@@ -450,4 +460,4 @@ async function apply(req, db, actor) {
   return { import_run_id: runId, upload_id: runId, created: counts.new_leads_created, skipped_duplicates: counts.call_log_rows_skipped_duplicates, ...counts };
 }
 
-module.exports = { MAX_FILE_BYTES, MAX_ROWS, MAX_COLUMNS, MAX_CELL_LENGTH, parseCsv, parseFile, parseXlsx, analyzeUpload, publicAnalysis, preview, apply, template, normalizePhone, comparablePhone, normalizeEmail, mapHeaders, excelCellValue, TEMPLATE_CORE_HEADERS };
+module.exports = { MAX_FILE_BYTES, MAX_ROWS, MAX_COLUMNS, MAX_CELL_LENGTH, parseCsv, parseFile, parseXlsx, analyzeUpload, publicAnalysis, preview, apply, template, normalizePhone, comparablePhone, normalizeEmail, mapHeaders, excelCellValue, TEMPLATE_HEADERS, TEMPLATE_ROWS, TEMPLATE_CORE_HEADERS };

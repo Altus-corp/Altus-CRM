@@ -55,7 +55,7 @@ test("sortable lead headers use accessible Lucide icons and cycle server sort st
 
 test("every server-sortable lead header has the shared icon path and the checkbox stays plain", () => {
   for (const key of ["leadNo", "leadTypeCode", "cellNo", "email", "lead_acquisition_date", "calling_resolution", "created_at", "sourceSystem", "owner", "totalPayable", "targetDate"]) assert.match(pageSource, new RegExp(`${key}: "`));
-  assert.match(pageSource, /configuredFieldsByKey\.has\(field\.key\) \? `configured:\$\{field\.key\}` : LEAD_SORT_KEYS\[field\.key\]/);
+  assert.match(pageSource, /configuredFieldsByKey\.has\(field\.key\)\s*\? LEAD_SORT_KEYS\[field\.displayKey \|\| field\.key\] \|\| `configured:\$\{field\.key\}`\s*:\s*LEAD_SORT_KEYS\[field\.displayKey \|\| field\.key\] \|\| LEAD_SORT_KEYS\[field\.key\]/);
   assert.match(pageSource, /function LeadTableHeader[\s\S]*?<th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">\{selectAll\}<\/label><\/th>\{fields\.map/);
 });
 
@@ -100,7 +100,7 @@ test("header column moves use the visible-only order helper", () => {
 });
 
 test("table header reorder shares Columns persistence and preserves sort interaction", () => {
-  assert.match(pageSource, /function saveColumnOrder\(order: string\[\]\)[\s\S]*?setVisibleColumnKeys\(next\)[\s\S]*?setPendingColumnKeys\(next\)[\s\S]*?\/api\/user-preferences/);
+  assert.match(pageSource, /function saveColumnOrder\(order: string\[\]\)[\s\S]*?setVisibleColumnKeys\(reconciled\.visible\)[\s\S]*?setPendingColumnKeys\(reconciled\.visible\)[\s\S]*?\/api\/user-preferences/);
   assert.match(pageSource, /handleHeaderDragOver[\s\S]*?event\.preventDefault\(\)[\s\S]*?setHeaderDropTarget\(\{ key: targetKey, side \}\)/);
   assert.match(pageSource, /handleHeaderDrop[\s\S]*?headerDropTarget\?\.key === targetKey[\s\S]*?moveVisibleColumn\(sourceKey, dropTarget\.key, dropTarget\.side\)/);
   assert.match(pageSource, /function moveVisibleColumn[\s\S]*?next\.every\([\s\S]*?return false;[\s\S]*?saveColumnOrder\(next\)/);

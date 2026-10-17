@@ -366,7 +366,8 @@ async function leadsList(req, res, db, url, actor) {
   // Keep the list endpoint usable while an older preview database is waiting for
   // migration 018. The field is optional in the client until that migration runs.
   const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance,COALESCE((SELECT array_agg(DISTINCT lp.product_code) FROM lead_products lp WHERE lp.lead_id=l.id),ARRAY[]::text[]) AS product_codes FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
-  return json(res, 200, { items: rows.rows.map(materializeLead), page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
+  const items = rows.rows.map((row) => materializeLead(row));
+  return json(res, 200, { items, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
 async function addLeadActivityDisplayNames(db, lead, collections) {
@@ -389,6 +390,10 @@ async function addLeadActivityDisplayNames(db, lead, collections) {
   };
 }
 
+async function leadDetailNotes(db, id) {
+  return db.query("SELECT n.id,n.lead_id,n.body,n.note_type,n.call_id,n.created_by,n.created_at FROM lead_notes n WHERE n.lead_id = $1 ORDER BY n.created_at DESC NULLS LAST, n.id DESC", [id]);
+}
+
 async function leadDetail(req, res, db, id, actor = null) {
   if (actor?.id) {
     try {
@@ -406,7 +411,7 @@ async function leadDetail(req, res, db, id, actor = null) {
     db.query("SELECT * FROM lead_followups WHERE lead_id = $1 ORDER BY due_at ASC NULLS LAST, id ASC", [id]),
     db.query("SELECT * FROM lead_history WHERE lead_id = $1 ORDER BY occurred_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_messages WHERE lead_id = $1 ORDER BY sent_at DESC NULLS LAST, id DESC", [id]),
-    db.query("SELECT n.*,COALESCE(o.label,n.activity_type_label) AS activity_type_display_label FROM lead_notes n LEFT JOIN dropdown_options o ON o.id=n.activity_type_option_id WHERE n.lead_id = $1 ORDER BY n.created_at DESC NULLS LAST, n.id DESC", [id]),
+    leadDetailNotes(db, id),
     db.query("SELECT * FROM lead_products WHERE lead_id = $1 ORDER BY product_code ASC, id ASC", [id]),
   ]);
   const named = await addLeadActivityDisplayNames(db, lead, { calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, notes: notes.rows });
@@ -468,13 +473,32 @@ async function addLeadNote(req, res, db, actor, id) {
   const body = await readJson(req); const note = activityText(body.body);
   if (!note) return json(res, 400, { error: "Note body is required." });
   if (!(await activityLeadExists(db, actor, id))) return json(res, 404, { error: "Lead not found." });
-  let activityType = null;
-  if (body.activity_type_option_id !== undefined && body.activity_type_option_id !== null) {
-    try { activityType = await Dropdowns.assertSelectableOptionId(db, "activity_type", body.activity_type_option_id); }
-    catch (error) { return json(res, error.status || 400, { error: error.message || "The selected activity type is unavailable." }); }
+  if (Object.prototype.hasOwnProperty.call(body, "activity_type_option_id")) return json(res, 400, { error: "This request format is no longer supported. Reload the page." });
+  if (body.activity !== undefined) {
+    const definitions = await LeadFields.getDefinitions(db);
+    const activityField = definitions.find((field) => field.key === "activity");
+    if (!activityField) return json(res, 400, { error: "Activity options aren't set up. Ask an administrator to add an Activity dropdown in Lead fields." });
+    if (!activityField.active) return json(res, 400, { error: "The Activity lead field is inactive." });
+    if (activityField.type !== "dropdown") return json(res, 400, { error: "The Activity lead field must be a dropdown." });
+    if (!(activityField.options || []).length) return json(res, 400, { error: "The Activity lead field has no options." });
+    let activity;
+    try { activity = LeadFields.validateActiveValues({ activity: body.activity }, definitions).activity; }
+    catch (error) { return json(res, error.status || 400, { error: error.message || "Invalid Activity option." }); }
+    const noteId = `lead-note-${crypto.randomUUID()}`;
+    try {
+      await transaction(db, async (tx) => {
+        const current = (await tx.query("SELECT custom_values FROM leads WHERE id=$1 FOR UPDATE", [id])).rows[0];
+        if (!current) throw Object.assign(new Error("Lead not found."), { status: 404 });
+        await tx.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by) VALUES($1,$2,$3,'manual',$4)", [noteId, id, note, actor.id]);
+        await tx.query("UPDATE leads SET custom_values=jsonb_set(COALESCE(custom_values,'{}'::jsonb), ARRAY['lead_fields','activity'], $1::jsonb, true), updated_at=now() WHERE id=$2", [JSON.stringify(activity), id]);
+        await writeAudit(tx, { actorUserId: actor.id, action: "lead.note_created", entityType: "lead", entityId: id, newValue: "manual_note", ip: req.socket.remoteAddress });
+        await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, field: "activity", oldValue: JSON.stringify(current.custom_values?.lead_fields?.activity ?? null), newValue: JSON.stringify(activity), ip: req.socket.remoteAddress });
+      });
+    } catch (error) { return json(res, error.status || 500, { error: error.status ? error.message : "Unable to save activity." }); }
+    return json(res, 201, { id: noteId });
   }
   const noteId = `lead-note-${crypto.randomUUID()}`;
-  await db.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by,activity_type_option_id,activity_type_label) VALUES($1,$2,$3,'manual',$4,$5,$6)", [noteId, id, note, actor.id, activityType?.id || null, activityType?.label || null]);
+  await db.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by) VALUES($1,$2,$3,'manual',$4)", [noteId, id, note, actor.id]);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.note_created", entityType: "lead", entityId: id, newValue: "manual_note", ip: req.socket.remoteAddress });
   return json(res, 201, { id: noteId });
 }

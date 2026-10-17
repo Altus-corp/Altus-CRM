@@ -85,7 +85,7 @@ test("lead list uses parameterized filters and caps page size at 100", async () 
   assert.equal(res.status, 200);
   assert.equal(body.page_size, 100);
   assert.equal(body.items.length, 1);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 2, "count and primary list query");
   assert.deepEqual(calls[0].params, ["%fixture%", "lead"]);
   assert.match(calls[1].sql, /LIMIT \$3 OFFSET \$4/);
   assert.deepEqual(calls[1].params.slice(-2), [100, 0]);

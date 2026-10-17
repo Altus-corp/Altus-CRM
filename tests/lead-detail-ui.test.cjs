@@ -67,8 +67,8 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /Meeting note/, "Should include Meeting note pill");
   assert.match(pageSource, /Internal handoff/, "Should include Internal handoff pill");
   assert.match(pageSource, /lead-note-toolbar/, "Should include rich text editor toolbar");
-  assert.match(pageSource, /lead-note-meta-grid/, "Should include 3-column metadata grid");
-  assert.match(pageSource, /Related activity/, "Should include Related activity field");
+  assert.match(pageSource, /lead-note-meta-grid/, "Should include note metadata grid");
+  assert.doesNotMatch(pageSource, /lead-note-related-activity|dropdownKey="related_activity"/, "Should not include the unsaved Related activity picker");
   assert.match(pageSource, /lead-note-tag-chips/, "Should include tag chips container");
   assert.match(pageSource, /Pin to lead/, "Should include Pin to lead toggle");
   assert.match(pageSource, /Set a reminder/, "Should include Set a reminder toggle");
@@ -93,7 +93,7 @@ test("Lead Details UI structure in page.tsx matches reference design", () => {
   assert.match(pageSource, /View lead/, "Should include View lead link");
   assert.match(pageSource, /Activity type/, "Should include Activity type label");
   assert.match(pageSource, /ref=\{activityTypePickerRef\}/, "Should attach ref to dropdown container for outside click handling");
-  assert.match(pageSource, /Activity types are managed by your administrator\./, "Should include admin helper text");
+  assert.match(pageSource, /Activity options are managed in Lead fields\./, "Should include Lead fields helper text");
   assert.match(pageSource, /Activity details/, "Should include Activity details label");
   assert.match(pageSource, /Add attachment/, "Should include Add attachment button");
   assert.match(pageSource, /Add follow-up task/, "Should include Add follow-up task toggle");
