@@ -33,7 +33,7 @@ function MasterSidebar({
 
   return <aside className="sidebar master-sidebar">
     <div className="master-sidebar-brand">
-      <Link className="topbar-logo" to="/lead-master" aria-label="Go to Lead Master">
+      <Link className="topbar-logo sidebar-brand-logo" to="/lead-master" aria-label="Go to Lead Master">
         <img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" />
         <span>Altus <b>CRM</b></span>
       </Link>
@@ -160,7 +160,7 @@ export function AppShell() {
     <MasterSidebar currentHref={currentHref} showAdmin={showAdminNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole || location.pathname.startsWith("/admin/")} />
     <main className="main">
       <header ref={topbarRef} className="topbar topbar-without-navigation">
-        <Link className="topbar-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
+        <Link className="topbar-logo topbar-brand-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
         <div className="navbar-hover-zone" aria-hidden="true" />
         <nav id="topbar-module-links" inert={!navbarOpen} className={navbarOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation" onPointerEnter={() => navbarController.enter()} onPointerLeave={() => navbarController.leave()} onFocusCapture={(event) => navbarController.setFocusHeld((event.target as HTMLElement).matches(":focus-visible"))} onBlurCapture={() => navbarController.setFocusHeld(false)}>{topbarModules.map((module, index) => <NavLink ref={index === 0 ? firstNavigationLinkRef : undefined} key={module.id} to={module.path} aria-label={module.label} title={module.label} onPointerUp={(event) => { if (event.pointerType === "touch") navbarController.navigationSelected(); }} onClick={(event) => { if (event.detail === 0) navbarController.navigationSelected(); }}><span>{module.label}</span></NavLink>)}</nav>
         <div className="topbar-right">

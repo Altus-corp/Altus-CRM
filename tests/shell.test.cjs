@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 
 const shell = () => fs.readFileSync("src/shared/layout/app-shell.tsx", "utf8");
+const shellStyles = () => fs.readFileSync("src/shared/layout/app-shell.css", "utf8");
 
 test("shell includes debounced keyboard search states and lead navigation", () => {
   const source = shell();
@@ -22,6 +23,17 @@ test("quick-navigation chevron is rendered independently of the expanded search 
   assert.match(source, /expanded \? "navbar-search is-expanded" : "navbar-search"/);
   assert.match(source, /className="navbar-action-button topbar-module-toggle"/);
   assert.match(source, /aria-controls="topbar-module-links"/);
+});
+
+test("shell exposes exactly one responsive brand target", () => {
+  const source = shell();
+  const styles = shellStyles();
+  assert.match(source, /className="topbar-logo sidebar-brand-logo"/);
+  assert.match(source, /className="topbar-logo topbar-brand-logo"/);
+  assert.match(styles, /\.master-sidebar-brand\s*\{[\s\S]*?height:\s*var\(--topbar-h\);/);
+  assert.match(styles, /\.topbar-brand-logo\s*\{\s*display:\s*none;/);
+  assert.match(styles, /@media \(max-width: 640px\) \{ \.topbar-brand-logo \{ display: inline-flex; \}/);
+  assert.match(styles, /\.master-sidebar-brand \{ display: none; \}/);
 });
 
 test("shell keeps role-gated new lead, theme, logout, master sidebar, and admin navigation", () => {

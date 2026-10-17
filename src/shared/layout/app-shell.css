@@ -1178,7 +1178,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 .master-sidebar-brand {
   display: flex;
-  min-height: 64px;
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
   align-items: center;
   padding: 0 8px;
   border-bottom: 1px solid var(--line);
@@ -1222,7 +1223,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .master-admin-navigation .nav-group-label { padding-left: 10px; }
 .master-admin-navigation .nav-link.active::before { left: -2px; }
 .sidebar-shell > .main { grid-column: 2; grid-row: 1; }
-.topbar-without-navigation { grid-template-columns: max-content minmax(0, 1fr); }
+.topbar-brand-logo { display: none; }
+.topbar-without-navigation { grid-template-columns: minmax(0, 1fr) max-content; }
+.topbar-without-navigation .topbar-module-links { grid-column: 1; }
 .topbar-without-navigation .topbar-right { grid-column: 2; }
 
 /* Leads-only navbar actions */
@@ -1276,21 +1279,21 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 640px) {
   .sidebar-shell { --main-sidebar-w: 0px; display: block !important; height: auto; min-height: 100vh; }
   .master-sidebar { width: 100%; height: auto; min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
-  .master-sidebar-brand { min-height: 52px; }
+  .master-sidebar-brand { display: none; }
   .master-navigation { grid-template-columns: minmax(0, 1fr); padding-block: 8px 12px; }
   .sidebar-shell > .main { display: flex; }
 }
 
 /* Unified quick navigation stays within the existing topbar footprint. */
-.topbar-without-navigation { position: relative; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; height: var(--topbar-h); min-height: var(--topbar-h); }
-.topbar-without-navigation .topbar-logo { grid-column: 1; }
-.topbar-without-navigation .topbar-right { grid-column: 3; }
+.topbar-without-navigation { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) max-content; height: var(--topbar-h); min-height: var(--topbar-h); }
+.topbar-without-navigation .topbar-module-links { grid-column: 1; }
+.topbar-without-navigation .topbar-right { grid-column: 2; }
 .navbar-hover-zone { position: fixed; inset: 0 0 auto; height: 10px; z-index: 80; pointer-events: none; }
 .topbar-module-links { grid-column: 2; position: static; z-index: auto; display: flex; align-items: center; justify-content: space-evenly; min-width: 0; width: auto; height: auto; min-height: 0; margin: 0 18px; padding: 0; overflow-x: auto; overflow-y: hidden; opacity: 0; visibility: hidden; pointer-events: none; background: transparent; border: 0; box-shadow: none; transform: translateY(-6px); transition: transform 240ms ease, opacity 240ms ease, visibility 0s linear 240ms; scrollbar-width: thin; }
 .topbar-module-links.is-open { max-width: none; opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
 .topbar-module-links a { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 8px 11px; }
 @media (prefers-reduced-motion: reduce) { .topbar-module-links { transition: none; } }
-@media (max-width: 640px) { .topbar-without-navigation { padding-inline: 12px; gap: 6px; } .topbar-module-links { justify-content: flex-start; margin-inline: 4px; gap: 4px; } .topbar-module-links a { min-width: max-content; padding-inline: 10px; } }
+@media (max-width: 640px) { .topbar-brand-logo { display: inline-flex; } .topbar-without-navigation { grid-template-columns: max-content minmax(0, 1fr) max-content; padding-inline: 12px; gap: 6px; } .topbar-without-navigation .topbar-brand-logo { grid-column: 1; } .topbar-without-navigation .topbar-module-links { grid-column: 2; } .topbar-without-navigation .topbar-right { grid-column: 3; } .topbar-module-links { justify-content: flex-start; margin-inline: 4px; gap: 4px; } .topbar-module-links a { min-width: max-content; padding-inline: 10px; } }
 
 .topbar-module-links a.active { background: var(--red-tint); color: var(--red); }
 .topbar-module-links a:hover { background: var(--bg-2); color: var(--ink); }
