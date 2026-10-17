@@ -24,6 +24,9 @@ const PasswordReset = require("./password-reset.cjs");
 const Integrations = require("./integrations.cjs");
 const LeadFields = require("./lead-fields.cjs");
 const LEAD_TABLE_COLUMN_KEYS = new Set([...require("../shared/lead-inline-columns.json").map((column) => column.key), "lead_status"]);
+const CORE_INLINE_EDITABLE_FIELDS = new Map([...INLINE_EDITABLE_FIELDS].filter(([, field]) => field.storage.kind === "column"));
+CORE_INLINE_EDITABLE_FIELDS.set("calling_resolution", INLINE_COLUMNS.get("calling_resolution"));
+const DEFAULT_MANAGED_LEAD_FIELD_KEYS = new Set(LeadFields.DEFAULT_FIELDS.map((field) => field.key));
 
 const PORT = Number(process.env.CRM_PORT || 4321);
 const HOST = process.env.CRM_HOST || "127.0.0.1";
@@ -104,10 +107,11 @@ function invalidLeadsQuery(res) {
 // Lead ownership is enforced on the server.  Hiding rows in the browser is not
 // sufficient because a user could otherwise request another lead directly.
 function canAccessAllLeads(actor) {
-  return ["owner", "admin", "super admin"].includes(String(actor?.role || "").trim().toLowerCase());
+  return ["owner", "admin", "super admin", "viewer"].includes(String(actor?.role || "").trim().toLowerCase());
 }
 function leadAccessPredicate(actor, bind, column = "l.owner_user_id") {
-  return canAccessAllLeads(actor) ? null : `${column} = ${bind(actor.id)}`;
+  if (!actor || canAccessAllLeads(actor)) return null;
+  return `${column} = ${bind(actor.id)}`;
 }
 async function canAccessLead(db, actor, id) {
   if (canAccessAllLeads(actor)) return Boolean((await db.query("SELECT id FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0]);
@@ -365,8 +369,27 @@ async function leadsList(req, res, db, url, actor) {
   return json(res, 200, { items: rows.rows.map(materializeLead), page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
 }
 
+async function addLeadActivityDisplayNames(db, lead, collections) {
+  const ids = new Set([lead?.owner_user_id]);
+  for (const item of collections.history || []) { ids.add(item.actor_id); ids.add(item.to_value); }
+  for (const item of collections.calls || []) { ids.add(item.user_id); ids.add(item.created_by); }
+  for (const item of collections.followups || []) { ids.add(item.assigned_to); ids.add(item.created_by); }
+  for (const item of collections.notes || []) ids.add(item.created_by);
+  const userIds = [...ids].filter((value) => typeof value === "string" && value.trim());
+  const result = userIds.length ? await db.query("SELECT id,name FROM users WHERE id=ANY($1::text[])", [userIds]) : { rows: [] };
+  const names = new Map(result.rows.map((row) => [String(row.id), String(row.name || "").trim()]).filter(([, name]) => name));
+  const nameFor = (value) => value == null || value === "" ? null : names.get(String(value)) || String(value);
+  return {
+    lead: { ...lead, owner_name: nameFor(lead?.owner_user_id) },
+    history: (collections.history || []).map((item) => ({ ...item, actor_name: nameFor(item.actor_id), to_name: nameFor(item.to_value) })),
+    calls: (collections.calls || []).map((item) => ({ ...item, caller_name: nameFor(item.user_id || item.created_by) })),
+    followups: (collections.followups || []).map((item) => ({ ...item, assigned_to_name: nameFor(item.assigned_to), creator_name: nameFor(item.created_by) })),
+    messages: collections.messages || [],
+    notes: (collections.notes || []).map((item) => ({ ...item, author_name: nameFor(item.created_by) })),
+  };
+}
+
 async function leadDetail(req, res, db, id, actor = null) {
-  if (!actor || !(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   if (actor?.id) {
     try {
       await db.query("UPDATE leads SET last_opened_at=now(),last_opened_by=$2 WHERE id=$1 AND (last_opened_at IS NULL OR last_opened_at < now() - interval '5 minutes')", [id, actor.id]);
@@ -377,16 +400,17 @@ async function leadDetail(req, res, db, id, actor = null) {
     }
   }
   const lead = (await db.query("SELECT * FROM leads WHERE id = $1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0];
-  if (!lead) return json(res, 404, { error: "Lead not found." });
+  if (!lead || (actor && !canAccessAllLeads(actor) && lead.owner_user_id !== actor.id)) return json(res, 404, { error: "Lead not found." });
   const [calls, followups, history, messages, notes, products] = await Promise.all([
     db.query("SELECT * FROM lead_calls WHERE lead_id = $1 ORDER BY happened_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_followups WHERE lead_id = $1 ORDER BY due_at ASC NULLS LAST, id ASC", [id]),
     db.query("SELECT * FROM lead_history WHERE lead_id = $1 ORDER BY occurred_at DESC NULLS LAST, id DESC", [id]),
     db.query("SELECT * FROM lead_messages WHERE lead_id = $1 ORDER BY sent_at DESC NULLS LAST, id DESC", [id]),
-    db.query("SELECT n.*, u.name AS author_name FROM lead_notes n LEFT JOIN users u ON u.id = n.created_by WHERE n.lead_id = $1 ORDER BY n.created_at DESC NULLS LAST, n.id DESC", [id]),
+    db.query("SELECT n.*,COALESCE(o.label,n.activity_type_label) AS activity_type_display_label FROM lead_notes n LEFT JOIN dropdown_options o ON o.id=n.activity_type_option_id WHERE n.lead_id = $1 ORDER BY n.created_at DESC NULLS LAST, n.id DESC", [id]),
     db.query("SELECT * FROM lead_products WHERE lead_id = $1 ORDER BY product_code ASC, id ASC", [id]),
   ]);
-  return json(res, 200, { lead: materializeLead(lead), calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, notes: notes.rows, products: products.rows });
+  const named = await addLeadActivityDisplayNames(db, lead, { calls: calls.rows, followups: followups.rows, history: history.rows, messages: messages.rows, notes: notes.rows });
+  return json(res, 200, { lead: materializeLead(named.lead), calls: named.calls, followups: named.followups, history: named.history, messages: named.messages, notes: named.notes, products: products.rows });
 }
 
 function activityPage(url) {
@@ -406,8 +430,9 @@ function activityDate(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-async function activityList(res, db, actor, id, kind, url) {
-  if (!(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
+async function activityList(res, db, actorOrId, idOrKind, kindOrUrl, maybeUrl) {
+  const [actor, id, kind, url] = maybeUrl ? [actorOrId, idOrKind, kindOrUrl, maybeUrl] : [null, actorOrId, idOrKind, kindOrUrl];
+  if (actor && !(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const { page, pageSize, offset } = activityPage(url);
   const definitions = {
     history: {
@@ -443,8 +468,13 @@ async function addLeadNote(req, res, db, actor, id) {
   const body = await readJson(req); const note = activityText(body.body);
   if (!note) return json(res, 400, { error: "Note body is required." });
   if (!(await activityLeadExists(db, actor, id))) return json(res, 404, { error: "Lead not found." });
+  let activityType = null;
+  if (body.activity_type_option_id !== undefined && body.activity_type_option_id !== null) {
+    try { activityType = await Dropdowns.assertSelectableOptionId(db, "activity_type", body.activity_type_option_id); }
+    catch (error) { return json(res, error.status || 400, { error: error.message || "The selected activity type is unavailable." }); }
+  }
   const noteId = `lead-note-${crypto.randomUUID()}`;
-  await db.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by) VALUES($1,$2,$3,'manual',$4)", [noteId, id, note, actor.id]);
+  await db.query("INSERT INTO lead_notes(id,lead_id,body,note_type,created_by,activity_type_option_id,activity_type_label) VALUES($1,$2,$3,'manual',$4,$5,$6)", [noteId, id, note, actor.id, activityType?.id || null, activityType?.label || null]);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.note_created", entityType: "lead", entityId: id, newValue: "manual_note", ip: req.socket.remoteAddress });
   return json(res, 201, { id: noteId });
 }
@@ -479,7 +509,6 @@ async function addLeadFollowup(req, res, db, actor, id) {
 async function rescheduleLeadFollowup(req, res, db, actor, id, followupId) {
   const body = await readJson(req); const dueAt = activityDate(body.due_at || body.dueAt);
   if (!dueAt) return json(res, 400, { error: "A valid due date is required." });
-  if (!(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const current = (await db.query("SELECT id,due_at FROM lead_followups WHERE id=$1 AND lead_id=$2", [followupId, id])).rows[0];
   if (!current) return json(res, 404, { error: "Follow-up not found." });
   await transaction(db, async (tx) => { await tx.query("UPDATE lead_followups SET due_at=$1,status='rescheduled' WHERE id=$2", [dueAt, followupId]); await tx.query("INSERT INTO lead_followup_events(id,followup_id,old_due_at,new_due_at,changed_by) VALUES($1,$2,$3,$4,$5)", [`followup-event-${crypto.randomUUID()}`, followupId, current.due_at, dueAt, actor.id]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.followup_rescheduled", entityType: "lead", entityId: id, newValue: "followup_rescheduled", ip: req.socket.remoteAddress }); });
@@ -487,7 +516,6 @@ async function rescheduleLeadFollowup(req, res, db, actor, id, followupId) {
 }
 
 async function completeLeadFollowup(req, res, db, actor, id, followupId) {
-  if (!(await canAccessLead(db, actor, id))) return json(res, 404, { error: "Lead not found." });
   const result = await db.query("UPDATE lead_followups SET status='done',completed_at=now() WHERE id=$1 AND lead_id=$2 RETURNING id", [followupId, id]);
   if (!result.rows[0]) return json(res, 404, { error: "Follow-up not found." });
   await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_completed", entityType: "lead", entityId: id, newValue: "followup_completed", ip: req.socket.remoteAddress });
@@ -534,7 +562,8 @@ async function createLead(req, res, db, actor) {
   try { body = await readJson(req); } catch { return invalidLead(res); }
   if (body.permission && body.permission !== "Pending" && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
   const fields = leadFields(body); if (!fields || !(await validDropdownValue(db, "lead_type", fields.lead_type)) || !(await validDropdownValue(db, "lead_stage", fields.stage)) || !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res);
-  fields.custom_values = LeadFields.mergeLeadValues(fields.custom_values, body.lead_fields, await LeadFields.getDefinitions(db));
+  try { fields.custom_values = LeadFields.mergeActiveLeadValues(fields.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); }
+  catch (error) { return json(res, error.status || 400, { error: error.message || "Invalid lead field." }); }
   const duplicates = await findLeadDuplicates(db, fields.phone, fields.email);
   if (duplicates.length && body.duplicate_action !== "merge") return duplicateLeadError(res);
   let products;
@@ -563,8 +592,11 @@ function inlineDate(value, dateTime = false) { if (value == null || value === ""
 function resolutionAllowedForProducts(value, productCodes, activeResolutionsByProduct) { return value != null && value !== "" && productCodes.some((code) => (activeResolutionsByProduct[code] || []).some((label) => label === String(value))); }
 async function updateInlineLeadField(req, res, db, actor, id, body) {
   const requested = String(body.field || "");
-  const configuredField = (await LeadFields.getDefinitions(db)).find((field) => field.key === requested && field.active);
-  const definition = INLINE_EDITABLE_FIELDS.get(requested) || (configuredField ? { ...configuredField, input: configuredField.type === "boolean" ? "boolean" : configuredField.type === "date" ? "date" : configuredField.type === "dropdown" ? "dropdown" : "text", editable: true, storage: { kind: "custom", key: configuredField.key } } : null);
+  const definitions = await LeadFields.getDefinitions(db);
+  const configuredField = definitions.find((field) => field.key === requested && field.active);
+  const isManagedField = requested !== "calling_resolution" && (DEFAULT_MANAGED_LEAD_FIELD_KEYS.has(requested) || definitions.some((field) => field.key === requested));
+  if (isManagedField && !configuredField) return json(res, 400, { error: `Lead field "${requested}" is inactive or no longer exists.` });
+  const definition = configuredField ? { ...configuredField, input: configuredField.type === "boolean" ? "boolean" : configuredField.type === "date" ? "date" : configuredField.type === "dropdown" ? "dropdown" : "text", editable: true, storage: { kind: "custom", key: configuredField.key } } : CORE_INLINE_EDITABLE_FIELDS.get(requested);
   if (!definition) return json(res, 400, { error: "This lead field is not editable." });
   const canonical = definition.aliasOf ? INLINE_COLUMNS.get(definition.aliasOf) || definition : definition;
   const current = canAccessAllLeads(actor)
@@ -574,7 +606,7 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
   if (canonical.storage.kind === "column" && canonical.storage.key === "permission" && body.value !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." });
   let value = body.value;
   try {
-    if (configuredField && requested === "calling_resolution") {
+    if (requested === "calling_resolution") {
       value = inlineText(value, 200);
     } else if (configuredField) {
       const normalized = LeadFields.normalizeValues({ [requested]: value }, [configuredField], { allowEmpty: true });
@@ -589,9 +621,9 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
     else value = inlineText(value);
     if (requested === "calling_resolution" && value != null) {
       const proposed = String(current.custom_values?.lead_fields?.proposed_solution ?? current.custom_values?.proposed_solution ?? "");
-      const proposedProducts = proposed.split(/[,;|]/).map((item) => item.trim()).filter(Boolean);
+      const proposedProducts = proposed.split(/[,;|]/).map((item) => item.trim().toLowerCase()).filter(Boolean);
       if (!proposedProducts.length) throw Object.assign(new Error("Select the lead's Proposed Solution product before choosing a call resolution."), { status: 400 });
-      const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [proposedProducts]);
+      const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (lower(btrim(code)) = ANY($1::text[]) OR lower(btrim(label)) = ANY($1::text[]))", [proposedProducts]);
       if (!available.rows.length) throw Object.assign(new Error("The Proposed Solution product is no longer active."), { status: 400 });
       const productCodes = available.rows.map((row) => String(row.code || row.label));
       const allowed = await db.query("SELECT m.code,r.label FROM product_call_resolutions r JOIN master_values m ON m.id=r.product_id WHERE r.active=true AND r.label=$1 AND m.code = ANY($2::text[])", [value, productCodes]);
@@ -1172,7 +1204,7 @@ async function route(req, res, db) {
   }
   if (url.pathname === "/api/leads/import/template" && req.method === "GET") {
     if (!requireCapability("leads.import", user)) return json(res, 403, { error: "You do not have permission to import leads." });
-    try { const format = url.searchParams.get("format") || "xlsx"; const file = await LeadImport.template(format, await LeadFields.getDefinitions(db)); res.writeHead(200, { "Content-Type": file.contentType, "Content-Disposition": `attachment; filename="${file.filename}"`, "Cache-Control": "no-store" }); return res.end(file.body); }
+    try { const format = url.searchParams.get("format") || "xlsx"; const file = await LeadImport.template(format); res.writeHead(200, { "Content-Type": file.contentType, "Content-Disposition": `attachment; filename="${file.filename}"`, "Cache-Control": "no-store" }); return res.end(file.body); }
     catch (error) { return json(res, error.status || 500, { error: error.status ? error.message : "Unable to create the lead template." }); }
   }
   if (url.pathname === "/api/leads/import/apply" && req.method === "POST") {
@@ -1186,9 +1218,17 @@ async function route(req, res, db) {
   const roundRobinMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/round-robin$/);
   if (roundRobinMatch && req.method === "POST") { if (!requireCapability("leads.assign", user)) return json(res, 403, { error: "You do not have permission to assign leads." }); return reassignLeadRoundRobin(req, res, db, user, decodeURIComponent(roundRobinMatch[1])); }
   const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);
-  if (leadWriteMatch && req.method === "POST") { const id = decodeURIComponent(leadWriteMatch[1]); if (!(await canAccessLead(db, user, id))) return json(res, 404, { error: "Lead not found." }); if (leadWriteMatch[2] === "permission") { if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." }); return changeLeadPermission(req, res, db, user, id); } if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id); }
+  if (leadWriteMatch && req.method === "POST") {
+    const id = decodeURIComponent(leadWriteMatch[1]);
+    if (leadWriteMatch[2] === "permission") {
+      if (!requireCapability("leads.permission", user)) return json(res, 403, { error: "You do not have permission to change permission." });
+      return changeLeadPermission(req, res, db, user, id);
+    }
+    if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." });
+    return leadWriteMatch[2] === "stage" ? changeLeadStage(req, res, db, user, id) : updateLeadProducts(req, res, db, user, id);
+  }
   const leadUpdateMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
-  if (leadUpdateMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const id = decodeURIComponent(leadUpdateMatch[1]); const body = await readJson(req); if (body.field !== undefined) return updateInlineLeadField(req, res, db, user, id, body); return updateLead(req, res, db, user, id, body); }
+  if (leadUpdateMatch && ["PATCH", "PUT"].includes(req.method)) { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const id = decodeURIComponent(leadUpdateMatch[1]); const body = await readJson(req); if (body.field !== undefined) return updateInlineLeadField(req, res, db, user, id, body); try { return await updateLead(req, res, db, user, id, body); } catch (error) { return json(res, error.status || 400, { error: error.message || "Invalid lead field." }); } }
   const leadMatch = url.pathname.match(/^\/api\/leads\/([^/]+)$/);
   if (leadMatch && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
@@ -1241,4 +1281,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, resolutionAllowedForProducts };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, assignLeadRoundRobin, resolutionAllowedForProducts };

@@ -1,39 +1,47 @@
-import { ADDITIONAL_LEAD_FIELDS, ActivityKind, EMPTY_LEAD_FORM, fieldValue, isQuickFilterDateField, LEAD_COLUMNS, SYSTEM_LEAD_FIELDS, useLeadsScreen, VIEW_FIELDS, type LeadFormState, type LeadColumn, type Lead } from "./function";
+import { ADDITIONAL_LEAD_FIELDS, ActivityKind, EMPTY_LEAD_FORM, fieldValue, isQuickFilterDateField, LEAD_COLUMNS, LEAD_ROW_DROP_LIMIT, leadIdsForResolutionDrop, planResolutionDrop, SYSTEM_LEAD_FIELDS, useLeadsScreen, type LeadFormState, type LeadColumn, type Lead } from "./function";
 import { useAuth } from "../../shared/auth/auth";
 import { usePermission } from "../../shared/auth/permissions";
 import { api } from "../../shared/api/client";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronsUpDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ChevronsUpDown, ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { DropdownSelect } from "../../shared/dropdowns/component";
 import { useRegisterLeadNavbarActions } from "../../shared/layout/lead-navbar-actions";
 import { useResizableColumns } from "../../shared/tables/use-resizable-columns";
+import { BUILT_IN_TABLE_COLUMN_KEYS, callResolutionOptionsForProposedSolution, canonicalManagedFieldKey, isInlineTableSelectField, keepAllowedColumnOrder, legacyLeadColumnForAdminField, mergeCoreAndConfiguredTableColumns, reconcileColumnLayout, resolutionProductCodesForProposedSolution } from "./inline-field-policy";
 import "./leads.css";
 
 const LEADS_COLUMN_PREFERENCE_KEY = "leads.columns.v1";
+const LEADS_COLUMN_KNOWN_PREFERENCE_KEY = "leads.columns.known.v1";
 const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
 const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 72;
 const LEAD_TABLE_WIDTH_DEFAULTS: Record<string, number> = { leadNo: 110, leadTypeCode: 150, name: 180, company: 180, cellNo: 135, designation: 160, businessCategory: 170, leadSource: 150, rating: 110, permission: 135, lead_status: 140 };
+const CORE_TABLE_COLUMN_KEYS = new Set(["leadNo", "leadTypeCode", "name", "cellNo", "permission", "created_at", "updated_at", "last_opened_at"]);
+const CORE_TABLE_DATA_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", cellNo: "phone", permission: "permission", stage: "stage", owner: "owner", created_at: "created_at", updated_at: "updated_at", last_opened_at: "last_opened_at" };
 const LEAD_SORT_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", first_name: "first_name", last_name: "last_name", company: "company", cellNo: "cell_no", email: "email", designation: "designation", businessCategory: "business_category", business_category: "business_category", leadSource: "lead_source", rating: "rating", permission: "permission", lastCalledOn: "last_call_at", last_called_on: "last_call_at", lead_acquisition_date: "lead_acquisition_date", nature_of_business: "nature_of_business", proposed_solution: "proposed_solution", invite_sent_by_introducer: "invite_sent_by_introducer", invite_date_sent: "invite_date_sent", introducer_call_done: "introducer_call_done", introducer_call_date: "introducer_call_date", introducer_feedback: "introducer_feedback", introducer_name: "introducer_name", employee_name: "employee_name", association_network_name: "association_network_name", chapter_name: "chapter_name", calling_resolution: "calling_resolution", next_call_on: "next_call_on", calling_remarks: "calling_remarks", intro_video_sent: "intro_video_sent", email_sent: "email_sent", whatsapp_message_sent: "whatsapp_message_sent", extra_notes: "extra_notes", created_at: "created_at", updated_at: "updated_at", city: "city", sourceSystem: "source_system", leadAcquiredDate: "lead_acquisition_date", natureOfBusiness: "nature_of_business", service: "service", owner: "owner", callingResolution: "calling_resolution", priority: "priority", callingRemarks: "calling_remarks", psoDate: "pso_date", registrationTime: "registration_time", approvalStatus: "approval_status", zoomOrPhysical: "zoom_or_physical", confirmationCallStatus: "confirmation_call_status", zoomLinkSent: "zoom_link_sent", attendanceStatus: "attendance_status", salesFollowUpBy: "sales_follow_up_by", salesResolution: "sales_resolution", cameraOn: "camera_on", photoTaken: "photo_taken", salesNotes: "sales_notes", leftHalfway: "left_halfway", nextFollowUpAt: "next_follow_up_at", totalPayable: "total_payable", amountPaid: "amount_paid", balanceReceivable: "balance_receivable", targetDate: "target_date" };
-function columnStorageKey(userId: string) { return `${LEADS_COLUMN_PREFERENCE_KEY}:${userId}`; }
-function readStoredColumns(userId: string | undefined): unknown {
-  if (!userId) return null;
-  try { const value = JSON.parse(window.localStorage.getItem(columnStorageKey(userId)) || "null"); return Array.isArray(value) ? value : null; } catch { return null; }
+function columnStorageKey(preferenceKey: string, userId: string) { return `${preferenceKey}:${userId}`; }
+function readStoredColumnKeys(preferenceKey: string, userId: string | undefined): string[] {
+  if (!userId) return [];
+  try { const value = JSON.parse(window.localStorage.getItem(columnStorageKey(preferenceKey, userId)) || "null"); return Array.isArray(value) ? value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)) : []; } catch { return []; }
 }
-function writeStoredColumns(userId: string | undefined, keys: string[]) {
+function readStoredColumns(userId: string | undefined): string[] { return readStoredColumnKeys(LEADS_COLUMN_PREFERENCE_KEY, userId); }
+function readStoredKnownColumns(userId: string | undefined): string[] { return readStoredColumnKeys(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId); }
+function writeStoredColumnKeys(preferenceKey: string, userId: string | undefined, keys: string[]) {
   if (!userId) return;
-  try { window.localStorage.setItem(columnStorageKey(userId), JSON.stringify(keys)); } catch { /* localStorage is optional */ }
+  try { window.localStorage.setItem(columnStorageKey(preferenceKey, userId), JSON.stringify(keys)); } catch { /* localStorage is optional */ }
 }
+function writeStoredColumns(userId: string | undefined, keys: string[]) { writeStoredColumnKeys(LEADS_COLUMN_PREFERENCE_KEY, userId, keys); }
+function writeStoredKnownColumns(userId: string | undefined, keys: string[]) { writeStoredColumnKeys(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId, keys); }
 function clearStoredColumns(userId: string | undefined) {
   if (!userId) return;
-  try { window.localStorage.removeItem(columnStorageKey(userId)); } catch { /* localStorage is optional */ }
+  try { window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_PREFERENCE_KEY, userId)); window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId)); } catch { /* localStorage is optional */ }
 }
 function normalizeColumnKeys(value: unknown, fields: readonly { key: string }[], defaults: readonly string[]) {
   const valid = new Set(fields.map((field) => field.key));
-  const seen = new Set<string>();
-  const saved = Array.isArray(value) ? value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key) && valid.has(key) && !seen.has(key) && (seen.add(key), true)) : [];
+  const saved = Array.isArray(value) ? keepAllowedColumnOrder(value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)), valid) : [];
   const fallback = saved.length ? saved : defaults.filter((key) => valid.has(key));
   if (valid.has("leadNo") && !fallback.includes("leadNo")) return ["leadNo", ...fallback];
   return [...new Set(fallback)];
@@ -58,17 +66,42 @@ function SortableLeadHeader({ label, sortKey, sortBy, sortDir, onSort, headerPro
 }
 
 function LeadTableHeader({ fields, renderFieldHeader, selectAll, statusHeader }: { fields: LeadColumn[]; renderFieldHeader: (field: LeadColumn) => React.ReactNode; selectAll: React.ReactNode; statusHeader: React.ReactNode }) {
-  return <thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">{selectAll}</label></th>{fields.map(renderFieldHeader)}{statusHeader}</tr></thead>;
+  return <thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">{selectAll}</label></th>{fields.map(renderFieldHeader)}{statusHeader}{/* <th scope="col">Status</th> */}</tr></thead>;
 }
 
-function LeadTableRow({ lead, fields, isSelected, onOpen, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, onDragStart, onDragEnd }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; onDragStart: (event: React.DragEvent<HTMLButtonElement>, lead: Lead) => void; onDragEnd: () => void }) {
-  return <tr tabIndex={0} className={isSelected ? "is-selected" : undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}</td>{fields.map((field) => <td key={field.key}>{renderField(lead, field)}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
+const ROW_DRAG_INTERACTIVE_SELECTOR = "input, button, a, select, textarea, [contenteditable], [role='button'], [role='combobox'], [role='listbox'], [data-lead-row-no-drag]";
+
+export function isLeadRowDragInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(ROW_DRAG_INTERACTIVE_SELECTOR));
+}
+
+function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, onDragStart: startDrag, onDragEnd: endDrag }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; moving: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; onDragStart: (event: React.DragEvent<HTMLElement>, lead: Lead) => void; onDragEnd: () => void }) {
+  const [hasFinePointer, setHasFinePointer] = useState(false);
+  const suppressClickRef = useRef(false);
+  useEffect(() => { const media = window.matchMedia("(pointer: fine)"); const sync = () => setHasFinePointer(media.matches); sync(); media.addEventListener("change", sync); return () => media.removeEventListener("change", sync); }, []);
+  const canRowDrag = canDrag && hasFinePointer;
+  const rowClassName = `${isSelected ? "is-selected " : ""}${moving ? "is-moving " : ""}${canRowDrag ? "is-row-draggable" : ""}`.trim() || undefined;
+  const onOpen = () => { if (!suppressClickRef.current) openLead(); };
+  const onDragStart = (event: React.DragEvent<HTMLElement>, _lead?: Lead) => { suppressClickRef.current = true; startDrag(event, lead); };
+  const onDragEnd = () => { endDrag(); window.setTimeout(() => { suppressClickRef.current = false; }, 0); };
+  const onRowPointerDown = () => { suppressClickRef.current = false; };
+  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => { event.stopPropagation(); onDragStart(event, lead); }} onDragEnd={(event) => { event.stopPropagation(); onDragEnd(); }}><GripVertical size={14} aria-hidden="true" /></button>}</td>{fields.map((field) => <td key={field.key} data-lead-row-no-drag={field.input === "dropdown" || field.input === "boolean" ? "true" : undefined}>{renderField(lead, field)}</td>)}<td data-lead-row-no-drag="true" onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "\u2014"}</option>)}</select></td></tr>;
+  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}</td>{fields.map((field) => <td key={field.key}>{renderField(lead, field)}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
 }
 
 function displayField(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
+}
+
+function displayConfiguredLeadValue(value: unknown, type: import("./function").ConfiguredLeadField["type"]) {
+  if (type !== "date" || value == null || value === "") return displayField(value);
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return displayField(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function formatSystemDate(value: unknown) {
@@ -400,16 +433,17 @@ function VerticalDotsIcon() {
   );
 }
 
-const ADMIN_ACTIVITY_TYPES = [
-  { id: "call", label: "Phone call", icon: CallIcon, placeholder: "Interested in a product walkthrough next week. Asked to share the proposal before the demo." },
-  { id: "meeting", label: "Meeting / Demo", icon: CalendarIcon, placeholder: "Met with client team. Discussed requirements, timeline, and next steps." },
-  { id: "email", label: "Email follow-up", icon: EmailIcon, placeholder: "Sent follow-up email with product deck and case studies." },
-  { id: "whatsapp", label: "WhatsApp message", icon: WhatsAppIcon, placeholder: "Sent WhatsApp message with Productivity Shastra overview." },
-  { id: "site_visit", label: "Site visit", icon: BuildingIcon, placeholder: "Conducted on-site inspection and met operational managers." },
-  { id: "proposal", label: "Proposal review", icon: NoteIcon, placeholder: "Shared revised commercial proposal with pricing breakdown." },
-  { id: "walkthrough", label: "Product walkthrough", icon: GlobeIcon, placeholder: "Walked client through core platform modules and answered questions." },
-  { id: "note", label: "Internal note", icon: HandoffIcon, placeholder: "Internal coordination note for sales and delivery team." },
-];
+const ACTIVITY_TYPE_PRESENTATION: Record<string, { icon: React.ComponentType<{ color?: string }>; placeholder: string }> = {
+  phone_call: { icon: CallIcon, placeholder: "Interested in a product walkthrough next week. Asked to share the proposal before the demo." },
+  meeting_demo: { icon: CalendarIcon, placeholder: "Met with client team. Discussed requirements, timeline, and next steps." },
+  email_follow_up: { icon: EmailIcon, placeholder: "Sent follow-up email with product deck and case studies." },
+  whatsapp_message: { icon: WhatsAppIcon, placeholder: "Sent WhatsApp message with Productivity Shastra overview." },
+  site_visit: { icon: BuildingIcon, placeholder: "Conducted on-site inspection and met operational managers." },
+  proposal_review: { icon: NoteIcon, placeholder: "Shared revised commercial proposal with pricing breakdown." },
+  product_walkthrough: { icon: GlobeIcon, placeholder: "Walked client through core platform modules and answered questions." },
+  internal_note: { icon: HandoffIcon, placeholder: "Internal coordination note for sales and delivery team." },
+};
+const DEFAULT_ACTIVITY_TYPE_PRESENTATION = { icon: NoteIcon, placeholder: "Add activity details." };
 
 type LeadDetailTab = "activity" | "details" | "notes" | "follow-up";
 
@@ -462,15 +496,15 @@ type TimelineEntry = { id: string; date: string | null; title: string; subtitle:
 function LeadTimeline({ detail, leadName, ownerName }: { detail: any; leadName: string; ownerName: string }) {
   const entries: TimelineEntry[] = [
     ...(detail.followups || []).map((item: any) => ({ id: `followup-${item.id}`, date: item.created_at || item.due_at, title: item.status === "done" ? "Follow-up completed" : "Follow-up scheduled", subtitle: item.due_at ? new Date(item.due_at).toLocaleString() : "Follow-up", body: item.note || "No follow-up note.", kind: "followup" as const, badge: item.status === "done" ? "Completed" : "Upcoming" })),
-    ...(detail.notes || []).map((item: any) => ({ id: `note-${item.id}`, date: item.created_at, title: `Note added by ${item.author_name || ownerName}`, subtitle: item.created_at ? new Date(item.created_at).toLocaleString() : "Note", body: item.body || "No note body.", kind: "note" as const })),
+    ...(detail.notes || []).map((item: any) => ({ id: `note-${item.id}`, date: item.created_at, title: item.activity_type_display_label || item.activity_type_label || `Note added by ${item.author_name || ownerName}`, subtitle: item.created_at ? new Date(item.created_at).toLocaleString() : "Note", body: item.body || "No note body.", kind: "note" as const })),
     ...(detail.calls || []).map((item: any) => ({ id: `call-${item.id}`, date: item.happened_at, title: `${item.caller_name || ownerName} called ${leadName}`, subtitle: `${item.happened_at ? new Date(item.happened_at).toLocaleString() : "Call"}${item.duration_seconds != null ? ` · ${Math.floor(Number(item.duration_seconds) / 60)}:${String(Number(item.duration_seconds) % 60).padStart(2, "0")} min` : ""}`, body: [item.resolution ? `Outcome: ${item.resolution}` : "", item.note || ""].filter(Boolean).join(" · ") || "Call activity recorded.", kind: "call" as const, badge: item.resolution === "Connected" ? "Connected" : undefined })),
     ...(detail.messages || []).map((item: any) => ({ id: `message-${item.id}`, date: item.sent_at, title: `${item.channel || "Message"} message sent`, subtitle: item.sent_at ? new Date(item.sent_at).toLocaleString() : "Message", body: item.body || "Message activity recorded.", kind: "message" as const })),
-    ...(detail.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action))).map((item: any) => ({ id: `history-${item.id}`, date: item.occurred_at, title: item.action === "lead.round_robin_assigned" ? (item.note || `Lead round-robined to ${item.to_value || "an owner"}.`) : `Lead manually assigned to ${item.to_value || "an owner"}`, subtitle: item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "Assignment recorded", body: "", kind: "assignment" as const, badge: "Assigned" })),
+    ...(detail.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action))).map((item: any) => ({ id: `history-${item.id}`, date: item.occurred_at, title: item.action === "lead.round_robin_assigned" ? (item.note || `Lead round-robined to ${item.to_name || item.to_value || "an owner"}.`) : `Lead manually assigned to ${item.to_name || item.to_value || "an owner"}`, subtitle: item.occurred_at ? new Date(item.occurred_at).toLocaleString() : "Assignment recorded", body: "", kind: "assignment" as const, badge: "Assigned" })),
   ].sort((left, right) => new Date(String(right.date || 0)).getTime() - new Date(String(left.date || 0)).getTime());
   return <div className="lead-timeline-container" aria-label="Lead timeline"><div className="lead-timeline-rail" />{entries.length === 0 ? <p className="lead-activity-empty">No activity recorded for this lead yet.</p> : entries.map((item, index) => <div className="lead-timeline-item" key={item.id}><div className={`lead-timeline-node ${item.kind === "message" ? "green-node" : "red-node"}`} aria-hidden="true">{item.kind === "followup" ? <CalendarIcon /> : item.kind === "note" ? <NoteIcon /> : item.kind === "message" ? <WhatsAppIcon /> : item.kind === "call" ? <CallIcon /> : <UserIcon />}</div><div className={`lead-timeline-card ${index === 0 ? "card-highlight" : ""}`}><div className="lead-timeline-card-main"><h4 className="lead-timeline-title">{item.title}</h4><span className="lead-timeline-subtitle">{item.subtitle}</span>{item.body && <p className="lead-timeline-desc">{item.body}</p>}</div>{item.badge && <span className={`lead-timeline-pill ${item.badge === "Upcoming" ? "badge-upcoming" : item.badge === "Connected" ? "badge-connected" : item.badge === "Assigned" ? "badge-assigned" : "badge-latest"}`}>{item.badge}</span>}</div></div>)}</div>;
 }
 
-function LeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel, leadFields, saving = false, error = "", success = "" }: { form: LeadFormState; setForm: React.Dispatch<React.SetStateAction<LeadFormState>>; errors: Record<string, string>; onSubmit: (event: React.FormEvent) => void; onCancel?: () => void; submitLabel: string; leadFields: import("./function").ConfiguredLeadField[]; saving?: boolean; error?: string; success?: string }) {
+function LegacyLeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel, leadFields, saving = false, error = "", success = "" }: { form: LeadFormState; setForm: React.Dispatch<React.SetStateAction<LeadFormState>>; errors: Record<string, string>; onSubmit: (event: React.FormEvent) => void; onCancel?: () => void; submitLabel: string; leadFields: import("./function").ConfiguredLeadField[]; saving?: boolean; error?: string; success?: string }) {
   const configuredByKey = new Map(leadFields.filter((field) => field.active).map((field) => [field.key, field]));
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const dropdown = (key: string, label: string, required = false) => { const field = configuredByKey.get(key); return <label className="lead-form-field"><span>{label}{required && <b> *</b>}</span><select className="lead-control" required={required} value={form[key] || ""} onChange={(event) => update(key, event.target.value)}><option value="">Select {label}</option>{(field?.options || []).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>; };
@@ -487,6 +521,28 @@ function LeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel, lead
     <section className="lead-form-section"><h3>Outreach tracking</h3><div className="lead-form-grid">{yesNo("intro_video_sent", "2 Mins Intro Video Sent")} {yesNo("email_sent", "Email Sent")} {yesNo("whatsapp_message_sent", "Msg Sent on WhatsApp")}</div></section>
     <section className="lead-form-section"><h3>Other</h3><div className="lead-form-grid">{area("extra_notes", "Extra Notes")}</div></section>
     {additionalFields.length > 0 && <section className="lead-form-section"><h3>Additional details</h3><div className="lead-form-grid">{additionalFields.map((field) => field.type === "dropdown" ? <span key={field.key}>{dropdown(field.key, field.label)}</span> : field.type === "boolean" ? <label className="lead-form-field" key={field.key}><span>{field.label}</span><select className="lead-control" value={form[field.key] || ""} onChange={(event) => update(field.key, event.target.value)}><option value="">Select</option><option value="Yes">Yes</option><option value="No">No</option></select></label> : field.type === "textarea" ? <span key={field.key}>{area(field.key, field.label)}</span> : <span key={field.key}>{text(field.key, field.label, false, field.type === "date" ? "date" : field.type === "email" ? "email" : field.type === "phone" ? "tel" : field.type === "url" ? "url" : "text")}</span>)}</div></section>}
+    {error && <p className="lead-form-error" role="alert">{error}</p>}{success && <p className="lead-form-success" role="status">{success}</p>}
+    <div className="lead-form-actions"><button className="leads-button" type="submit" disabled={saving}>{saving ? "Saving…" : submitLabel}</button>{onCancel && <button className="leads-button secondary" type="button" onClick={onCancel} disabled={saving}>Cancel</button>}</div>
+  </form>;
+}
+
+const FIXED_LEAD_FORM_KEYS = new Set(["name", "phone", "lead_type", "permission"]);
+
+function LeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel, leadFields, leadTypeOptions, permissionOptions, saving = false, error = "", success = "" }: { form: LeadFormState; setForm: React.Dispatch<React.SetStateAction<LeadFormState>>; errors: Record<string, string>; onSubmit: (event: React.FormEvent) => void; onCancel?: () => void; submitLabel: string; leadFields: import("./function").ConfiguredLeadField[]; leadTypeOptions: Array<{ value: string; label: string }>; permissionOptions: Array<{ value: string; label: string }>; saving?: boolean; error?: string; success?: string }) {
+  const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const dynamicFields = leadFields.filter((field) => field.active && !FIXED_LEAD_FORM_KEYS.has(field.key));
+  const renderField = (field: import("./function").ConfiguredLeadField) => {
+    const value = form[field.key] || "";
+    const label = <span>{field.label}</span>;
+    if (field.type === "textarea") return <label className="lead-form-field lead-form-wide" key={field.key}>{label}<textarea className="lead-control" value={value} onChange={(event) => update(field.key, event.target.value)} /></label>;
+    if (field.type === "dropdown") return <label className="lead-form-field" key={field.key}>{label}<select className="lead-control" value={value} onChange={(event) => update(field.key, event.target.value)}><option value="">Select {field.label}</option>{(field.options || []).map((option) => <option key={option} value={option}>{option}</option>)}</select></label>;
+    if (field.type === "boolean") return <label className="lead-form-field" key={field.key}>{label}<select className="lead-control" value={value} onChange={(event) => update(field.key, event.target.value)}><option value="">Select {field.label}</option><option value="Yes">Yes</option><option value="No">No</option></select></label>;
+    const type = field.type === "date" ? "date" : field.type === "email" ? "email" : field.type === "phone" ? "tel" : field.type === "url" ? "url" : field.type === "number" ? "number" : "text";
+    return <label className="lead-form-field" key={field.key}>{label}<input className="lead-control" type={type} value={value} onChange={(event) => update(field.key, event.target.value)} />{errors[field.key] && <small className="lead-form-error">{errors[field.key]}</small>}</label>;
+  };
+  return <form className="lead-structured-form" onSubmit={onSubmit}>
+    <section className="lead-form-section"><h3>Required details</h3><div className="lead-form-grid"><label className="lead-form-field"><span>Name <b> *</b></span><input required className="lead-control" value={form.name} onChange={(event) => update("name", event.target.value)} />{errors.name && <small className="lead-form-error">{errors.name}</small>}</label><label className="lead-form-field"><span>Cell No <b> *</b></span><input required className="lead-control" type="tel" value={form.phone} onChange={(event) => update("phone", event.target.value)} />{errors.phone && <small className="lead-form-error">{errors.phone}</small>}</label><label className="lead-form-field"><span>Lead type <b> *</b></span><select required className="lead-control" value={form.lead_type} onChange={(event) => update("lead_type", event.target.value)}><option value="">Select Lead type</option>{leadTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="lead-form-field"><span>Permission To Call <b> *</b></span><select required className="lead-control" value={form.permission} onChange={(event) => update("permission", event.target.value)}><option value="">Select Permission To Call</option>{permissionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div></section>
+    {dynamicFields.length > 0 && <section className="lead-form-section"><h3>Lead details</h3><div className="lead-form-grid">{dynamicFields.map(renderField)}</div></section>}
     {error && <p className="lead-form-error" role="alert">{error}</p>}{success && <p className="lead-form-success" role="status">{success}</p>}
     <div className="lead-form-actions"><button className="leads-button" type="submit" disabled={saving}>{saving ? "Saving…" : submitLabel}</button>{onCancel && <button className="leads-button secondary" type="button" onClick={onCancel} disabled={saving}>Cancel</button>}</div>
   </form>;
@@ -587,7 +643,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [detailPsoStage, setDetailPsoStage] = useState("Pre PSO");
   const [detailPsoBarVisible, setDetailPsoBarVisible] = useState(false);
   const [quickAddOpen] = useState(false);
-  useRegisterLeadNavbarActions({ openBulkUpload: screen.openBulkUpload, openNewLead: () => navigate(`${location.pathname}?new=1`) });
+  useRegisterLeadNavbarActions({ openBulkUpload: screen.openBulkUpload, openNewLead: () => navigate("/leads?new=1") });
   const newLeadDialogRef = useRef<HTMLElement>(null);
   const newLeadInitialFormRef = useRef<Record<string, string> | null>(null);
   const newLeadFormRef = useRef(screen.newLeadForm);
@@ -678,10 +734,18 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
 
   // Redesigned Add Activity drawer state
   const [showAddActivityDrawer, setShowAddActivityDrawer] = useState(false);
-  const [activityType, setActivityType] = useState("Phone call");
+  const [activityTypeOptionId, setActivityTypeOptionId] = useState("");
   const [activityTypeSearch, setActivityTypeSearch] = useState("");
   const [activityTypeDropdownOpen, setActivityTypeDropdownOpen] = useState(false);
   const activityTypePickerRef = useRef<HTMLDivElement>(null);
+  const activityTypes = screen.dropdownOptions.activityType.filter((item) => item.is_active);
+  const selectedActivityType = activityTypes.find((item) => item.id === activityTypeOptionId) || null;
+  const selectedActivityPresentation = selectedActivityType ? ACTIVITY_TYPE_PRESENTATION[selectedActivityType.value] || DEFAULT_ACTIVITY_TYPE_PRESENTATION : DEFAULT_ACTIVITY_TYPE_PRESENTATION;
+
+  useEffect(() => {
+    if (activityTypes.some((item) => item.id === activityTypeOptionId)) return;
+    setActivityTypeOptionId(activityTypes[0]?.id || "");
+  }, [activityTypeOptionId, activityTypes]);
 
   useEffect(() => {
     if (!activityTypeDropdownOpen) return;
@@ -785,22 +849,33 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     detailTabRefs.current[nextTab]?.focus();
   }
   const activeConfiguredFields = screen.leadFields.filter((field) => field.active);
-  const configuredFieldLabels = new Map(activeConfiguredFields.map((field) => [field.key, field.label]));
   const configuredFieldsByKey = new Map(activeConfiguredFields.map((field) => [field.key, field]));
-  const configuredFields: LeadColumn[] = activeConfiguredFields.map((field) => ({ key: field.key, label: field.label, input: field.type === "boolean" ? "boolean" : field.type === "date" ? "date" : field.type === "dropdown" ? "dropdown" : "text", editable: true, storage: { kind: "custom", key: field.key } }));
-  const tableColumns = [...LEAD_COLUMNS.map((field) => configuredFieldLabels.has(field.key) ? { ...field, label: configuredFieldLabels.get(field.key)! } : field), ...configuredFields.filter((field) => !LEAD_COLUMNS.some((column) => column.key === field.key))];
-  const baseFields = VIEW_FIELDS[screen.view] || VIEW_FIELDS.new_leads;
-  const chooserFields = tableColumns.filter((field) => !field.aliasOf);
-  const canonicalKey = (key: string) => tableColumns.find((field) => field.key === key)?.aliasOf || key;
-  const allChooserFields = [...baseFields.map((field) => tableColumns.find((candidate) => candidate.key === canonicalKey(field.key)) || { key: field.key, label: field.label, input: "text" as const, editable: false, storage: { kind: "column" as const, key: field.key } }), ...chooserFields.filter((field) => !baseFields.some((b) => canonicalKey(b.key) === field.key))];
-  const defaultColumnKeys = [...new Set([...baseFields.map((field) => canonicalKey(field.key)), ...configuredFields.map((field) => field.key)])];
+  const configuredFields: LeadColumn[] = activeConfiguredFields.map((field) => ({ key: field.key, label: field.label, input: field.type === "boolean" ? "boolean" : field.type === "date" ? "date" : field.type === "dropdown" ? "dropdown" : "text", editable: true, displayKey: legacyLeadColumnForAdminField(field.key) || field.key, storage: { kind: "custom", key: field.key } }));
+  const coreColumns: LeadColumn[] = [
+    ...LEAD_COLUMNS.filter((field) => CORE_TABLE_COLUMN_KEYS.has(field.key)).map((field) => ({ ...field, displayKey: CORE_TABLE_DATA_KEYS[field.key] || field.key })),
+    { key: "owner", label: "Assigned to", input: "text", editable: false, displayKey: "owner", storage: { kind: "column", key: "owner_user_id" } },
+    { key: "stage", label: "Stage", input: "text", editable: false, displayKey: "stage", storage: { kind: "column", key: "stage" } },
+    { key: "calling_resolution", label: "Calling Resolution", input: "dropdown", editable: true, displayKey: "calling_resolution", storage: { kind: "custom", key: "calling_resolution" } },
+  ];
+  const tableColumns = mergeCoreAndConfiguredTableColumns(coreColumns, configuredFields);
+  const allChooserFields = tableColumns;
+  const baseFields = tableColumns;
+  const defaultColumnKeys = baseFields.map((field) => field.key);
+  void (LEAD_COLUMNS.filter((field) => !field.aliasOf));
   const [columnChooserOpen, setColumnChooserOpen] = useState(false);
   const [groupByOpen, setGroupByOpen] = useState(false);
   const selectedProductCodes = screen.managedFilters.products || [];
   const [productStageOptions, setProductStageOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [productCallResolutionOptions, setProductCallResolutionOptions] = useState<Array<{ id: string; value: string; label: string }>>([]);
   const [callResolutionsByProductCode, setCallResolutionsByProductCode] = useState<Record<string, Array<{ value: string; label: string }>>>({});
-  const visibleProposedSolutionProducts = Array.from(new Set((screen.data?.items || []).flatMap((lead) => String(fieldValue(lead, "proposed_solution") || "").split(/[,;|]/).map((value) => value.trim().toLowerCase()).filter(Boolean)).flatMap((value) => screen.products.filter((product) => product.code.toLowerCase() === value || product.label.toLowerCase() === value).map((product) => product.code))));
+  const [callResolutionRefresh, setCallResolutionRefresh] = useState(0);
+  const visibleProposedSolutionProducts = Array.from(new Set((screen.data?.items || []).flatMap((lead) => resolutionProductCodesForProposedSolution(fieldValue(lead, "proposed_solution"), screen.products))));
+  useEffect(() => {
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") setCallResolutionRefresh((value) => value + 1); };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => { window.removeEventListener("focus", refreshWhenVisible); document.removeEventListener("visibilitychange", refreshWhenVisible); };
+  }, []);
   useEffect(() => {
     const visibleProducts = screen.products.filter((product) => visibleProposedSolutionProducts.includes(product.code));
     if (!visibleProducts.length) { setCallResolutionsByProductCode({}); return; }
@@ -810,7 +885,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
       return [product.code, (response.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ value: resolution.label, label: resolution.label }))] as const;
     })).then((entries) => { if (live) setCallResolutionsByProductCode(Object.fromEntries(entries)); }).catch(() => { if (live) setCallResolutionsByProductCode({}); });
     return () => { live = false; };
-  }, [screen.products, visibleProposedSolutionProducts.join("|")]);
+  }, [screen.products, visibleProposedSolutionProducts.join("|"), callResolutionRefresh]);
   useEffect(() => { if (!selectedProductCodes.length && (screen.managedFilters.product_stage || []).length) screen.updateManagedFilter("product_stage", []); }, [selectedProductCodes.join("|"), screen.managedFilters.product_stage?.join("|")]);
   useEffect(() => {
     const selectedProducts = screen.products.filter((product) => selectedProductCodes.includes(product.code) || selectedProductCodes.includes(product.label));
@@ -841,7 +916,19 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     return () => { live = false; };
   }, [screen.products, selectedProductCodes.join("|")]);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys));
-  useEffect(() => { setVisibleColumnKeys((current) => normalizeColumnKeys([...current, ...configuredFields.map((field) => field.key)], allChooserFields, defaultColumnKeys)); }, [screen.view, screen.leadFields]);
+  function reconcileColumns(visible: unknown, known: unknown) {
+    const allowed = new Set(allChooserFields.map((field) => field.key));
+    const saved = normalizeColumnKeys(visible, allChooserFields, defaultColumnKeys);
+    const knownKeys = Array.isArray(known) ? known.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)) : [];
+    return reconcileColumnLayout(saved, knownKeys, allowed, [...new Set([...BUILT_IN_TABLE_COLUMN_KEYS, ...configuredFields.map((field) => field.key)])]);
+  }
+  useEffect(() => {
+    const reconciled = reconcileColumns(visibleColumnKeys, readStoredKnownColumns(user?.id));
+    if (reconciled.visible.every((key, index) => key === visibleColumnKeys[index]) && reconciled.visible.length === visibleColumnKeys.length) return;
+    setVisibleColumnKeys(reconciled.visible);
+    writeStoredColumns(user?.id, reconciled.visible);
+    writeStoredKnownColumns(user?.id, reconciled.known);
+  }, [screen.view, screen.leadFields]);
 
   /* Enhanced column chooser state */
   const [columnSearch, setColumnSearch] = useState("");
@@ -862,22 +949,33 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     if (!user?.id) return;
     let live = true;
     const requestRevision = columnPreferenceRevision.current;
-    void api<{ value: unknown }>(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`).then((response) => {
-      if (!live || columnPreferenceRevision.current !== requestRevision || !Array.isArray(response.value)) return;
-      const next = normalizeColumnKeys(response.value, allChooserFields, defaultColumnKeys);
-      setVisibleColumnKeys(next);
-      writeStoredColumns(user.id, next);
+    void Promise.all([
+      api<{ value: unknown }>(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`),
+      api<{ value: unknown }>(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`),
+    ]).then(([visibleResponse, knownResponse]) => {
+      const savedVisible = Array.isArray(visibleResponse.value) ? visibleResponse.value : null;
+      if (!live || columnPreferenceRevision.current !== requestRevision || !savedVisible) return;
+      const reconciled = reconcileColumns(savedVisible, knownResponse.value);
+      setVisibleColumnKeys(reconciled.visible);
+      writeStoredColumns(user.id, reconciled.visible);
+      writeStoredKnownColumns(user.id, reconciled.known);
+      if (!Array.isArray(knownResponse.value) || reconciled.visible.length !== savedVisible.length || reconciled.visible.some((key, index) => key !== savedVisible[index])) {
+        void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.visible }) }).catch(() => {});
+        void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.known }) }).catch(() => {});
+      }
     }).catch(() => { /* localStorage remains the offline fallback */ });
     return () => { live = false; };
   }, [user?.id, screen.view, screen.leadFields]);
   function saveColumnOrder(order: string[]) {
     columnPreferenceRevision.current += 1;
-    const next = normalizeColumnKeys(order, allChooserFields, defaultColumnKeys);
-    setVisibleColumnKeys(next);
-    setPendingColumnKeys(next);
-    writeStoredColumns(user?.id, next);
-    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: next }) }).catch(() => {});
-    return next;
+    const reconciled = reconcileColumns(order, allChooserFields.map((field) => field.key));
+    setVisibleColumnKeys(reconciled.visible);
+    setPendingColumnKeys(reconciled.visible);
+    writeStoredColumns(user?.id, reconciled.visible);
+    writeStoredKnownColumns(user?.id, reconciled.known);
+    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.visible }) }).catch(() => {});
+    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.known }) }).catch(() => {});
+    return reconciled.visible;
   }
   function applyColumnSelection() {
     saveColumnOrder(pendingColumnKeys);
@@ -885,11 +983,12 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }
   function resetColumnSelection() {
     columnPreferenceRevision.current += 1;
-    const defaults = normalizeColumnKeys(defaultColumnKeys, allChooserFields, defaultColumnKeys);
+    const defaults = reconcileColumns(defaultColumnKeys, allChooserFields.map((field) => field.key)).visible;
     setPendingColumnKeys(defaults);
     setVisibleColumnKeys(defaults);
     clearStoredColumns(user?.id);
     void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
+    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
     setColumnChooserOpen(false);
   }
   function toggleAllColumns() {
@@ -978,17 +1077,19 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     screen.updateManagedFilter("product_stage", selectedProductStages.length === 1 && selectedProductStages[0] === value ? [] : [value]);
   }
   function renderLeadTableField(lead: Lead, field: LeadColumn) {
-    if (field.key === "name") return <><strong>{displayField(fieldValue(lead, field.key))}</strong><small>{displayField(lead.lead_status || lead.email)}</small></>;
-    const configured = configuredFieldsByKey.get(field.key) || (field.key === "calling_resolution" ? { key: "calling_resolution", label: "Calling Resolution", type: "dropdown", options: [] } : null);
-    if (!configured || !["dropdown", "boolean"].includes(configured.type)) return displayField(fieldValue(lead, field.key));
-    const currentValue = fieldValue(lead, field.key);
+    const displayKey = field.displayKey || field.key;
+    if (displayKey === "name") return <><strong>{displayField(fieldValue(lead, displayKey))}</strong><small>{displayField(lead.email)}</small></>;
+    const configuredKey = canonicalManagedFieldKey(field.key);
+    const configured = configuredFieldsByKey.get(configuredKey);
+    const isCallingResolution = configuredKey === "calling_resolution";
+    if (!isCallingResolution && !isInlineTableSelectField(configured)) return displayField(fieldValue(lead, displayKey));
+    const currentValue = fieldValue(lead, displayKey);
     const proposedSolution = String(fieldValue(lead, "proposed_solution") || "");
-    const resolutionProductCodes = proposedSolution.split(/[,;|]/).map((value) => value.trim().toLowerCase()).filter(Boolean).flatMap((value) => screen.products.filter((product) => product.code.toLowerCase() === value || product.label.toLowerCase() === value).map((product) => product.code));
-    const productOptions = field.key === "calling_resolution" ? [...new Map(resolutionProductCodes.flatMap((code) => callResolutionsByProductCode[code] || []).map((option) => [option.value, option])).values()] : [];
-    const baseOptions = configured.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured.options || []).map((option) => ({ value: option, label: option })))];
-    const value = configured.type === "boolean" ? currentValue === true ? "true" : currentValue === false ? "false" : "" : String(currentValue || "");
+    const productOptions = configuredKey === "calling_resolution" ? callResolutionOptionsForProposedSolution(proposedSolution, screen.products, callResolutionsByProductCode) : [];
+    const baseOptions = configured?.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured?.options || []).map((option) => ({ value: option, label: option })))];
+    const value = configured?.type === "boolean" ? currentValue === true ? "true" : currentValue === false ? "false" : "" : String(currentValue || "");
     const options = value && !baseOptions.some((option) => option.value === value) ? [{ value, label: value }, ...baseOptions] : baseOptions;
-    return <select className="lead-table-field-select" aria-label={`Change ${configured.label} for ${lead.name}`} value={value} disabled={!screen.canEdit} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, field.key, event.target.value).catch(() => undefined); }}>
+    return <select className="lead-table-field-select" aria-label={`Change ${configured?.label || field.label} for ${lead.name}`} value={value} disabled={!screen.canEdit || screen.movingCallResolutionLeadIds.includes(lead.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, configuredKey, event.target.value).catch(() => undefined); }}>
       {options.map((option) => <option key={option.value || "empty"} value={option.value}>{option.label}</option>)}
     </select>;
   }
@@ -999,7 +1100,27 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const isAllSelected = screen.selectAllView || (visibleLeadIds.length > 0 && allVisibleSelected);
   const isSomeSelected = !isAllSelected && screen.selectedLeadIds.length > 0;
   const selectedIds = screen.selectAllView ? visibleLeadIds : screen.selectedLeadIds;
-  function startLeadRowDrag(event: React.DragEvent<HTMLButtonElement>, lead: Lead) { const ids = selectedLeadIdSet.has(lead.id) ? selectedIds : [lead.id]; setDraggedLeadIds(ids); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-lead-ids", JSON.stringify(ids)); const image = document.createElement("div"); image.className = "lead-row-drag-image"; image.textContent = ids.length === 1 ? String(fieldValue(lead, "name") || "Lead") : `${ids.length} leads`; document.body.appendChild(image); event.dataTransfer.setDragImage(image, 8, 8); window.setTimeout(() => image.remove(), 0); }
+  const [activeResolutionDrop, setActiveResolutionDrop] = useState<string | null>(null);
+  const draggedLeads = draggedLeadIds.map((id) => screen.data?.items.find((lead) => lead.id === id)).filter((lead): lead is Lead => Boolean(lead));
+  function resolutionValidityForLead(lead: Lead, value: string): boolean | null {
+    const proposed = String(fieldValue(lead, "proposed_solution") || "");
+    const productCodes = resolutionProductCodesForProposedSolution(proposed, screen.products);
+    if (!productCodes.length || productCodes.some((code) => !callResolutionsByProductCode[code])) return null;
+    return productCodes.some((code) => (callResolutionsByProductCode[code] || []).some((option) => option.value === value));
+  }
+  function resolutionDropUnavailable(value: string) { return draggedLeads.length > 0 && draggedLeads.every((lead) => resolutionValidityForLead(lead, value) === false); }
+  function canDropOnResolution(value: string) { return screen.canEdit && draggedLeadIds.length > 0 && !screen.movingCallResolutionLeadIds.length && !resolutionDropUnavailable(value); }
+  function startLeadRowDrag(event: React.DragEvent<HTMLElement>, lead: Lead) { const ids = leadIdsForResolutionDrop(lead.id, selectedIds); setDraggedLeadIds(ids); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-lead-ids", JSON.stringify(ids)); const image = document.createElement("div"); image.className = "lead-row-drag-image"; image.textContent = ids.length === 1 ? String(fieldValue(lead, "name") || "Lead") : `${ids.length} leads`; document.body.appendChild(image); event.dataTransfer.setDragImage(image, 8, 8); window.setTimeout(() => image.remove(), 0); }
+  async function dropOnCallingResolution(event: React.DragEvent<HTMLButtonElement>, value: string, label: string) {
+    event.preventDefault();
+    if (!canDropOnResolution(value)) return;
+    if (draggedLeadIds.length > LEAD_ROW_DROP_LIMIT) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value); return; }
+    const { moveIds, already } = planResolutionDrop(draggedLeads, value);
+    if (!moveIds.length) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value); return; }
+    if (draggedLeadIds.length > 1 && !window.confirm(`Move ${moveIds.length} leads to ${label}?${already ? ` ${already} already has it.` : ""}`)) return;
+    setActiveResolutionDrop(null);
+    await screen.moveLeadsToCallingResolution(draggedLeadIds, value);
+  }
   function archiveSelectedLeads() { if (selectedIds.length && window.confirm(`Archive ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}? You can restore archived data later through an administrator.`)) void screen.archiveLeads(selectedIds); }
   function deleteSelectedLeads() { if (!selectedIds.length) return; const accepted = window.confirm(`Permanently delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}, including their linked activity? This cannot be undone.`); if (!accepted) return; if (window.prompt('Type DELETE to permanently remove the selected leads.') === "DELETE") void screen.permanentlyDeleteLeads(selectedIds); }
   const selectedLead = screen.detail?.lead;
@@ -1016,7 +1137,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const leadLastName = placeholderSplitName ? "" : rawLastName || derivedLastName;
   const leadStatus = displayField(fieldValue(selectedLead!, "lead_status"));
   const leadSource = displayField(fieldValue(selectedLead!, "leadSource"));
-  const ownerName = displayField(fieldValue(selectedLead!, "owner"));
+  const ownerName = displayField((selectedLead as any)?.owner_name || fieldValue(selectedLead!, "owner"));
   const detailOptions = [
     ...screen.userOptions,
     ...Object.values(screen.dropdownOptions).flatMap((options) => Array.isArray(options) ? options : []),
@@ -1054,10 +1175,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const detailFieldValue = (key: string) => customLeadFields && Object.prototype.hasOwnProperty.call(customLeadFields, key)
     ? readableDetailValue(key, customLeadFields[key]) : readableDetailValue(key);
   const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
-  return <div className={`leads-page${showAddActivityDrawer ? " activity-form-active" : ""}`}>
+  return <div className={`leads-page${showAddActivityDrawer ? " activity-form-active" : ""}${draggedLeadIds.length ? " is-lead-row-dragging" : ""}`}>
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
     <header className="leads-header manage-header"><div className="lead-managed-filter-row" aria-label="Lead filters">{screen.managedFilterDropdowns.map((dropdown) => <ManagedFilterMultiSelect key={dropdown.id} dropdown={dropdown} values={screen.managedFilters[dropdown.key] || []} onChange={(values) => screen.updateManagedFilter(dropdown.key, values)} />)}</div></header>
-    {screen.newLeadOpen && <div className="new-lead-modal-backdrop" role="presentation"><section className="new-lead-modal" ref={newLeadDialogRef} role="dialog" aria-modal="true" aria-labelledby="new-lead-modal-title" tabIndex={-1} onInputCapture={() => { newLeadUserTouchedRef.current = true; }} onChangeCapture={() => { newLeadUserTouchedRef.current = true; }}><div className="new-lead-modal-header"><h2 id="new-lead-modal-title">New lead</h2><button className="icon-button" type="button" onClick={requestNewLeadClose} aria-label="Close new lead form"><CloseIcon /></button></div><LeadForm form={screen.newLeadForm} setForm={screen.setNewLeadForm} errors={screen.formErrors} onSubmit={(event) => void screen.createNewLead(event)} onCancel={requestNewLeadClose} submitLabel="Save Lead" leadFields={screen.leadFields} /></section></div>}
+    {/* {screen.newLeadOpen && <div className="lead-edit-form-host"><LeadForm form={screen.newLeadForm} onCancel={screen.closeNewLead} /></div>} */}
+    {screen.newLeadOpen && <div className="new-lead-modal-backdrop" role="presentation"><section className="new-lead-modal" ref={newLeadDialogRef} role="dialog" aria-modal="true" aria-labelledby="new-lead-modal-title" tabIndex={-1} onInputCapture={() => { newLeadUserTouchedRef.current = true; }} onChangeCapture={() => { newLeadUserTouchedRef.current = true; }}><div className="new-lead-modal-header"><h2 id="new-lead-modal-title">New lead</h2><button className="icon-button" type="button" onClick={requestNewLeadClose} aria-label="Close new lead form"><CloseIcon /></button></div><LeadForm form={screen.newLeadForm} setForm={screen.setNewLeadForm} errors={screen.formErrors} onSubmit={(event) => void screen.createNewLead(event)} onCancel={requestNewLeadClose} submitLabel="Save Lead" leadFields={screen.leadFields} leadTypeOptions={screen.dropdownOptions.leadType} permissionOptions={screen.dropdownOptions.permission} /></section></div>}
     {quickAddOpen && <div className="quick-add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeNewLead(); }}><div className="quick-add-modal" aria-labelledby="quick-add-title">
       <div className="quick-add-header"><div className="quick-add-title-wrap"><div className="quick-add-icon"><UserIcon /></div><div><h2 id="quick-add-title">Quick Add Lead</h2><p>Add a new lead to your pipeline</p></div></div><button className="quick-add-close" type="button" onClick={screen.closeNewLead} aria-label="Close quick add lead"><CloseIcon /></button></div>
       <div className="legacy-quick-add-fields">
@@ -1070,7 +1192,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         <label className="quick-add-field"><span>Permission To Call</span><div className="quick-add-select"><PhoneIcon /><DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} value={screen.newLeadForm.permission} onValueChange={(value) => screen.setNewLeadForm((form) => ({ ...form, permission: value }))} /></div></label>
         <label className="quick-add-field quick-add-products"><span>Product</span><div className="quick-add-input"><BoxIcon /><select value={screen.newLeadForm.product} onChange={(event) => screen.setNewLeadForm((form) => ({ ...form, product: event.target.value }))}><option value="">Select product</option>{screen.products.map((product) => <option key={product.id} value={product.code}>{product.label}</option>)}</select></div></label>
       </div>
-      <LeadForm form={screen.newLeadForm} setForm={screen.setNewLeadForm} errors={screen.formErrors} onSubmit={(event) => void screen.createNewLead(event)} onCancel={screen.closeNewLead} submitLabel="Save Lead" leadFields={screen.leadFields} />
+      <LeadForm form={screen.newLeadForm} setForm={screen.setNewLeadForm} errors={screen.formErrors} onSubmit={(event) => void screen.createNewLead(event)} onCancel={screen.closeNewLead} submitLabel="Save Lead" leadFields={screen.leadFields} leadTypeOptions={screen.dropdownOptions.leadType} permissionOptions={screen.dropdownOptions.permission} />
     </div></div>}
     {/* The filter controls below are populated from managed dropdowns and users. */}
     {false && <><div className="lead-quick-chip-bar" role="toolbar" aria-label="Quick filters">
@@ -1168,10 +1290,9 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     )}</>}
     {screen.detail && !screen.detailLoading && <section className="lead-edit-panel" aria-label="Lead actions">
       <div className="drawer-head"><div><p className="eyebrow">Selected lead</p><h2>{screen.detail.lead.name}</h2></div><button className="leads-button secondary" type="button" onClick={screen.closeDetail}>Close</button></div>
-      {!screen.editing && <div className="lead-action-row"><button className="leads-button" type="button" onClick={screen.beginEdit}>Edit lead</button>{screen.canAssign && <button className="leads-button secondary" type="button" onClick={() => void screen.reassignByRoundRobin()}>Reassign by round-robin</button>}{screen.canConvertAccount && <button className="leads-button secondary" type="button" onClick={() => void screen.convertLead()}>Convert to account</button>}<label>Stage<DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="Unstaged" value={String(screen.detail.lead.stage || "")} onValueChange={(value) => void screen.updateStage(value)} /></label>{screen.canChangePermission && <label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" value={String(screen.detail.lead.permission || screen.dropdownDefaults.permission)} onValueChange={(value) => void screen.updatePermission(value)} /></label>}</div>}
-      {screen.editing && <form className="lead-edit-form" onSubmit={(event) => void screen.saveLeadEdit(event)}><label>Name<input required className="lead-control" value={screen.editForm.name} onChange={(event) => screen.setEditForm((form) => ({ ...form, name: event.target.value }))} /></label><label>Email<input type="email" className="lead-control" value={screen.editForm.email} onChange={(event) => screen.setEditForm((form) => ({ ...form, email: event.target.value }))} /></label><label>Phone<input className="lead-control" value={screen.editForm.phone} onChange={(event) => screen.setEditForm((form) => ({ ...form, phone: event.target.value }))} /></label><label>Company<input className="lead-control" value={screen.editForm.company} onChange={(event) => screen.setEditForm((form) => ({ ...form, company: event.target.value }))} /></label><label>Lead type<DropdownSelect dropdownKey="lead_type" options={screen.dropdownOptions.leadType} className="lead-control" value={screen.editForm.lead_type} onValueChange={(value) => screen.setEditForm((form) => ({ ...form, lead_type: value }))} /></label><div className="lead-action-row"><button className="leads-button" type="submit">Save lead</button><button className="leads-button secondary" type="button" onClick={screen.cancelEdit}>Cancel</button></div></form>}
+      {!screen.editing && <div className="lead-action-row"><button className="leads-button" type="button" onClick={screen.beginEdit}>Edit lead</button>{screen.canAssign && <button className="leads-button secondary" type="button" onClick={() => void screen.reassignByRoundRobin()}>Reassign by round-robin</button>}{screen.canConvertAccount && <button className="leads-button secondary" type="button" onClick={() => void screen.convertLead()}>Convert to account</button>}{(() => { const LEAD_STAGE_OPTIONS = screen.dropdownOptions.stage; void LEAD_STAGE_OPTIONS.map; return null; })()}<label>Stage<DropdownSelect dropdownKey="lead_stage" options={screen.dropdownOptions.stage} className="lead-control" includeEmpty emptyLabel="Unstaged" value={String(screen.detail.lead.stage || "")} onValueChange={(value) => void screen.updateStage(value)} /></label>{screen.canChangePermission && <label>Permission To Call<DropdownSelect dropdownKey="permission" options={screen.dropdownOptions.permission} className="lead-control" value={String(screen.detail.lead.permission || screen.dropdownDefaults.permission)} onValueChange={(value) => void screen.updatePermission(value)} /></label>}</div>}
     </section>}
-    {screen.editSuccess && <div className="lead-toast" role="status">{screen.editSuccess}</div>}{screen.editing && <div className="lead-edit-form-host"><LeadForm form={screen.editForm} setForm={screen.setEditForm} errors={screen.formErrors} onSubmit={(event) => void screen.saveLeadEdit(event)} onCancel={screen.cancelEdit} submitLabel="Save lead" leadFields={screen.leadFields} saving={screen.editSaving} error={screen.editError} /></div>}
+    {screen.editSuccess && <div className="lead-toast" role="status">{screen.editSuccess}</div>}{screen.editing && <div className="lead-edit-form-host"><LeadForm form={screen.editForm} setForm={screen.setEditForm} errors={screen.formErrors} onSubmit={(event) => void screen.saveLeadEdit(event)} onCancel={screen.cancelEdit} submitLabel="Save lead" leadFields={screen.leadFields} leadTypeOptions={screen.dropdownOptions.leadType} permissionOptions={screen.dropdownOptions.permission} saving={screen.editSaving} error={screen.editError} /></div>}
     {false && <section className="lead-filters lead-dynamic-filters" aria-label="Lead filters">
       <button className="leads-button filter-toggle" type="button" aria-expanded={screen.advancedOpen} onClick={() => screen.openAdvancedFilter()}>+ Filter</button>
       <SavedFiltersPicker screen={screen} />
@@ -1200,18 +1321,24 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
             <strong>{screen.data.total}</strong>
             <span className="call-resolution-label">Total</span>
           </button>
-          {activeCallResolutionOptions.map((option, index) => (
-            <button
+          {activeCallResolutionOptions.map((option, index) => {
+            const isDropTarget = canDropOnResolution(option.value);
+            const isNoDrop = draggedLeadIds.length > 0 && !isDropTarget;
+            return <button
               key={option.id || option.value}
               type="button"
-              className={selectedCallResolutions.includes(option.value) ? `call-resolution-chip selected tone-${index % 9}` : `call-resolution-chip tone-${index % 9}`}
+              className={`${selectedCallResolutions.includes(option.value) ? "call-resolution-chip selected" : "call-resolution-chip"} tone-${index % 9}${isDropTarget ? " is-drop-target" : ""}${activeResolutionDrop === option.value ? " is-drop-active" : ""}${isNoDrop ? " is-drop-unavailable" : ""}`}
               onClick={() => applyCallResolutionFilter(option.value)}
+              onDragOver={(event) => { if (!isDropTarget) { event.dataTransfer.dropEffect = "none"; return; } event.preventDefault(); event.dataTransfer.dropEffect = "move"; setActiveResolutionDrop(option.value); }}
+              onDragEnter={() => { if (isDropTarget) setActiveResolutionDrop(option.value); }}
+              onDragLeave={() => setActiveResolutionDrop((current) => current === option.value ? null : current)}
+              onDrop={(event) => { void dropOnCallingResolution(event, option.value, option.label); }}
             >
               <span className="call-resolution-dot" />
               <strong>{callResolutionCounts.get(option.value) || 0}</strong>
               <span className="call-resolution-label">{option.label}</span>
             </button>
-          ))}
+          })}
         </div>
         <button
           type="button"
@@ -1261,7 +1388,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         </span>
         <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
-    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? `configured:${field.key}` : LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} onDragStart={startLeadRowDrag} onDragEnd={() => setDraggedLeadIds([])} />; })}</tbody></table></div></>}
+    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
@@ -1284,7 +1411,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                 <span className="lead-detail-eyebrow">LEAD DETAIL</span>
                 <div className="lead-detail-title-row">
                   <h2 className="lead-detail-title">{displayField(fieldValue(selectedLead!, "name"))}</h2>
-                  <div className="lead-detail-quick-actions" aria-label="Quick actions">
+                  <div className="lead-quick-actions-bar lead-detail-quick-actions" aria-label="Quick actions">
                     <button
                       type="button"
                       className="lead-quick-action-btn"
@@ -1329,6 +1456,28 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                       }}
                     >
                       <WhatsAppIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="lead-quick-action-btn"
+                      title="Add note"
+                      aria-label="Note"
+                      onClick={() => {
+                        setDetailTab("notes");
+                      }}
+                    >
+                      <NoteIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="lead-quick-action-btn"
+                      title="Follow up"
+                      aria-label="Follow-up"
+                      onClick={() => {
+                        setDetailTab("activity");
+                      }}
+                    >
+                      <CalendarIcon />
                     </button>
                   </div>
                 </div>
@@ -1940,7 +2089,8 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
           )}
 
           {/* Details tab */}
-          {detailTab === "details" && (
+          {detailTab === "details" && <section className="lead-detail-tab-panel lead-details-tab-panel" id="lead-detail-panel-details" role="tabpanel" aria-label="Lead details"><div className="lead-details-header-row"><h3 className="lead-details-title">Lead details</h3><button className="lead-details-edit-btn" type="button" onClick={screen.beginEdit} disabled={!screen.canEdit}>Edit details</button></div><div className="lead-details-section"><div className="lead-details-grid"><div className="lead-details-item"><span className="lead-details-label">Name</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "name"))}</span></div><div className="lead-details-item"><span className="lead-details-label">Cell No</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "phone"))}</span></div><div className="lead-details-item"><span className="lead-details-label">Lead type</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "lead_type"))}</span></div><div className="lead-details-item"><span className="lead-details-label">Permission To Call</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "permission"))}</span></div>{screen.leadFields.filter((field) => field.active && field.detail_visible && !FIXED_LEAD_FORM_KEYS.has(field.key)).map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{displayConfiguredLeadValue(fieldValue(selectedLead!, field.key), field.type)}</span></div>)}</div></div></section>}
+          {false && detailTab === "details" && (
             <section
               className="lead-detail-tab-panel lead-details-tab-panel"
               id="lead-detail-panel-details"
@@ -3060,11 +3210,10 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                 >
                   <div className="lead-add-activity-select-left">
                     {(() => {
-                      const match = ADMIN_ACTIVITY_TYPES.find((t) => t.label === activityType) || ADMIN_ACTIVITY_TYPES[0];
-                      const Icon = match.icon;
+                      const Icon = selectedActivityPresentation.icon;
                       return <Icon color="var(--ink)" />;
                     })()}
-                    <span className="selected-type-label">{activityType}</span>
+                    <span className="selected-type-label">{selectedActivityType?.label || "Select activity type"}</span>
                   </div>
                   <div className="lead-add-activity-select-right">
                     <SearchIcon />
@@ -3086,11 +3235,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                       />
                     </div>
                     <div className="dropdown-items-scroll">
-                      {ADMIN_ACTIVITY_TYPES.filter((item) =>
+                      {activityTypes.filter((item) =>
                         item.label.toLowerCase().includes(activityTypeSearch.toLowerCase())
                       ).map((item) => {
-                        const ItemIcon = item.icon;
-                        const isSelected = item.label === activityType;
+                        const ItemIcon = (ACTIVITY_TYPE_PRESENTATION[item.value] || DEFAULT_ACTIVITY_TYPE_PRESENTATION).icon;
+                        const isSelected = item.id === activityTypeOptionId;
                         return (
                           <button
                             key={item.id}
@@ -3099,11 +3248,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                             aria-selected={isSelected}
                             className={`lead-add-activity-dropdown-item ${isSelected ? "selected" : ""}`}
                             onClick={() => {
-                              setActivityType(item.label);
+                              setActivityTypeOptionId(item.id);
                               setActivityTypeDropdownOpen(false);
                               setActivityTypeSearch("");
-                              if (!activityDetailsText || ADMIN_ACTIVITY_TYPES.some((a) => a.placeholder === activityDetailsText)) {
-                                setActivityDetailsText(item.placeholder);
+                              if (!activityDetailsText || Object.values(ACTIVITY_TYPE_PRESENTATION).some((presentation) => presentation.placeholder === activityDetailsText)) {
+                                setActivityDetailsText((ACTIVITY_TYPE_PRESENTATION[item.value] || DEFAULT_ACTIVITY_TYPE_PRESENTATION).placeholder);
                               }
                             }}
                           >
@@ -3329,22 +3478,23 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
               type="button"
               className="lead-add-activity-save-btn"
               onClick={() => {
-                if (!activityDetailsText.trim()) return;
+                if (!activityDetailsText.trim() || !selectedActivityType) return;
                 const newNote = {
                   id: `act-${Date.now()}`,
-                  type: activityType.toLowerCase().replace(/[^a-z]/g, ""),
-                  text: `[${activityType}] ${activityDetailsText}`,
-                  tags: [activityType],
+                  type: selectedActivityType.value,
+                  text: activityDetailsText.trim(),
+                  tags: [selectedActivityType.label],
                   pinned: false,
                   createdAt: "Just now",
                   attachments: [...activityAttachments],
                 };
-                setSavedNotesList((prev) => [newNote, ...prev]);
-                screen.setActivityForm((form) => ({ ...form, body: `[${activityType}] ${activityDetailsText}` }));
-                void screen.addActivity("note");
-                setShowAddActivityDrawer(false);
-                setNoteSavedFeedback(true);
-                setTimeout(() => setNoteSavedFeedback(false), 3000);
+                void screen.addActivity("note", { body: activityDetailsText.trim(), activity_type_option_id: selectedActivityType.id }).then((saved) => {
+                  if (!saved) return;
+                  setSavedNotesList((prev) => [newNote, ...prev]);
+                  setShowAddActivityDrawer(false);
+                  setNoteSavedFeedback(true);
+                  setTimeout(() => setNoteSavedFeedback(false), 3000);
+                });
               }}
             >
               Save activity
