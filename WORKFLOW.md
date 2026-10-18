@@ -21,7 +21,7 @@
 | Reports | Placeholder view over lead data; no dedicated data model yet. | Placeholder view |
 | Quote & Invoicing | Placeholder view over lead data; no dedicated data model yet. | Placeholder view |
 | Marketing | Placeholder view over lead data; no dedicated data model yet. | Placeholder view / draft-test mode |
-| Dashboard | No dashboard route or dedicated dashboard screen exists in the current repository. | Not started |
+| Dashboard | Implemented: admin-only dashboard route with live lead/call/follow-up summary, upcoming follow-ups, and management shortcuts. | Active |
 
 Users with `nav.admin` see all six core navigation items; everyone else sees only Leads and Reports. This is a UI restriction only; server permissions are unchanged. Admin groups appear only with the `nav.admin` capability. Old stages remain filters/tabs inside Leads.
 

@@ -86,12 +86,17 @@ button, input { font: inherit; }
 .role-badge { padding: 3px 9px; border-radius: 999px; color: var(--bg); background: var(--ink); font-size: 10px; font-weight: 700; }
 .account-menu-chevron { color: var(--ink-2); font-size: 14px; line-height: 1; }
 .account-menu-button:hover { border-color: var(--red); background: var(--bg-2); }
-.account-menu { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; width: min(280px, calc(100vw - 24px)); padding: 7px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-pop); }
-.account-menu-identity { display: grid; gap: 3px; padding: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line-2); }
-.account-menu-identity strong { color: var(--ink); font-size: 12px; }
-.account-menu-identity span { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.account-menu button { display: block; width: 100%; padding: 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-1); cursor: pointer; font-size: 12px; text-align: left; }
-.account-menu button:hover { background: var(--red-tint); color: var(--red); }
+.account-menu { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; width: min(280px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-pop); }
+.account-menu-identity { display: grid; gap: 3px; padding: 10px 10px 12px; }
+.account-menu-identity strong { color: var(--ink); font-size: 13px; }
+.account-menu-identity > span:not(.account-menu-role) { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu-role { width: fit-content; margin-top: 3px; padding: 2px 7px; border-radius: 999px; background: var(--bg-2); color: var(--ink-1); font-size: 10px; font-weight: 700; }
+.account-menu-actions { display: grid; gap: 2px; padding: 4px 0; border-top: 1px solid var(--line-2); }
+.account-menu-signout { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line-2); }
+.account-menu button { display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-1); cursor: pointer; font-size: 12px; text-align: left; }
+.account-menu button:hover { background: var(--bg-1); color: var(--ink); }
+.account-menu-signout button { color: var(--ink-2); }
+.account-menu-signout button:hover { background: var(--red-tint); color: var(--red); }
 .content { min-width: 0; min-height: 0; padding: 40px; overflow: auto; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .page { max-width: 1100px; }

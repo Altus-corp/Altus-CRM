@@ -23,6 +23,7 @@ export function DropdownManagement() {
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<"all" | DropdownDefinition["source_type"]>("all");
 
   const selected = definitions.find((definition) => definition.key === selectedKey) || null;
   const managed = selected?.source_type === "managed";
@@ -32,11 +33,12 @@ export function DropdownManagement() {
 
   const filteredDefinitions = useMemo(() => {
     const q = searchFilter.trim().toLowerCase();
-    if (!q) return definitions;
     return definitions.filter(
-      (def) => def.label.toLowerCase().includes(q) || def.key.toLowerCase().includes(q)
+      (def) =>
+        (sourceFilter === "all" || def.source_type === sourceFilter) &&
+        (!q || def.label.toLowerCase().includes(q) || def.key.toLowerCase().includes(q))
     );
-  }, [definitions, searchFilter]);
+  }, [definitions, searchFilter, sourceFilter]);
 
   async function load(preserveKey?: string) {
     setLoading(true);
@@ -242,7 +244,7 @@ export function DropdownManagement() {
   }
 
   return (
-    <section className="dropdown-management" aria-label="Dropdown Management">
+    <section className="dropdown-management management-dropdowns" aria-label="Dropdown Management">
       {error && (
         <div className="dropdown-alert dropdown-alert-error" role="alert">
           <span className="alert-icon">⚠</span>
@@ -269,12 +271,13 @@ export function DropdownManagement() {
       )}
 
       <div className="dropdown-management-grid">
-        {/* LEFT MASTER LIST */}
         <aside className="dropdown-sidebar-card">
           <div className="dropdown-sidebar-header">
             <div className="dropdown-sidebar-title-row">
-              <h3>Dropdowns</h3>
-              <span className="dropdown-badge-counter">{definitions.length}</span>
+              <div>
+                <h3>Dropdown definitions</h3>
+                <p>{definitions.length} available</p>
+              </div>
             </div>
             <div className="dropdown-search-box">
               <span className="search-icon" aria-hidden="true">
@@ -289,11 +292,20 @@ export function DropdownManagement() {
                 aria-label="Filter dropdown list"
               />
             </div>
+            <label className="dropdown-source-filter">
+              <span>Show</span>
+              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)}>
+                <option value="all">All sources</option>
+                <option value="managed">Managed</option>
+                <option value="system_locked">System controlled</option>
+                <option value="api_backed">API backed</option>
+              </select>
+            </label>
           </div>
 
           <div className="dropdown-items-scroller" role="tablist" aria-label="Dropdowns">
             {filteredDefinitions.length === 0 ? (
-              <div className="dropdown-no-results">No matching dropdowns found.</div>
+              <div className="dropdown-no-results"><strong>No matching dropdowns</strong><span>Try a different search or filter.</span></div>
             ) : (
               filteredDefinitions.map((def) => {
                 const isSelected = def.key === selectedKey;
@@ -332,30 +344,15 @@ export function DropdownManagement() {
           </div>
         </aside>
 
-        {/* RIGHT DETAILS WORKSPACE */}
         {selected && definitionDraft ? (
           <div className="dropdown-editor">
-            {/* CARD 1: SETTINGS */}
             <div className="dropdown-card dropdown-settings-card">
-              <div className="dropdown-card-topbar">
-                <div className="dropdown-header-titles">
-                  <div className="dropdown-header-keyline">
-                    <span className="eyebrow-chip">Configuration</span>
-                    <span className={`source-pill-lg source-${selected.source_type}`}>
-                      Source: <strong>{selected.source_type}</strong>
-                    </span>
-                    <span className="key-code-chip">
-                      Key: <code>{selected.key}</code>
-                    </span>
-                  </div>
-                  <h2>{selected.label}</h2>
-                  <p>
-                    Manage default behavior, validation constraints, and visibility for this dropdown.
-                  </p>
-                </div>
-              </div>
-
-              <form className="dropdown-settings-form" onSubmit={(event) => void saveDefinition(event)}>
+              <details className="dropdown-advanced-settings">
+                <summary>
+                  <span>Advanced settings</span>
+                  <small>Label, default value, and availability</small>
+                </summary>
+                <form className="dropdown-settings-form" onSubmit={(event) => void saveDefinition(event)}>
                 <div className="dropdown-fields-row">
                   <div className="dropdown-field-block">
                     <label htmlFor="field-label">Display Label *</label>
@@ -462,24 +459,30 @@ export function DropdownManagement() {
                     {savingDef ? "Saving changes..." : "Save definition"}
                   </button> : <span className="field-hint-text">Products are managed in Product Catalog. You can reorder them below.</span>}
                 </div>
-              </form>
+                </form>
+              </details>
             </div>
 
-            {/* CARD 2: OPTIONS TABLE */}
             <div className="dropdown-card dropdown-options-card">
               <div className="dropdown-options-heading">
                 <div>
+                  <div className="dropdown-selected-definition">
+                    <span className={`source-pill-lg source-${selected.source_type}`}>
+                      {selected.source_type === "managed" ? "Managed" : selected.source_type === "system_locked" ? "System controlled" : "API backed"}
+                    </span>
+                    <code>{selected.key}</code>
+                  </div>
                   <div className="options-title-row">
-                    <h2>Options</h2>
+                    <h2>{selected.label}</h2>
                     <span className="options-count-badge">{options.length}</span>
                   </div>
                   <p className="options-sub-text">
-                    Control display labels, values, display ordering, and availability.
+                    {managed ? "Add, edit, reorder, or deactivate values." : "Values are maintained outside this page."}
                   </p>
                 </div>
                 {!managed && (
                   <span className="dropdown-system-banner">
-                    Read-only: {selected.source_type} values are controlled by the system/API.
+                    Read-only
                   </span>
                 )}
               </div>

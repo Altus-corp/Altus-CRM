@@ -2,13 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 
-test("admin navigation uses the capability gate and placeholder routes", () => {
+test("admin navigation uses the capability gate and includes the dashboard route", () => {
   const source = fs.readFileSync("src/main.tsx", "utf8");
   assert.match(source, /RequireCapability capability="nav\.admin"/);
   const placeholder = fs.readFileSync("src/screens/placeholder/page.tsx", "utf8");
   assert.match(placeholder, /Coming soon/);
   assert.match(placeholder, /placeholder-empty/);
-  assert.doesNotMatch(source, /path="\/dashboard"/);
+  assert.match(source, /path="\/admin\/dashboard"/);
   assert.doesNotMatch(source, /Key Note/);
 });
 

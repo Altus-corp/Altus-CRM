@@ -60,3 +60,14 @@ test("shell keeps role-gated new lead, theme, logout, master sidebar, and admin 
   assert.doesNotMatch(source, /className="top-navigation"/);
   assert.doesNotMatch(source, /Collapse navigation/);
 });
+
+test("account menu groups identity, account actions, and sign out without changing its controls", () => {
+  const source = shell();
+  const styles = shellStyles();
+  assert.match(source, /account-menu-actions/);
+  assert.match(source, /account-menu-signout/);
+  assert.match(source, /account-menu-role/);
+  assert.match(source, /Theme: \{theme === "light"/);
+  assert.match(source, /signOut\(logout, navigate\)/);
+  assert.match(styles, /\.account-menu-signout button:hover/);
+});

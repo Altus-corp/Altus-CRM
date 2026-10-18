@@ -79,6 +79,7 @@ export const ADMIN_NAV_GROUPS = [
     label: "Admin",
     collapsible: true,
     items: [
+      { to: "/admin/dashboard", label: "Dashboard" },
       { to: "/leads?view=new_leads", label: "Leads", countKey: "new_leads" },
       { to: "/admin/assignment", label: "Assignment" },
       { to: "/reports", label: "Reports" },

@@ -12,5 +12,5 @@ test("theme toggle and duplicate role display are handled in the shell", () => {
   const source = fs.readFileSync("src/shared/layout/app-shell.tsx", "utf8");
   assert.match(source, /setTheme\(next\)/);
   assert.match(source, /user\.name !== roleLabel/);
-  assert.match(source, /role-badge/);
+  assert.match(source, /account-menu-role/);
 });
