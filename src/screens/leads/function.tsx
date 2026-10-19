@@ -26,7 +26,7 @@ export type ActivityResponse = { items: Record<string, unknown>[]; page: number;
 export type LoggedActivityNote = { body: string; activity?: string };
 export type BulkImportPreview = { file_hash: string; extension: string; sheet_note: string | null; total_rows: number; valid: number; errors: number; possible_duplicates: number; duplicate_rows: Array<{ row: number; reason: string | undefined }>; ignored_columns: string[]; preview_rows: Record<string, unknown>[]; error_rows: Array<{ row: number; errors: string[] }>; can_apply: boolean };
 export type BulkImportResult = { import_run_id: string; upload_id: string; total_rows: number; created: number; new_leads_created: number; existing_leads_updated: number; fields_filled: number; call_log_rows_added: number; call_log_rows_filled: number; call_log_rows_skipped_duplicates: number; conflicts_needing_review: number; unchanged_leads: number; skipped_duplicates: number; skipped_errors: number; errors: string[] };
-export type LeadsResponse = { items: Lead[]; page: number; page_size: number; total: number; sort: string; direction: string; view: string | null };
+export type LeadsResponse = { items: Lead[]; page: number; page_size: number; total: number; sort: string; direction: string; view: string | null; call_resolution_counts?: Record<string, number> };
 export type LeadFilters = { q: string; stage: string; permission: string; owner: string; lead_status: string; pso_date_from: string; pso_date_to: string; next_follow_up: string; work_queue: string };
 export function leadIdsForResolutionDrop(leadId: string, selectedIds: readonly string[]) {
   return selectedIds.includes(leadId) ? [...new Set(selectedIds)] : [leadId];

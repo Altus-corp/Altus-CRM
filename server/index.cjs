@@ -251,6 +251,7 @@ async function leadsCounts(res, db, actor) {
 async function leadsList(req, res, db, url, actor) {
   const params = [];
   const where = ["COALESCE(l.custom_values->>'archived','false') <> 'true'"];
+  let callingResolutionFilterSql = "";
   const bind = (value) => { params.push(value); return `$${params.length}`; };
   const ownership = leadAccessPredicate(actor, bind);
   if (ownership) where.push(ownership);
@@ -302,7 +303,9 @@ async function leadsList(req, res, db, url, actor) {
         // so filter its stored values directly instead of rejecting a newly configured option.
         const validValues = key === "calling_resolution" || (await Promise.all(values.map((value) => validDropdownValue(db, key, value)))).every(Boolean);
         if (!validValues) return invalidLeadsQuery(res);
-        where.push(`${managedFilterFields[key]} IN (${values.map((value) => bind(value)).join(", ")})`);
+        const managedClause = `${managedFilterFields[key]} IN (${values.map((value) => bind(value)).join(", ")})`;
+        where.push(managedClause);
+        if (key === "calling_resolution") callingResolutionFilterSql = managedClause;
         if (key === "calling_resolution" && selectedProducts.length) {
           const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [selectedProducts]);
           if (available.rows.length !== selectedProducts.length) return invalidLeadsQuery(res);
@@ -357,7 +360,17 @@ async function leadsList(req, res, db, url, actor) {
   const direction = directionParam === "asc" ? "ASC" : "DESC";
   const isAll = url.searchParams.get("page_size") === "all";
   const filterSql = where.length ? "WHERE " + where.join(" AND ") : "";
-  const count = await db.query(`SELECT count(*)::int AS total FROM leads l ${filterSql}`, params);
+  // Resolution chips should retain their counts after one chip is selected.
+  // Keep every other active filter, but intentionally exclude this one chip's
+  // calling-resolution condition for the chip aggregate.
+  const resolutionCountWhere = callingResolutionFilterSql
+    ? where.map((clause) => clause === callingResolutionFilterSql ? `(${[...new Set(callingResolutionFilterSql.match(/\$\d+/g) || [])].map((placeholder) => `${placeholder} IS NOT NULL`).join(" AND ")})` : clause)
+    : where;
+  const resolutionCountSql = resolutionCountWhere.length ? "WHERE " + resolutionCountWhere.join(" AND ") : "";
+  const [count, resolutionCountRows] = await Promise.all([
+    db.query(`SELECT count(*)::int AS total FROM leads l ${filterSql}`, params),
+    db.query(`SELECT ${jsonValue("calling_resolution")} AS resolution,count(*)::int AS total FROM leads l ${resolutionCountSql} AND ${jsonValue("calling_resolution")} IS NOT NULL GROUP BY ${jsonValue("calling_resolution")}`, params),
+  ]);
   const total = count.rows[0]?.total || 0;
   const pageSize = isAll ? Math.max(1, total) : integerParam(url.searchParams.get("page_size"), 50, 100);
   const page = isAll ? 1 : integerParam(url.searchParams.get("page"), 1, 1000000);
@@ -370,7 +383,24 @@ async function leadsList(req, res, db, url, actor) {
   // migration 018. The field is optional in the client until that migration runs.
   const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance,COALESCE((SELECT array_agg(DISTINCT lp.product_code) FROM lead_products lp WHERE lp.lead_id=l.id),ARRAY[]::text[]) AS product_codes FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   const items = rows.rows.map((row) => materializeLead(row));
-  return json(res, 200, { items, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null });
+  const call_resolution_counts = Object.fromEntries(resolutionCountRows.rows.map((row) => [String(row.resolution), Number(row.total) || 0]));
+  return json(res, 200, { items, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null, call_resolution_counts });
+}
+
+async function productMasterList(res, db, url, actor) {
+  const product = String(url.searchParams.get("product") || "").trim();
+  const stage = String(url.searchParams.get("stage") || "").trim();
+  const resolution = String(url.searchParams.get("resolution") || "").trim();
+  const params = [actor.id]; const where = ["l.owner_user_id=$1", "COALESCE(l.custom_values->>'archived','false') <> 'true'"];
+  if (product) { params.push(product); where.push(`${jsonValue("proposed_solution")}=$${params.length}`); }
+  if (stage) { params.push(stage); where.push(`COALESCE(l.stage,'')=$${params.length}`); }
+  if (resolution) { params.push(resolution); where.push(`${jsonValue("calling_resolution")}=$${params.length}`); }
+  const filterSql = `WHERE ${where.join(" AND ")}`;
+  const [summary, rows] = await Promise.all([
+    db.query(`SELECT COALESCE(${jsonValue("proposed_solution")},'Unassigned') AS product,COALESCE(l.stage,'No stage') AS stage,COALESCE(${jsonValue("calling_resolution")},'No resolution') AS resolution,count(*)::int AS total FROM leads l WHERE l.owner_user_id=$1 AND COALESCE(l.custom_values->>'archived','false') <> 'true' GROUP BY 1,2,3 ORDER BY 1,2,3`, [actor.id]),
+    product ? db.query(`SELECT l.id,l.name,l.lead_no,l.company,l.phone,l.stage,${jsonValue("calling_resolution")} AS calling_resolution,${jsonValue("proposed_solution")} AS proposed_solution,l.updated_at FROM leads l ${filterSql} ORDER BY l.updated_at DESC NULLS LAST LIMIT 100`, params) : Promise.resolve({ rows: [] }),
+  ]);
+  return json(res, 200, { summary: summary.rows, leads: rows.rows });
 }
 
 async function addLeadActivityDisplayNames(db, lead, collections) {
@@ -690,8 +720,29 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
   } catch (error) { if (error.status) return json(res, error.status, { error: error.message }); return json(res, 500, { error: "Unable to save lead field." }); }
 }
 
+function leadAuditChanges(current, fields, body) {
+  const changes = [];
+  const tracked = ["name", "first_name", "last_name", "email", "phone", "company", "designation", "team", "lead_type", "priority", "stage", "permission", "lead_status", "owner_user_id", "pso_date", "legacy_finance"];
+  for (const field of tracked) {
+    if (body[field] === undefined) continue;
+    const oldValue = current[field] ?? null;
+    const newValue = fields[field] ?? null;
+    if (String(oldValue ?? "") !== String(newValue ?? "")) changes.push({ field, oldValue, newValue });
+  }
+  if (body.lead_fields && typeof body.lead_fields === "object") {
+    const oldValues = current.custom_values?.lead_fields || {};
+    const newValues = fields.custom_values?.lead_fields || {};
+    for (const field of Object.keys(body.lead_fields)) {
+      const oldValue = oldValues[field] ?? null;
+      const newValue = newValues[field] ?? null;
+      if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) changes.push({ field, oldValue, newValue });
+    }
+  }
+  return changes;
+}
+
 async function updateLead(req, res, db, actor, id, parsedBody = null) {
-  const body = parsedBody || await readJson(req); const current = canAccessAllLeads(actor) ? (await db.query("SELECT * FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0] : (await db.query("SELECT * FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); const explicitPermission = String(body.permission ?? "").trim(); const nextPermission = explicitPermission || String(current.permission || "Pending"); if (explicitPermission && nextPermission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const merged = { ...current, ...body, lead_type: body.lead_type || current.lead_type || "DL", stage: body.stage || current.stage || "lead", permission: nextPermission, custom_values: body.custom_values ?? current.custom_values }; if (body.first_name !== undefined || body.last_name !== undefined) merged.name = `${String(body.first_name ?? current.first_name ?? "").trim()} ${String(body.last_name ?? current.last_name ?? "").trim()}`.trim(); const fields = leadFields(merged); if (!fields) return invalidLead(res, "Lead name and lead type are required."); const currentType = leadTypeValue(current.lead_type); const explicitType = String(body.lead_type ?? "").trim(); const explicitStage = String(body.stage ?? "").trim(); const typeChanged = Boolean(explicitType) && fields.lead_type !== currentType; const stageChanged = Boolean(explicitStage) && fields.stage !== String(current.stage || ""); const permissionChanged = Boolean(explicitPermission) && fields.permission !== String(current.permission || ""); if (typeChanged && !(await validDropdownValue(db, "lead_type", fields.lead_type))) return invalidLead(res, "The selected lead type is no longer available."); if (stageChanged && !(await validDropdownValue(db, "lead_stage", fields.stage))) return invalidLead(res, "The selected lead stage is no longer available."); if (permissionChanged && !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res, "The selected permission value is no longer available."); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,first_name=$3,last_name=$4,email=$5,phone=$6,company=$7,designation=$8,team=$9,lead_type=$10,priority=$11,stage=$12,permission=$13,lead_status=$14,owner_user_id=$15,pso_date=$16,custom_values=$17,legacy_finance=$18,updated_at=now() WHERE id=$1", [id, fields.name, fields.first_name, fields.last_name, fields.email, fields.phone, fields.company, fields.designation, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch (error) { console.error(`lead update failed code=${error?.code || "unknown"} status=${error?.status || "none"} constraint=${error?.constraint || "none"}`); return json(res, 500, { error: "Unable to save lead." }); }
+  const body = parsedBody || await readJson(req); const current = canAccessAllLeads(actor) ? (await db.query("SELECT * FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0] : (await db.query("SELECT * FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0]; if (!current) return json(res, 404, { error: "Lead not found." }); const explicitPermission = String(body.permission ?? "").trim(); const nextPermission = explicitPermission || String(current.permission || "Pending"); if (explicitPermission && nextPermission !== current.permission && !requireCapability("leads.permission", actor)) return json(res, 403, { error: "You do not have permission to change permission." }); const merged = { ...current, ...body, lead_type: body.lead_type || current.lead_type || "DL", stage: body.stage || current.stage || "lead", permission: nextPermission, custom_values: body.custom_values ?? current.custom_values }; if (body.first_name !== undefined || body.last_name !== undefined) merged.name = `${String(body.first_name ?? current.first_name ?? "").trim()} ${String(body.last_name ?? current.last_name ?? "").trim()}`.trim(); const fields = leadFields(merged); if (!fields) return invalidLead(res, "Lead name and lead type are required."); const currentType = leadTypeValue(current.lead_type); const explicitType = String(body.lead_type ?? "").trim(); const explicitStage = String(body.stage ?? "").trim(); const typeChanged = Boolean(explicitType) && fields.lead_type !== currentType; const stageChanged = Boolean(explicitStage) && fields.stage !== String(current.stage || ""); const permissionChanged = Boolean(explicitPermission) && fields.permission !== String(current.permission || ""); if (typeChanged && !(await validDropdownValue(db, "lead_type", fields.lead_type))) return invalidLead(res, "The selected lead type is no longer available."); if (stageChanged && !(await validDropdownValue(db, "lead_stage", fields.stage))) return invalidLead(res, "The selected lead stage is no longer available."); if (permissionChanged && !(await validDropdownValue(db, "permission", fields.permission))) return invalidLead(res, "The selected permission value is no longer available."); fields.custom_values = LeadFields.mergeLeadValues(current.custom_values, body.lead_fields, await LeadFields.getDefinitions(db)); const auditChanges = leadAuditChanges(current, fields, body); const duplicates = await findLeadDuplicates(db, fields.phone, fields.email, id); if (duplicates.length) return duplicateLeadError(res); try { await transaction(db, async (tx) => { await tx.query("UPDATE leads SET name=$2,first_name=$3,last_name=$4,email=$5,phone=$6,company=$7,designation=$8,team=$9,lead_type=$10,priority=$11,stage=$12,permission=$13,lead_status=$14,owner_user_id=$15,pso_date=$16,custom_values=$17,legacy_finance=$18,updated_at=now() WHERE id=$1", [id, fields.name, fields.first_name, fields.last_name, fields.email, fields.phone, fields.company, fields.designation, fields.team, fields.lead_type, fields.priority, fields.stage, fields.permission, fields.lead_status, fields.owner_user_id, fields.pso_date, fields.custom_values, fields.legacy_finance]); if (body.owner_user_id !== undefined && String(body.owner_user_id || "") !== String(current.owner_user_id || "")) await writeAssignmentHistory(tx, { leadId: id, actorId: actor.id, action: "lead.owner_changed", previousOwner: current.owner_user_id, ownerId: fields.owner_user_id, reason: "manual", note: "Lead owner changed manually." }); if (auditChanges.length) for (const change of auditChanges) await writeAudit(tx, { actorUserId: actor.id, action: "lead.field_updated", entityType: "lead", entityId: id, field: change.field, oldValue: JSON.stringify(change.oldValue), newValue: JSON.stringify(change.newValue), ip: req.socket.remoteAddress }); else await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, ip: req.socket.remoteAddress }); }); return json(res, 200, { id }); } catch (error) { console.error(`lead update failed code=${error?.code || "unknown"} status=${error?.status || "none"} constraint=${error?.constraint || "none"}`); return json(res, 500, { error: "Unable to save lead." }); }
 }
 async function reassignLeadRoundRobin(req, res, db, actor, id) {
   const current = (await db.query("SELECT * FROM leads WHERE id=$1", [id])).rows[0];
@@ -1257,6 +1308,10 @@ async function route(req, res, db) {
   if (followupCreateMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadFollowup(req, res, db, user, decodeURIComponent(followupCreateMatch[1])); }
   const followupActionMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups\/([^/]+)\/(reschedule|complete)$/);
   if (followupActionMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const leadId = decodeURIComponent(followupActionMatch[1]); const followupId = decodeURIComponent(followupActionMatch[2]); return followupActionMatch[3] === "reschedule" ? rescheduleLeadFollowup(req, res, db, user, leadId, followupId) : completeLeadFollowup(req, res, db, user, leadId, followupId); }
+  if (url.pathname === "/api/product-master" && req.method === "GET") {
+    if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
+    return productMasterList(res, db, url, user);
+  }
   if (url.pathname === "/api/leads" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     return leadsList(req, res, db, url, user);

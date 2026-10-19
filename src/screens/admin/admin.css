@@ -454,7 +454,17 @@
 .assignment-lead-table td small { color: var(--ink-2); }
 .assignment-pagination { justify-content: flex-end; color: var(--ink-2); font-size: 12px; }
 .assignment-pagination span:first-child { margin-right: auto; }
+.admin-audit-card { padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); box-shadow: var(--shadow-sm); }
+.admin-audit-list { display: grid; gap: 8px; }
+.admin-audit-list article { display: grid; grid-template-columns: minmax(190px, .9fr) minmax(280px, 1.5fr) minmax(120px, .55fr); gap: 18px; align-items: center; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-1); }
+.admin-audit-actor, .admin-audit-change { display: grid; gap: 4px; min-width: 0; }
+.admin-audit-actor strong, .admin-audit-change strong { color: var(--ink); font-size: 14px; }
+.admin-audit-actor span, .admin-audit-change span, .admin-audit-record { color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+.admin-audit-change em { font-style: normal; text-decoration: line-through; color: var(--ink-2); }
+.admin-audit-change b { color: var(--ink); }
+.admin-audit-record { text-align: right; word-break: break-word; }
 @media (max-width: 760px) { .assignment-manual-form { grid-template-columns: 1fr; } .assignment-selected-leads { grid-column: auto; } }
+@media (max-width: 760px) { .admin-audit-card { padding: 16px; } .admin-audit-list article { grid-template-columns: 1fr; gap: 8px; } .admin-audit-record { text-align: left; } }
 @media (max-width: 1000px) { .assignment-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .assignment-filter-actions { justify-content: flex-end; } }
 @media (max-width: 760px) { .assignment-filter-row { grid-template-columns: 1fr; } .assignment-action-bar { align-items: stretch; flex-direction: column; } .assignment-action-bar > strong { margin-right: 0; } .assignment-action-bar label { min-width: 0; } .assignment-pagination { justify-content: space-between; flex-wrap: wrap; } .assignment-pagination span:first-child { width: 100%; } }
 @media (max-width: 760px) { .assignment-rule-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

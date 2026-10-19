@@ -51,7 +51,31 @@ async function adminData(db, screen) {
   if (screen === "user-management") return { rows: await optionalRows(db, `SELECT u.id,u.name,u.email,COALESCE(mr.name,ep.role_label,u.role) AS role,u.role AS access_level,u.member_role_id,ep.team AS department,u.active,u.created_at FROM users u LEFT JOIN employee_profiles ep ON ep.user_id=u.id LEFT JOIN member_roles mr ON mr.id=u.member_role_id ORDER BY u.name ASC,u.id ASC`) };
   if (screen === "templates") return { rows: await optionalRows(db, `SELECT source_id, category, sequence, channel, subject, language, active FROM admin_templates ORDER BY category ASC, sequence ASC, source_id ASC`) };
   if (screen === "integrations") return { rows: await optionalRows(db, `SELECT source_id, name, enabled FROM integration_catalog ORDER BY name ASC, source_id ASC`) };
-  if (screen === "audit") return { rows: await optionalRows(db, `SELECT id, occurred_at, actor_id, action, entity, entity_id, field FROM lead_history ORDER BY occurred_at DESC NULLS LAST, id DESC LIMIT $1`, [100]) };
+  if (screen === "audit") {
+    const [metrics, rows] = await Promise.all([
+      optionalOne(db, `SELECT
+        count(*)::int AS total_activities,
+        count(*) FILTER (WHERE occurred_at >= CURRENT_DATE)::int AS activities_today,
+        count(DISTINCT actor_user_id) FILTER (WHERE actor_user_id IS NOT NULL)::int AS active_users
+        FROM audit_log`),
+      optionalRows(db, `SELECT
+        a.id,
+        a.occurred_at,
+        COALESCE(NULLIF(u.name, ''), NULLIF(u.email, ''), a.actor_user_id, 'System') AS user_name,
+        a.action,
+        a.entity_type,
+        a.entity_id,
+        a.field,
+        a.old_value,
+        a.new_value,
+        count(*) OVER (PARTITION BY a.actor_user_id)::int AS user_change_count
+        FROM audit_log a
+        LEFT JOIN users u ON u.id = a.actor_user_id
+        ORDER BY a.occurred_at DESC NULLS LAST, a.id DESC
+        LIMIT $1`, [100]),
+    ]);
+    return { metrics, rows, note: "Each entry is permanent. User change count is the total recorded activity for that user." };
+  }
   if (screen === "reports") return { metrics: await optionalOne(db, `SELECT count(*)::int AS leads, count(*) FILTER (WHERE stage = 'registered')::int AS registered, count(*) FILTER (WHERE stage = 'attended')::int AS attended, count(*) FILTER (WHERE stage = 'psreg')::int AS sales FROM leads`, []), rows: [] };
   if (screen === "import-export") return { metrics: {}, rows: [], note: "Import and export history is not available in this workspace yet." };
   return { metrics: {}, rows: [
