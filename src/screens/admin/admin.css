@@ -439,6 +439,12 @@
 .assignment-action-bar { justify-content: flex-end; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .assignment-action-bar > strong { margin-right: auto; color: var(--ink); }
 .assignment-action-bar label { min-width: 200px; }
+.assignment-manual-members { min-width: min(460px, 100%); margin: 0; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 7px; }
+.assignment-manual-members legend { padding: 0 4px; color: var(--ink-2); font-size: 11px; font-weight: 700; }
+.assignment-manual-members > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.assignment-manual-members label { display: inline-flex; align-items: center; min-width: auto; gap: 5px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink-1); font-size: 12px; font-weight: 600; cursor: pointer; }
+.assignment-manual-members input { accent-color: var(--red); }
+.assignment-action-bar > small { width: 100%; color: var(--ink-2); font-size: 12px; }
 .assignment-lead-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .assignment-lead-table { width: 100%; min-width: 780px; border-collapse: collapse; }
 .assignment-lead-table th, .assignment-lead-table td { padding: 10px 12px; border-bottom: 1px solid var(--line-2); color: var(--ink-1); font-size: 13px; text-align: left; vertical-align: middle; }

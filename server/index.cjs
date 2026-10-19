@@ -307,7 +307,10 @@ async function leadsList(req, res, db, url, actor) {
           const available = await db.query("SELECT code,label FROM master_values WHERE master_type='product' AND active=true AND (code = ANY($1::text[]) OR label = ANY($1::text[]))", [selectedProducts]);
           if (available.rows.length !== selectedProducts.length) return invalidLeadsQuery(res);
           const productCodes = available.rows.map((row) => String(row.code || row.label));
-          where.push(`EXISTS (SELECT 1 FROM lead_products lp WHERE lp.lead_id=l.id AND lp.product_code IN (${productCodes.map((value) => bind(value)).join(", ")}))`);
+          // Product-specific calling resolutions are stored against the lead's
+          // Proposed Solution. Do not rely on lead_products here: that record
+          // is created when the user later selects a stage.
+          where.push(`${jsonValue("proposed_solution")} IN (${productCodes.map((value) => bind(value)).join(", ")})`);
         }
       }
     }
@@ -680,7 +683,10 @@ async function updateInlineLeadField(req, res, db, actor, id, body) {
       await writeAudit(tx, { actorUserId: actor.id, action: "lead.updated", entityType: "lead", entityId: id, field: requested, oldValue: JSON.stringify(current[canonical.storage.key] ?? current.custom_values?.lead_fields?.[canonical.storage.key] ?? null), newValue: JSON.stringify(value), ip: req.socket.remoteAddress });
       return updatedLead;
     });
-    return json(res, 200, { id, lead: updated });
+    // Match the Leads list representation. The client merges this response
+    // into an existing row, so returning materialized values prevents an old
+    // top-level display field from overwriting the just-saved custom value.
+    return json(res, 200, { id, lead: materializeLead(updated) });
   } catch (error) { if (error.status) return json(res, error.status, { error: error.message }); return json(res, 500, { error: "Unable to save lead field." }); }
 }
 
@@ -697,10 +703,42 @@ async function reassignLeadRoundRobin(req, res, db, actor, id) {
   } catch { return json(res, 500, { error: "Unable to reassign lead by round-robin." }); }
 }
 async function changeLeadStage(req, res, db, actor, id) { const body = await readJson(req); const stage = String(body.stage || ""); if (!(await validDropdownValue(db, "lead_stage", stage))) return invalidLead(res); try { await transaction(db, async (tx) => { const current = (await tx.query("SELECT stage FROM leads WHERE id=$1", [id])).rows[0]; if (!current) throw Object.assign(new Error("missing"), { status: 404 }); await tx.query("UPDATE leads SET stage=$2,updated_at=now() WHERE id=$1", [id, stage]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.stage_changed", entityType: "lead", entityId: id, field: "stage", oldValue: current.stage, newValue: stage, ip: req.socket.remoteAddress }); }); return json(res, 200, { id, stage }); } catch (error) { return json(res, error.status === 404 ? 404 : 500, { error: error.status === 404 ? "Lead not found." : "Unable to change lead stage." }); } }
+async function changeLeadProductStage(req, res, db, actor, id) {
+  const body = await readJson(req); const stage = String(body.stage || "").trim();
+  if (!stage) return invalidLead(res, "Choose a product stage.");
+  const current = canAccessAllLeads(actor) ? (await db.query("SELECT * FROM leads WHERE id=$1 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id])).rows[0] : (await db.query("SELECT * FROM leads WHERE id=$1 AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [id, actor.id])).rows[0];
+  if (!current) return json(res, 404, { error: "Lead not found." });
+  const proposed = String(current.custom_values?.lead_fields?.proposed_solution ?? current.custom_values?.proposed_solution ?? "");
+  const requestedProducts = proposed.split(/[,;|]/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+  if (!requestedProducts.length) return invalidLead(res, "Select the lead's Proposed Solution product before choosing a stage.");
+  const products = (await db.query("SELECT id,code,label FROM master_values WHERE master_type='product' AND active=true AND (lower(btrim(code)) = ANY($1::text[]) OR lower(btrim(label)) = ANY($1::text[]))", [requestedProducts])).rows;
+  const activeStages = products.length ? (await db.query("SELECT product_id FROM product_stages WHERE product_id=ANY($1::text[]) AND active=true AND label=$2", [products.map((product) => product.id), stage])).rows : [];
+  const activeProductIds = new Set(activeStages.map((row) => row.product_id)); const matchingProducts = products.filter((product) => activeProductIds.has(product.id));
+  if (!matchingProducts.length) return invalidLead(res, "This stage is not active for the lead's Proposed Solution product.");
+  try { const lead = await transaction(db, async (tx) => { for (const product of matchingProducts) { const code = String(product.code || product.label); await tx.query("INSERT INTO lead_products(id,lead_id,product_code,stage,call_stage,funnel) VALUES($1,$2,$3,$4,'lead',$5) ON CONFLICT(lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,updated_at=now()", [`lead-product-${crypto.randomUUID()}`, id, code, stage, PRODUCT_FUNNELS[code] || "standard"]); } const result = await tx.query("UPDATE leads SET stage=$2,updated_at=now() WHERE id=$1 RETURNING *", [id, stage]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.product_stage_changed", entityType: "lead", entityId: id, field: "stage", oldValue: current.stage, newValue: stage, ip: req.socket.remoteAddress }); return result.rows[0]; }); return json(res, 200, { id, lead }); } catch { return json(res, 500, { error: "Unable to change product stage." }); }
+}
 async function changeLeadPermission(req, res, db, actor, id) { const body = await readJson(req); const permission = String(body.permission || ""); if (!(await validDropdownValue(db, "permission", permission))) return invalidLead(res); try { await transaction(db, async (tx) => { const current = (await tx.query("SELECT permission FROM leads WHERE id=$1", [id])).rows[0]; if (!current) throw Object.assign(new Error("missing"), { status: 404 }); await tx.query("UPDATE leads SET permission=$2,updated_at=now() WHERE id=$1", [id, permission]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.permission_changed", entityType: "lead", entityId: id, field: "permission", oldValue: current.permission, newValue: permission, ip: req.socket.remoteAddress }); }); return json(res, 200, { id, permission }); } catch (error) { return json(res, error.status === 404 ? 404 : 500, { error: error.status === 404 ? "Lead not found." : "Unable to change lead permission." }); } }
 async function updateLeadProducts(req, res, db, actor, id) { const body = await readJson(req); if (!Array.isArray(body.products)) return invalidLead(res); const products = leadProductRows(id, body.products); try { await transaction(db, async (tx) => { for (const product of products) await tx.query("INSERT INTO lead_products (id,lead_id,product_code,stage,call_stage,funnel) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (lead_id,product_code) DO UPDATE SET stage=EXCLUDED.stage,call_stage=EXCLUDED.call_stage,funnel=EXCLUDED.funnel,updated_at=now()", [product.id, id, product.product_code, product.stage, product.call_stage, product.funnel]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.products_updated", entityType: "lead", entityId: id, newValue: "products", ip: req.socket.remoteAddress }); }); return json(res, 200, { id, product_count: products.length }); } catch { return json(res, 500, { error: "Unable to save lead products." }); }
 }
 function leadIds(value) { return [...new Set((Array.isArray(value) ? value : []).map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 500); }
+async function moveLeadsToProductResolution(req, res, db, actor) {
+  const body = await readJson(req); const ids = leadIds(body.ids).slice(0, 50);
+  const productCode = String(body.product_code || "").trim(); const resolution = String(body.resolution || "").trim();
+  if (!ids.length || !productCode || !resolution) return json(res, 400, { error: "Choose leads, a product, and a calling resolution." });
+  const product = (await db.query("SELECT id,code FROM master_values WHERE master_type='product' AND active=true AND lower(btrim(code))=lower(btrim($1))", [productCode])).rows[0];
+  if (!product) return json(res, 400, { error: "The selected product is no longer active." });
+  const allowed = (await db.query("SELECT id FROM product_call_resolutions WHERE product_id=$1 AND active=true AND label=$2", [product.id, resolution])).rows[0];
+  if (!allowed) return json(res, 400, { error: "That calling resolution is not active for the selected product." });
+  const accessible = canAccessAllLeads(actor)
+    ? (await db.query("SELECT id FROM leads WHERE id=ANY($1::text[]) AND COALESCE(custom_values->>'archived','false') <> 'true'", [ids])).rows.map((row) => row.id)
+    : (await db.query("SELECT id FROM leads WHERE id=ANY($1::text[]) AND owner_user_id=$2 AND COALESCE(custom_values->>'archived','false') <> 'true'", [ids, actor.id])).rows.map((row) => row.id);
+  if (!accessible.length) return json(res, 404, { error: "No selected leads are available." });
+  await transaction(db, async (tx) => {
+    await tx.query("UPDATE leads SET custom_values=jsonb_set(jsonb_set(COALESCE(custom_values,'{}'::jsonb), ARRAY['lead_fields','proposed_solution'], $1::jsonb, true), ARRAY['lead_fields','calling_resolution'], $2::jsonb, true),updated_at=now() WHERE id=ANY($3::text[])", [JSON.stringify(product.code), JSON.stringify(resolution), accessible]);
+    for (const id of accessible) await writeAudit(tx, { actorUserId: actor.id, action: "lead.product_resolution_changed", entityType: "lead", entityId: id, field: "calling_resolution", newValue: JSON.stringify({ product: product.code, resolution }), ip: req.socket.remoteAddress });
+  });
+  return json(res, 200, { updated: accessible.length, ids: accessible });
+}
 async function archiveLeads(req, res, db, actor) {
   const body = await readJson(req); const ids = leadIds(body.ids);
   if (!ids.length) return json(res, 400, { error: "Select at least one lead." });
@@ -1003,21 +1041,26 @@ async function assignmentRuleDelete(res, db, actor, id, ip) {
 }
 async function assignmentManualWrite(req, res, db, actor) {
   let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid manual assignment."); }
-  const ownerId = String(body.owner_user_id || "").trim();
+  const ownerIds = [...new Set((Array.isArray(body.owner_user_ids) ? body.owner_user_ids : [body.owner_user_id]).map((value) => String(value || "").trim()).filter((value) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)))].slice(0, 50);
   const leadIds = Array.isArray(body.lead_ids) ? [...new Set(body.lead_ids.map((value) => String(value || "").trim()).filter((value) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)))].slice(0, 100) : [];
-  if (!ownerId || !leadIds.length) return userWriteError(res, 400, "Choose at least one lead and an active user.");
-  const owner = (await db.query("SELECT id,name FROM users WHERE id=$1 AND active=true AND offboarded=false", [ownerId])).rows[0];
-  if (!owner) return userWriteError(res, 400, "The selected user is inactive or unavailable.");
+  if (!ownerIds.length || !leadIds.length) return userWriteError(res, 400, "Choose at least one lead and one active user.");
+  const ownerRows = (await db.query("SELECT id,name FROM users WHERE id = ANY($1::text[]) AND active=true AND offboarded=false", [ownerIds])).rows;
+  if (ownerRows.length !== ownerIds.length) return userWriteError(res, 400, "One or more selected users are inactive or unavailable.");
+  const ownerById = new Map(ownerRows.map((owner) => [owner.id, owner]));
+  const owners = ownerIds.map((id) => ownerById.get(id));
   await transaction(db, async (tx) => {
     const selected = (await tx.query("SELECT id,owner_user_id FROM leads WHERE id = ANY($1::text[]) FOR UPDATE", [leadIds])).rows;
     if (selected.length !== leadIds.length) throw Object.assign(new Error("One or more leads were not found."), { status: 404 });
-    for (const lead of selected) {
+    const leadById = new Map(selected.map((lead) => [lead.id, lead]));
+    for (const [index, leadId] of leadIds.entries()) {
+      const lead = leadById.get(leadId); const owner = owners[index % owners.length];
       await tx.query("UPDATE leads SET owner_user_id=$2,updated_at=now() WHERE id=$1", [lead.id, owner.id]);
-      await writeAssignmentHistory(tx, { leadId: lead.id, actorId: actor.id, action: "lead.owner_changed", previousOwner: lead.owner_user_id, ownerId: owner.id, reason: "manual", note: `Manually assigned to ${owner.name || owner.id}.` });
+      await writeAssignmentHistory(tx, { leadId: lead.id, actorId: actor.id, action: "lead.owner_changed", previousOwner: lead.owner_user_id, ownerId: owner.id, reason: owners.length > 1 ? "manual_round_robin" : "manual", note: `${owners.length > 1 ? "Round-robin assigned" : "Manually assigned"} to ${owner.name || owner.id}.` });
       await writeAudit(tx, { actorUserId: actor.id, action: "lead.manually_assigned", entityType: "lead", entityId: lead.id, oldValue: lead.owner_user_id || null, newValue: owner.id, ip: req.socket.remoteAddress });
     }
   });
-  return json(res, 200, { assigned: leadIds.length, owner: { id: owner.id, name: owner.name } });
+  const distribution = Object.fromEntries(owners.map((owner) => [owner.id, leadIds.filter((_, index) => owners[index % owners.length].id === owner.id).length]));
+  return json(res, 200, { assigned: leadIds.length, owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), distribution });
 }
 async function masterWrite(req, res, db, actor, id = null) {
   const body = await readJson(req); const masterType = String(body.master_type || "").trim(); const label = String(body.label || "").trim();
@@ -1237,10 +1280,13 @@ async function route(req, res, db) {
     try { return json(res, 200, await LeadImport.apply(req, db, user)); } catch (error) { return json(res, error.status || 500, error.analysis ? { error: error.message, ...error.analysis } : { error: error.status ? error.message : "Unable to apply the lead import." }); }
   }
   if (url.pathname === "/api/leads" && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return createLead(req, res, db, user); }
+  if (url.pathname === "/api/leads/bulk-product-resolution" && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return moveLeadsToProductResolution(req, res, db, user); }
   if (url.pathname === "/api/leads/bulk-archive" && req.method === "POST") { if (!requireCapability("leads.delete", user)) return json(res, 403, { error: "You do not have permission to archive leads." }); return archiveLeads(req, res, db, user); }
   if (url.pathname === "/api/leads/bulk-delete" && req.method === "POST") { if (!requireCapability("leads.delete", user)) return json(res, 403, { error: "You do not have permission to permanently delete leads." }); return permanentlyDeleteLeads(req, res, db, user); }
   const roundRobinMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/round-robin$/);
   if (roundRobinMatch && req.method === "POST") { if (!requireCapability("leads.assign", user)) return json(res, 403, { error: "You do not have permission to assign leads." }); return reassignLeadRoundRobin(req, res, db, user, decodeURIComponent(roundRobinMatch[1])); }
+  const leadProductStageMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/product-stage$/);
+  if (leadProductStageMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return changeLeadProductStage(req, res, db, user, decodeURIComponent(leadProductStageMatch[1])); }
   const leadWriteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/(stage|permission|products)$/);
   if (leadWriteMatch && req.method === "POST") {
     const id = decodeURIComponent(leadWriteMatch[1]);
