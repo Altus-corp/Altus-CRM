@@ -58,7 +58,7 @@
 .lead-table tbody tr.is-moving { background: var(--bg-2); opacity: .7; }
 .lead-table td:first-child, .lead-table td strong { color: var(--ink); }
 .lead-table small { display: block; margin-top: 4px; color: var(--ink-2); font-size: 10px; }
-.lead-table-checkbox-col { width: var(--lead-selection-column-width, 72px); min-width: var(--lead-selection-column-width, 72px); max-width: var(--lead-selection-column-width, 72px); padding: 12px 8px !important; text-align: left !important; }
+.lead-table-checkbox-col { width: var(--lead-selection-column-width, 152px); min-width: var(--lead-selection-column-width, 152px); max-width: var(--lead-selection-column-width, 152px); padding: 12px 8px !important; text-align: left !important; }
 .lead-row-select-control, .lead-row-drag-grip { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; padding: 0; vertical-align: middle; }
 .lead-row-select-control { cursor: pointer; }
 .lead-row-drag-grip { margin-left: 4px; border: 0; background: transparent; color: var(--ink-3); cursor: grab; }
@@ -66,6 +66,11 @@
 .lead-table tbody tr.is-row-draggable .lead-row-drag-grip { cursor: grab; user-select: none; }
 .lead-table tbody tr.is-row-draggable .lead-row-drag-grip:active { cursor: grabbing; }
 .lead-row-drag-grip:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; border-radius: 3px; }
+.lead-row-contact-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; vertical-align: middle; }
+.lead-row-contact-action { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink-3); cursor: pointer; text-decoration: none; }
+.lead-row-contact-action:hover:not(:disabled), .lead-row-contact-action:focus-visible { background: var(--bg-2); color: var(--ink-1); outline: none; }
+.lead-row-contact-action:focus-visible { box-shadow: 0 0 0 2px var(--red-tint); }
+.lead-row-contact-action:disabled { color: var(--ink-3); cursor: not-allowed; opacity: .48; }
 .lead-row-drag-image { position: fixed; top: -100px; left: -100px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); box-shadow: var(--shadow-pop); font-size: 12px; font-weight: 700; pointer-events: none; }
 .lead-column-header { position: relative; cursor: grab; }
 .lead-column-header:has(.lead-column-resize-handle) { padding-right: 10px; }
@@ -430,17 +435,19 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 .lead-toolbar-page:hover:not(:disabled), .lead-toolbar-page:focus-visible { border-color: var(--red); color: var(--red); outline: none; }
 .lead-toolbar-page:disabled { cursor: not-allowed; opacity: .45; }
 .lead-toolbar-columns { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; font-size: 12px; }
-.lead-column-chooser { position: relative; flex: 0 0 auto; }
+.lead-column-chooser { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.lead-column-layout-unsaved { color: var(--ink-2); font-size: 11px; font-weight: 700; white-space: nowrap; }
 /* Enhanced column chooser dropdown */
 .lead-column-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
+  z-index: 250;
   display: flex;
   flex-direction: column;
-  width: 250px;
-  max-height: min(360px, calc(100vh - 240px));
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
@@ -500,7 +507,7 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
   min-height: 0;
   overflow-y: auto;
   padding: 4px 0;
-  max-height: 180px;
+  max-height: min(360px, 50vh);
 }
 .col-menu-item {
   display: flex;
@@ -515,7 +522,7 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 .col-menu-item:hover { background: var(--bg-2); }
 .col-menu-item input { width: 16px; height: 16px; accent-color: var(--red); cursor: pointer; }
 .col-menu-item > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.col-menu-pin { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink-2); cursor: pointer; font: inherit; font-size: 10px; font-weight: 700; }
+.col-menu-pin { flex: 0 0 58px; width: 58px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink-2); cursor: pointer; font: inherit; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .col-menu-pin:hover, .col-menu-pin:focus-visible { border-color: var(--red); color: var(--red); outline: none; }
 .col-menu-drag-handle {
   flex-shrink: 0;
@@ -528,43 +535,48 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 .col-menu-drag-handle:active { cursor: grabbing; }
 .col-dragging { opacity: 0.5; background: var(--bg-2); }
 .col-menu-footer {
-   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 10px 14px;
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 12px 16px;
   border-top: 1px solid var(--line);
-   background: var(--panel);
+  background: var(--panel);
 }
+.col-menu-footer-secondary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.col-menu-footer button { box-sizing: border-box; white-space: nowrap; }
 .col-menu-reset {
-  padding: 8px 20px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--panel);
   color: var(--ink-1);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   transition: border-color 0.12s ease, color 0.12s ease;
 }
 .col-menu-reset:hover { border-color: var(--ink-3); color: var(--ink); }
 .col-menu-apply {
-  padding: 8px 24px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
   border: 1px solid var(--red);
   border-radius: 7px;
   background: var(--red);
   color: #fff;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .col-menu-apply:hover { background: var(--red-600, #c92832); border-color: var(--red-600, #c92832); }
-.col-menu-unsaved { color: var(--ink-2); font-size: 11px; font-weight: 700; }
-.col-menu-save-error { margin: 0; padding: 0 16px 12px; color: var(--red); font-size: 11px; }
+.col-menu-unsaved { color: var(--ink-2); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.col-menu-save-error { margin: 0; color: var(--red); font-size: 11px; }
 .lead-table { min-width: 1080px; font-size: 12px; }
 .lead-table th { position: sticky; top: 0; z-index: 1; padding: 12px 16px; background: var(--bg-2); color: var(--ink-1); font-size: 10px; letter-spacing: .08em; }
 .lead-table td { padding: 13px 16px; }

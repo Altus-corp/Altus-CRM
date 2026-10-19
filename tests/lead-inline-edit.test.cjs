@@ -60,7 +60,7 @@ test("every server-sortable lead header has the shared icon path and the checkbo
 });
 
 test("lead row selection control stays before the drag grip in the fixed first column", () => {
-  assert.match(pageSource, /const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 72;/);
+  assert.match(pageSource, /const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 152;/);
   assert.match(pageSource, /leadTableWidth = LEAD_TABLE_SELECTION_COLUMN_WIDTH/);
   assert.match(pageSource, /<label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox"[\s\S]*?<button type="button" className="lead-row-drag-grip"/);
   assert.match(pageSource, /<td className="lead-table-checkbox-col" onClick=\{\(event\) => \{ event\.stopPropagation\(\); \}\}/);

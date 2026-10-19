@@ -1,15 +1,19 @@
 import { ADDITIONAL_LEAD_FIELDS, ActivityKind, EMPTY_LEAD_FORM, fieldValue, isQuickFilterDateField, LEAD_COLUMNS, LEAD_ROW_DROP_LIMIT, leadIdsForResolutionDrop, planResolutionDrop, SYSTEM_LEAD_FIELDS, useLeadsScreen, type LeadFormState, type LeadColumn, type Lead } from "./function";
+import { formatWhatsAppPhone } from "./quick-contact";
 import { useAuth } from "../../shared/auth/auth";
 import { usePermission } from "../../shared/auth/permissions";
 import { api } from "../../shared/api/client";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronsUpDown, ChevronDown, ChevronUp } from "lucide-react";
+import { Mail } from "lucide-react";
 import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { DropdownSelect } from "../../shared/dropdowns/component";
 import { useRegisterLeadNavbarActions } from "../../shared/layout/lead-navbar-actions";
 import { useResizableColumns } from "../../shared/tables/use-resizable-columns";
 import { callResolutionOptionsForProposedSolution, canonicalManagedFieldKey, isInlineTableSelectField, keepAllowedColumnOrder, legacyLeadColumnForAdminField, mergeCoreAndConfiguredTableColumns, resolutionProductCodesForProposedSolution } from "./inline-field-policy";
+import { isColumnChooserEscape, shouldCloseColumnChooser } from "./column-chooser-popup";
 import "./leads.css";
 
 const LEADS_TABLE_LAYOUT_CACHE_KEY = "leads.table-layout.v1";
@@ -17,7 +21,7 @@ const DEFAULT_LEAD_TABLE_COLUMN_KEYS = ["leadTypeCode", "name", "permission", "s
 const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
-const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 72;
+const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 152;
 const LEAD_TABLE_WIDTH_DEFAULTS: Record<string, number> = { leadNo: 110, leadTypeCode: 150, name: 180, company: 180, cellNo: 135, designation: 160, businessCategory: 170, leadSource: 150, rating: 110, permission: 135, activity: 185, lead_status: 140 };
 const CORE_TABLE_COLUMN_KEYS = new Set(["leadNo", "leadTypeCode", "name", "cellNo", "permission", "created_at", "updated_at", "last_opened_at"]);
 const CORE_TABLE_DATA_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", cellNo: "phone", permission: "permission", stage: "stage", owner: "owner", created_at: "created_at", updated_at: "updated_at", last_opened_at: "last_opened_at" };
@@ -109,7 +113,20 @@ export function isLeadRowDragInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest(ROW_DRAG_INTERACTIVE_SELECTOR));
 }
 
-function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, onDragStart: startDrag, onDragEnd: endDrag, selectionSticky, pinnedCellStyle }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; moving: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; onDragStart: (event: React.DragEvent<HTMLElement>, lead: Lead) => void; onDragEnd: () => void; selectionSticky: boolean; pinnedCellStyle: (key: string) => React.CSSProperties | undefined }) {
+function LeadQuickContactActions({ lead, canContact }: { lead: Lead; canContact: boolean }) {
+  const email = lead.email?.trim() || "";
+  const whatsappNumber = formatWhatsAppPhone(lead.phone);
+  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+  const preventDrag = (event: React.DragEvent<HTMLElement>) => event.preventDefault();
+  const emailDisabled = !canContact || !email;
+  const whatsappDisabled = !canContact || !whatsappNumber;
+  return <span className="lead-row-contact-actions" data-lead-row-no-drag="true" onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}>
+    {emailDisabled ? <button className="lead-row-contact-action" type="button" disabled aria-disabled="true" draggable={false} title="No email available" aria-label={`Send email to ${lead.name}`}><Mail size={15} aria-hidden="true" /></button> : <a className="lead-row-contact-action" href={`mailto:${email}`} draggable={false} title="Send email" aria-label={`Send email to ${lead.name}`} onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}><Mail size={15} aria-hidden="true" /></a>}
+    {whatsappDisabled ? <button className="lead-row-contact-action lead-row-whatsapp-action" type="button" disabled aria-disabled="true" draggable={false} title="No phone number available" aria-label={`Chat with ${lead.name} on WhatsApp`}><WhatsAppIcon color="var(--ink-3)" /></button> : <a className="lead-row-contact-action lead-row-whatsapp-action" href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noopener noreferrer" draggable={false} title="Chat on WhatsApp" aria-label={`Chat with ${lead.name} on WhatsApp`} onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}><WhatsAppIcon /></a>}
+  </span>;
+}
+
+function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, canContact, onDragStart: startDrag, onDragEnd: endDrag, selectionSticky, pinnedCellStyle }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; moving: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; canContact: boolean; onDragStart: (event: React.DragEvent<HTMLElement>, lead: Lead) => void; onDragEnd: () => void; selectionSticky: boolean; pinnedCellStyle: (key: string) => React.CSSProperties | undefined }) {
   const [hasFinePointer, setHasFinePointer] = useState(false);
   const suppressClickRef = useRef(false);
   useEffect(() => { const media = window.matchMedia("(pointer: fine)"); const sync = () => setHasFinePointer(media.matches); sync(); media.addEventListener("change", sync); return () => media.removeEventListener("change", sync); }, []);
@@ -121,8 +138,8 @@ function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSe
   const onRowPointerDown = () => { suppressClickRef.current = false; };
   const lastPinnedKey = fields.filter((field) => pinnedCellStyle(field.key)).at(-1)?.key;
   const cells = fields.map((field) => <td key={field.key} className={pinnedCellStyle(field.key) ? `lead-pinned-cell${field.key === lastPinnedKey ? " is-last-pinned" : ""}` : undefined} style={pinnedCellStyle(field.key)} data-lead-row-no-drag={field.input === "dropdown" || field.input === "boolean" ? "true" : undefined}>{renderField(lead, field)}</td>);
-  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => { event.stopPropagation(); onDragStart(event, lead); }} onDragEnd={(event) => { event.stopPropagation(); onDragEnd(); }}><GripVertical size={14} aria-hidden="true" /></button>}</td>{cells}<td data-lead-row-no-drag="true" onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "\u2014"}</option>)}</select></td></tr>;
-  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}</td>{cells}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
+  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => { event.stopPropagation(); onDragStart(event, lead); }} onDragEnd={(event) => { event.stopPropagation(); onDragEnd(); }}><GripVertical size={14} aria-hidden="true" /></button>}<LeadQuickContactActions lead={lead} canContact={canContact} /></td>{cells}<td data-lead-row-no-drag="true" onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "\u2014"}</option>)}</select></td></tr>;
+  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}<LeadQuickContactActions lead={lead} canContact={canContact} /></td>{cells}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
 }
 
 function displayField(value: unknown) {
@@ -255,9 +272,9 @@ function EmailIcon({ color = "var(--red)" }: { color?: string }) {
   );
 }
 
-function WhatsAppIcon() {
+function WhatsAppIcon({ color = "#25D366" }: { color?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#25d366" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
     </svg>
   );
@@ -647,6 +664,7 @@ function InlineLeadCell({ lead, column, canEdit, dropdownOptions, onSave }: { le
 export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_master" | "focused_calling" | "" }) {
   const screen = useLeadsScreen(forcedWorkQueue);
   const { user } = useAuth();
+  const canQuickContact = usePermission("leads.view");
   const navigate = useNavigate();
   const location = useLocation();
   const [callResolutionMoreOpen, setCallResolutionMoreOpen] = useState(false);
@@ -910,6 +928,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const defaultColumnKeys = DEFAULT_LEAD_TABLE_COLUMN_KEYS.filter((key) => baseFields.some((field) => field.key === key));
   void (LEAD_COLUMNS.filter((field) => !field.aliasOf));
   const [columnChooserOpen, setColumnChooserOpen] = useState(false);
+  const [columnChooserPosition, setColumnChooserPosition] = useState({ top: 12, left: 12 });
   const [groupByOpen, setGroupByOpen] = useState(false);
   const selectedProductCodes = screen.managedFilters.products || [];
   const [productStageOptions, setProductStageOptions] = useState<Array<{ id: string; label: string }>>([]);
@@ -996,12 +1015,59 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const layoutDraftChangedRef = useRef(false);
   const pendingPinnedPreferenceRef = useRef<PinnedColumnPreference | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
+  const columnChooserButtonRef = useRef<HTMLButtonElement>(null);
+  const columnChooserMenuRef = useRef<HTMLDivElement>(null);
+  const columnChooserSearchRef = useRef<HTMLInputElement>(null);
   const suppressHeaderSortClickRef = useRef(false);
   const filteredChooserFields = columnSearch ? allChooserFields.filter((f) => f.label.toLowerCase().includes(columnSearch.toLowerCase())) : allChooserFields;
   const filteredColumnKeys = filteredChooserFields.map((field) => field.key);
   const pendingAllSelected = filteredColumnKeys.length > 0 && filteredColumnKeys.every((key) => pendingColumnKeys.includes(key));
   const pendingSelectedCount = pendingColumnKeys.length;
-  useEffect(() => { if (columnChooserOpen) { setPendingColumnKeys([...visibleColumnKeys]); setColumnSearch(""); } }, [columnChooserOpen]);
+  function closeColumnChooser() {
+    setColumnChooserOpen(false);
+    requestAnimationFrame(() => columnChooserButtonRef.current?.focus());
+  }
+  function updateColumnChooserPosition() {
+    const trigger = columnChooserButtonRef.current;
+    if (!trigger) return;
+    const bounds = trigger.getBoundingClientRect();
+    if (bounds.bottom <= 0 || bounds.top >= window.innerHeight || bounds.right <= 0 || bounds.left >= window.innerWidth) { closeColumnChooser(); return; }
+    const width = Math.min(360, Math.max(0, window.innerWidth - 24));
+    const menuHeight = columnChooserMenuRef.current?.getBoundingClientRect().height || Math.min(520, window.innerHeight - 24);
+    setColumnChooserPosition({
+      left: Math.min(Math.max(12, bounds.right - width), Math.max(12, window.innerWidth - width - 12)),
+      top: Math.max(12, Math.min(bounds.bottom + 8, window.innerHeight - menuHeight - 12)),
+    });
+  }
+  function handleColumnChooserKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (isColumnChooserEscape(event.key)) { event.preventDefault(); closeColumnChooser(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'));
+    if (!focusable.length) return;
+    const current = focusable.indexOf(document.activeElement as HTMLElement);
+    const next = event.shiftKey ? (current <= 0 ? focusable.length - 1 : current - 1) : (current === focusable.length - 1 ? 0 : current + 1);
+    event.preventDefault();
+    focusable[next].focus();
+  }
+  useEffect(() => {
+    if (!columnChooserOpen) return;
+    setPendingColumnKeys([...visibleColumnKeys]);
+    setColumnSearch("");
+    const frame = requestAnimationFrame(() => { updateColumnChooserPosition(); columnChooserSearchRef.current?.focus(); });
+    const onViewportChange = () => updateColumnChooserPosition();
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("resize", onViewportChange); window.removeEventListener("scroll", onViewportChange, true); };
+  }, [columnChooserOpen]);
+  useEffect(() => {
+    if (!columnChooserOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!shouldCloseColumnChooser(event.target, columnChooserMenuRef.current, columnChooserButtonRef.current, dragColumnIdx !== null)) return;
+      closeColumnChooser();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [columnChooserOpen, dragColumnIdx]);
   useEffect(() => {
     if (!columnChooserOpen || pendingColumnKeys.length === 0 || (pendingColumnKeys.length === visibleColumnKeys.length && pendingColumnKeys.every((key, index) => key === visibleColumnKeys[index]))) return;
     saveColumnOrder(pendingColumnKeys);
@@ -1458,10 +1524,10 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         </button>
       </div>
       <div className="product-stage-summary system-work-queue-summary" aria-label="My lead queues"><span>My lead queues</span><div className="system-work-queue-toggle"><button type="button" className={screen.filters.work_queue === "lead_master" ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.chooseWorkQueue("lead_master")}>Lead Master</button><button type="button" className={screen.filters.work_queue === "focused_calling" ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.chooseWorkQueue("focused_calling")}>Focussed Calling</button></div>{selectedProductCodes.length > 0 && <>{productStageOptions.map((stage) => <button key={stage.id} type="button" className={selectedProductStages.includes(stage.label) ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => applyProductStageFilter(stage.label)}>{stage.label}</button>)}{!productStageOptions.length && <span className="product-stage-empty">No active stages for this product.</span>}</>}</div>
-      <div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="menu" onClick={() => setColumnChooserOpen((open) => !open)}>☷ <span>Columns</span></button>{columnChooserOpen && <div className="lead-column-menu" role="menu" aria-label="Choose columns">
+      <div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button ref={columnChooserButtonRef} className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="dialog" aria-controls="lead-column-chooser-dialog" onClick={() => columnChooserOpen ? closeColumnChooser() : setColumnChooserOpen(true)}>☷ <span>Columns</span></button>{hasUnsavedLayoutChanges && !columnChooserOpen && <span className="lead-column-layout-unsaved" role="status">Unsaved changes</span>}</div>{columnChooserOpen && createPortal(<div id="lead-column-chooser-dialog" ref={columnChooserMenuRef} className="lead-column-menu" role="dialog" aria-label="Choose columns" aria-modal="true" style={columnChooserPosition} onKeyDown={handleColumnChooserKeyDown}>
               <div className="col-menu-search-wrap">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input className="col-menu-search" type="text" placeholder="Search columns..." value={columnSearch} onChange={(e) => setColumnSearch(e.target.value)} autoFocus />
+                <input ref={columnChooserSearchRef} className="col-menu-search" type="text" placeholder="Search columns..." value={columnSearch} onChange={(e) => setColumnSearch(e.target.value)} />
               </div>
               <label className="col-menu-select-all">
                 <input type="checkbox" checked={pendingAllSelected} onChange={toggleAllColumns} />
@@ -1482,13 +1548,12 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                 })}
               </div>
                <div className="col-menu-footer">
-                 <button type="button" className="col-menu-reset" onClick={resetColumnSelection}>Reset to default</button>
-                 <button type="button" className="col-menu-reset" onClick={resizableColumns.resetAll}>Reset column widths</button>
                  {hasUnsavedLayoutChanges && <span className="col-menu-unsaved" role="status">Unsaved changes</span>}
+                 {layoutSaveError && <p className="col-menu-save-error" role="alert">{layoutSaveError}</p>}
                  <button type="button" className="col-menu-apply" onClick={saveTableLayout}>Save layout</button>
+                 <div className="col-menu-footer-secondary"><button type="button" className="col-menu-reset" onClick={resetColumnSelection}>Reset to default</button><button type="button" className="col-menu-reset" onClick={resizableColumns.resetAll}>Reset column widths</button></div>
                </div>
-              {layoutSaveError && <p className="col-menu-save-error" role="alert">{layoutSaveError}</p>}
-            </div>}</div></div></div>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
+            </div>, document.body)}</div></div>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
       <div className="lead-selection-bar" role="status" aria-live="polite">
         <span className="lead-selection-count">
           {screen.selectAllView ? (
@@ -1499,7 +1564,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         </span>
         <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
-    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" style={{ width: `${LEAD_TABLE_SELECTION_COLUMN_WIDTH}px` }} />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectionSticky={hasPinnedColumns} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} pinControl={pinControl(field)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{pinControl(field)}{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} selectionSticky={hasPinnedColumns} pinnedCellStyle={pinnedCellStyle} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div></>}
+    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" style={{ width: `${LEAD_TABLE_SELECTION_COLUMN_WIDTH}px` }} />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectionSticky={hasPinnedColumns} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} pinControl={pinControl(field)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{pinControl(field)}{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} canContact={canQuickContact} selectionSticky={hasPinnedColumns} pinnedCellStyle={pinnedCellStyle} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
