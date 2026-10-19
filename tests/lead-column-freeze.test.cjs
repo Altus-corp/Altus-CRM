@@ -7,7 +7,7 @@ const page = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
 const css = fs.readFileSync("src/screens/leads/leads.css", "utf8");
 
 function functionSource(name) {
-  const start = page.indexOf(`export function ${name}`);
+  const start = page.indexOf(`export function ${name}`) >= 0 ? page.indexOf(`export function ${name}`) : page.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `${name} must remain a small pure helper`);
   const brace = page.indexOf("{\r\n", start) >= 0 ? page.indexOf("{\r\n", start) : page.indexOf("{\n", start);
   let depth = 0;
@@ -26,6 +26,13 @@ function typescriptHelper(name) {
   const source = `type PinnedColumnPreference = { pinnedOrder: string[]; unpinnedOrder: string[]; preFreezePositions: Record<string, number> };\n${functionSource(name).replace("export ", "")}`;
   const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return new Function(`${output}\nreturn ${name};`)();
+}
+
+function layoutReconciler() {
+  const helpers = ["normalizeColumnKeys", "reconcilePinnedColumnPreference", "groupPinnedColumns", "reconcileLeadTableLayout"].map((name) => functionSource(name).replace("export ", "")).join("\n");
+  const source = `const DEFAULT_LEAD_TABLE_COLUMN_KEYS = ["leadTypeCode", "name", "permission", "stage", "calling_resolution", "owner", "company", "cellNo", "designation", "business_category"]; const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/; type PinnedColumnPreference = { pinnedOrder: string[]; unpinnedOrder: string[]; preFreezePositions: Record<string, number> }; type LeadTableLayout = { visibleColumnKeys: string[]; pinnedOrder: string[]; preFreezePositions: Record<string, number> }; function keepAllowedColumnOrder(keys: string[], allowed: Set<string>) { return keys.filter((key) => allowed.has(key)); }\n${helpers}`;
+  const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function(`${output}\nreturn reconcileLeadTableLayout;`)();
 }
 
 test("pinned columns render in pinnedOrder and all columns may be pinned", () => {
@@ -57,7 +64,20 @@ test("saved ordered layout is restored, default Name is only used with no prefer
   const restored = reconcile({ pinnedOrder: ["company", "missing", "name"], unpinnedOrder: ["email", "missing"], preFreezePositions: { company: 1, missing: 9 } }, fields, ["name", "email", "company"]);
   assert.deepEqual(restored, { pinnedOrder: ["company", "name"], unpinnedOrder: ["email"], preFreezePositions: { company: 1 } });
   assert.deepEqual(reconcile({ pinnedOrder: [], unpinnedOrder: ["email", "name", "company"], preFreezePositions: {} }, fields, ["name", "email", "company"]).pinnedOrder, []);
-  assert.match(page, /writeStoredPinnedColumns\(user\?\.id, nextPreference\)/);
+  assert.match(page, /writeStoredLeadTableLayout\(user\?\.id, saved\)/);
+});
+
+test("new users receive the requested default layout and saved layouts reconcile on reload", () => {
+  const reconcile = layoutReconciler();
+  const fields = ["leadTypeCode", "name", "permission", "stage", "calling_resolution", "owner", "company", "cellNo", "designation", "business_category"].map((key) => ({ key }));
+  const defaults = reconcile(null, fields);
+  assert.deepEqual(defaults.visibleColumnKeys, ["name", "leadTypeCode", "permission", "stage", "calling_resolution", "owner", "company", "cellNo", "designation", "business_category"]);
+  assert.deepEqual(defaults.pinnedOrder, ["name"]);
+  const restored = reconcile({ visibleColumnKeys: ["company", "missing", "name"], pinnedOrder: ["company", "missing"], preFreezePositions: { company: 1, missing: 4 } }, fields);
+  assert.deepEqual(restored, { visibleColumnKeys: ["company", "name"], pinnedOrder: ["company"], preFreezePositions: { company: 1 } });
+  assert.match(page, /Reset to default/);
+  assert.match(page, /Save layout/);
+  assert.match(page, /Unsaved changes/);
 });
 
 test("freeze controls live only in the Columns picker and headers render no pin icon", () => {

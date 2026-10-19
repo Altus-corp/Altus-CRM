@@ -29,5 +29,5 @@ test("Activity is a single configured Lead-field column, including saved layout 
   assert.doesNotMatch(page, /displayKey: "latest_activity"/);
   assert.doesNotMatch(page, /\{ key: "activity", label: "Activity", input: "text", editable: false/);
   assert.match(policy, /BUILT_IN_TABLE_COLUMN_KEYS = \["calling_resolution"\]/);
-  assert.match(page, /const allowed = new Set\(allChooserFields\.map\(\(field\) => field\.key\)\)/);
+  assert.match(page, /const allChooserFields = tableColumns/);
 });

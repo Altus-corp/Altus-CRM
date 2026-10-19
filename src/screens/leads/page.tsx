@@ -9,12 +9,11 @@ import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { DropdownSelect } from "../../shared/dropdowns/component";
 import { useRegisterLeadNavbarActions } from "../../shared/layout/lead-navbar-actions";
 import { useResizableColumns } from "../../shared/tables/use-resizable-columns";
-import { BUILT_IN_TABLE_COLUMN_KEYS, callResolutionOptionsForProposedSolution, canonicalManagedFieldKey, isInlineTableSelectField, keepAllowedColumnOrder, legacyLeadColumnForAdminField, mergeCoreAndConfiguredTableColumns, reconcileColumnLayout, resolutionProductCodesForProposedSolution } from "./inline-field-policy";
+import { callResolutionOptionsForProposedSolution, canonicalManagedFieldKey, isInlineTableSelectField, keepAllowedColumnOrder, legacyLeadColumnForAdminField, mergeCoreAndConfiguredTableColumns, resolutionProductCodesForProposedSolution } from "./inline-field-policy";
 import "./leads.css";
 
-const LEADS_COLUMN_PREFERENCE_KEY = "leads.columns.v1";
-const LEADS_COLUMN_KNOWN_PREFERENCE_KEY = "leads.columns.known.v1";
-const LEADS_COLUMN_PINNED_PREFERENCE_KEY = "leads.columns.pinned.v1";
+const LEADS_TABLE_LAYOUT_CACHE_KEY = "leads.table-layout.v1";
+const DEFAULT_LEAD_TABLE_COLUMN_KEYS = ["leadTypeCode", "name", "permission", "stage", "calling_resolution", "owner", "company", "cellNo", "designation", "business_category"];
 const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
@@ -24,32 +23,16 @@ const CORE_TABLE_COLUMN_KEYS = new Set(["leadNo", "leadTypeCode", "name", "cellN
 const CORE_TABLE_DATA_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", cellNo: "phone", permission: "permission", stage: "stage", owner: "owner", created_at: "created_at", updated_at: "updated_at", last_opened_at: "last_opened_at" };
 const LEAD_SORT_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", first_name: "first_name", last_name: "last_name", company: "company", cellNo: "cell_no", email: "email", designation: "designation", businessCategory: "business_category", business_category: "business_category", leadSource: "lead_source", rating: "rating", permission: "permission", lastCalledOn: "last_call_at", last_called_on: "last_call_at", lead_acquisition_date: "lead_acquisition_date", nature_of_business: "nature_of_business", proposed_solution: "proposed_solution", invite_sent_by_introducer: "invite_sent_by_introducer", invite_date_sent: "invite_date_sent", introducer_call_done: "introducer_call_done", introducer_call_date: "introducer_call_date", introducer_feedback: "introducer_feedback", introducer_name: "introducer_name", employee_name: "employee_name", association_network_name: "association_network_name", chapter_name: "chapter_name", calling_resolution: "calling_resolution", next_call_on: "next_call_on", calling_remarks: "calling_remarks", intro_video_sent: "intro_video_sent", email_sent: "email_sent", whatsapp_message_sent: "whatsapp_message_sent", extra_notes: "extra_notes", created_at: "created_at", updated_at: "updated_at", city: "city", sourceSystem: "source_system", leadAcquiredDate: "lead_acquisition_date", natureOfBusiness: "nature_of_business", service: "service", owner: "owner", callingResolution: "calling_resolution", priority: "priority", callingRemarks: "calling_remarks", psoDate: "pso_date", registrationTime: "registration_time", approvalStatus: "approval_status", zoomOrPhysical: "zoom_or_physical", confirmationCallStatus: "confirmation_call_status", zoomLinkSent: "zoom_link_sent", attendanceStatus: "attendance_status", salesFollowUpBy: "sales_follow_up_by", salesResolution: "sales_resolution", cameraOn: "camera_on", photoTaken: "photo_taken", salesNotes: "sales_notes", leftHalfway: "left_halfway", nextFollowUpAt: "next_follow_up_at", totalPayable: "total_payable", amountPaid: "amount_paid", balanceReceivable: "balance_receivable", targetDate: "target_date" };
 function columnStorageKey(preferenceKey: string, userId: string) { return `${preferenceKey}:${userId}`; }
-function readStoredColumnKeys(preferenceKey: string, userId: string | undefined): string[] {
-  if (!userId) return [];
-  try { const value = JSON.parse(window.localStorage.getItem(columnStorageKey(preferenceKey, userId)) || "null"); return Array.isArray(value) ? value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)) : []; } catch { return []; }
-}
-function readStoredColumns(userId: string | undefined): string[] { return readStoredColumnKeys(LEADS_COLUMN_PREFERENCE_KEY, userId); }
-function readStoredKnownColumns(userId: string | undefined): string[] { return readStoredColumnKeys(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId); }
-function writeStoredColumnKeys(preferenceKey: string, userId: string | undefined, keys: string[]) {
-  if (!userId) return;
-  try { window.localStorage.setItem(columnStorageKey(preferenceKey, userId), JSON.stringify(keys)); } catch { /* localStorage is optional */ }
-}
-function writeStoredColumns(userId: string | undefined, keys: string[]) { writeStoredColumnKeys(LEADS_COLUMN_PREFERENCE_KEY, userId, keys); }
-function writeStoredKnownColumns(userId: string | undefined, keys: string[]) { writeStoredColumnKeys(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId, keys); }
-function clearStoredColumns(userId: string | undefined) {
-  if (!userId) return;
-  try { window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_PREFERENCE_KEY, userId)); window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId)); } catch { /* localStorage is optional */ }
-}
 type PinnedColumnPreference = { pinnedOrder: string[]; unpinnedOrder: string[]; preFreezePositions: Record<string, number> };
-function readStoredPinnedColumns(userId: string | undefined): unknown | null {
+type LeadTableLayout = { visibleColumnKeys: string[]; pinnedOrder: string[]; preFreezePositions: Record<string, number> };
+function readStoredLeadTableLayout(userId: string | undefined): unknown | null {
   if (!userId) return null;
-  try { const raw = window.localStorage.getItem(columnStorageKey(LEADS_COLUMN_PINNED_PREFERENCE_KEY, userId)); return raw === null ? null : JSON.parse(raw); } catch { return null; }
+  try { const raw = window.localStorage.getItem(columnStorageKey(LEADS_TABLE_LAYOUT_CACHE_KEY, userId)); return raw === null ? null : JSON.parse(raw); } catch { return null; }
 }
-function writeStoredPinnedColumns(userId: string | undefined, preference: PinnedColumnPreference) {
+function writeStoredLeadTableLayout(userId: string | undefined, layout: LeadTableLayout) {
   if (!userId) return;
-  try { window.localStorage.setItem(columnStorageKey(LEADS_COLUMN_PINNED_PREFERENCE_KEY, userId), JSON.stringify(preference)); } catch { /* localStorage is optional */ }
+  try { window.localStorage.setItem(columnStorageKey(LEADS_TABLE_LAYOUT_CACHE_KEY, userId), JSON.stringify(layout)); } catch { /* localStorage is optional */ }
 }
-function clearStoredPinnedColumns(userId: string | undefined) { if (userId) try { window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_PINNED_PREFERENCE_KEY, userId)); } catch { /* localStorage is optional */ } }
 export function reconcilePinnedColumnPreference(saved: unknown | null, fields: readonly { key: string }[], fallbackOrder: readonly string[]): PinnedColumnPreference {
   const valid = new Set(fields.map((field) => field.key));
   const onlyValid = (value: unknown) => Array.isArray(value) ? [...new Set(value.filter((key): key is string => typeof key === "string" && valid.has(key)))] : [];
@@ -88,8 +71,14 @@ function normalizeColumnKeys(value: unknown, fields: readonly { key: string }[],
   const valid = new Set(fields.map((field) => field.key));
   const saved = Array.isArray(value) ? keepAllowedColumnOrder(value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)), valid) : [];
   const fallback = saved.length ? saved : defaults.filter((key) => valid.has(key));
-  if (valid.has("leadNo") && !fallback.includes("leadNo")) return ["leadNo", ...fallback];
   return [...new Set(fallback)];
+}
+export function reconcileLeadTableLayout(saved: unknown | null, fields: readonly { key: string }[]): LeadTableLayout {
+  const defaults = DEFAULT_LEAD_TABLE_COLUMN_KEYS.filter((key) => fields.some((field) => field.key === key));
+  const record = saved && typeof saved === "object" && !Array.isArray(saved) ? saved as Partial<LeadTableLayout> : null;
+  const visibleColumnKeys = normalizeColumnKeys(record?.visibleColumnKeys, fields, defaults);
+  const preference = reconcilePinnedColumnPreference(saved === null ? null : { pinnedOrder: record?.pinnedOrder, preFreezePositions: record?.preFreezePositions }, fields, visibleColumnKeys);
+  return { visibleColumnKeys: groupPinnedColumns(visibleColumnKeys, preference.pinnedOrder), pinnedOrder: preference.pinnedOrder, preFreezePositions: preference.preFreezePositions };
 }
 
 export function moveColumnKey(order: readonly string[], fromKey: string, toKey: string, side: "before" | "after") {
@@ -913,7 +902,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const tableColumns = mergeCoreAndConfiguredTableColumns(coreColumns, configuredFields);
   const allChooserFields = tableColumns;
   const baseFields = tableColumns;
-  const defaultColumnKeys = baseFields.map((field) => field.key);
+  const defaultColumnKeys = DEFAULT_LEAD_TABLE_COLUMN_KEYS.filter((key) => baseFields.some((field) => field.key === key));
   void (LEAD_COLUMNS.filter((field) => !field.aliasOf));
   const [columnChooserOpen, setColumnChooserOpen] = useState(false);
   const [groupByOpen, setGroupByOpen] = useState(false);
@@ -985,37 +974,12 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     }).catch(() => { if (live) setProductCallResolutionOptions([]); });
     return () => { live = false; };
   }, [screen.products, selectedProductCodes.join("|")]);
-  const [pinnedPreference, setPinnedPreference] = useState<PinnedColumnPreference>(() => {
-    const order = normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys);
-    return reconcilePinnedColumnPreference(readStoredPinnedColumns(user?.id), allChooserFields, order);
-  });
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => {
-    const order = normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys);
-    const preference = reconcilePinnedColumnPreference(readStoredPinnedColumns(user?.id), allChooserFields, order);
-    return groupPinnedColumns(order, preference.pinnedOrder);
-  });
+  const initialTableLayout = reconcileLeadTableLayout(readStoredLeadTableLayout(user?.id), allChooserFields);
+  const [pinnedPreference, setPinnedPreference] = useState<PinnedColumnPreference>(() => reconcilePinnedColumnPreference({ pinnedOrder: initialTableLayout.pinnedOrder, preFreezePositions: initialTableLayout.preFreezePositions }, allChooserFields, initialTableLayout.visibleColumnKeys));
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => initialTableLayout.visibleColumnKeys);
+  const [savedTableLayout, setSavedTableLayout] = useState<LeadTableLayout>(() => initialTableLayout);
+  const [layoutSaveError, setLayoutSaveError] = useState("");
   const pinnedColumnKeys = pinnedPreference.pinnedOrder;
-  function reconcileColumns(visible: unknown, known: unknown) {
-    const allowed = new Set(allChooserFields.map((field) => field.key));
-    const saved = normalizeColumnKeys(visible, allChooserFields, defaultColumnKeys);
-    const knownKeys = Array.isArray(known) ? known.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)) : [];
-    return reconcileColumnLayout(saved, knownKeys, allowed, [...new Set([...BUILT_IN_TABLE_COLUMN_KEYS, ...configuredFields.map((field) => field.key)])]);
-  }
-  useEffect(() => {
-    const reconciled = reconcileColumns(visibleColumnKeys, readStoredKnownColumns(user?.id));
-    if (reconciled.visible.every((key, index) => key === visibleColumnKeys[index]) && reconciled.visible.length === visibleColumnKeys.length) return;
-    setVisibleColumnKeys(groupPinnedColumns(reconciled.visible, pinnedPreference.pinnedOrder));
-    writeStoredColumns(user?.id, reconciled.visible);
-    writeStoredKnownColumns(user?.id, reconciled.known);
-  }, [screen.view, screen.leadFields]);
-  useEffect(() => {
-    const reconciled = reconcilePinnedColumnPreference(readStoredPinnedColumns(user?.id), allChooserFields, visibleColumnKeys);
-    if (JSON.stringify(reconciled) === JSON.stringify(pinnedPreference)) return;
-    setPinnedPreference(reconciled);
-    writeStoredPinnedColumns(user?.id, reconciled);
-    setVisibleColumnKeys((current) => groupPinnedColumns(current, reconciled.pinnedOrder));
-  }, [screen.leadFields, user?.id]);
-
   /* Enhanced column chooser state */
   const [columnSearch, setColumnSearch] = useState("");
   const [pendingColumnKeys, setPendingColumnKeys] = useState<string[]>([]);
@@ -1024,6 +988,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [headerDropTarget, setHeaderDropTarget] = useState<{ key: string; side: "before" | "after" } | null>(null);
   const [columnOrderAnnouncement, setColumnOrderAnnouncement] = useState("");
   const columnPreferenceRevision = useRef(0);
+  const layoutDraftChangedRef = useRef(false);
   const pendingPinnedPreferenceRef = useRef<PinnedColumnPreference | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const suppressHeaderSortClickRef = useRef(false);
@@ -1033,67 +998,55 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const pendingSelectedCount = pendingColumnKeys.length;
   useEffect(() => { if (columnChooserOpen) { setPendingColumnKeys([...visibleColumnKeys]); setColumnSearch(""); } }, [columnChooserOpen]);
   useEffect(() => {
+    if (!columnChooserOpen || pendingColumnKeys.length === 0 || (pendingColumnKeys.length === visibleColumnKeys.length && pendingColumnKeys.every((key, index) => key === visibleColumnKeys[index]))) return;
+    saveColumnOrder(pendingColumnKeys);
+  }, [pendingColumnKeys, columnChooserOpen]);
+  useEffect(() => {
     if (!user?.id) return;
     let live = true;
-    const requestRevision = columnPreferenceRevision.current;
-    void Promise.all([
-      api<{ value: unknown }>(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`),
-      api<{ value: unknown }>(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`),
-    ]).then(([visibleResponse, knownResponse]) => {
-      const savedVisible = Array.isArray(visibleResponse.value) ? visibleResponse.value : null;
-      if (!live || columnPreferenceRevision.current !== requestRevision || !savedVisible) return;
-      const reconciled = reconcileColumns(savedVisible, knownResponse.value);
-      reconciled.visible = groupPinnedColumns(reconciled.visible, pinnedPreference.pinnedOrder);
-      setVisibleColumnKeys(reconciled.visible);
-      writeStoredColumns(user.id, reconciled.visible);
-      writeStoredKnownColumns(user.id, reconciled.known);
-      if (!Array.isArray(knownResponse.value) || reconciled.visible.length !== savedVisible.length || reconciled.visible.some((key, index) => key !== savedVisible[index])) {
-        void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.visible }) }).catch(() => {});
-        void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.known }) }).catch(() => {});
-      }
-    }).catch(() => { /* localStorage remains the offline fallback */ });
+    void api<{ layout: unknown | null }>("/api/leads/table-layout").then((response) => {
+      if (!live || layoutDraftChangedRef.current || !response.layout) return;
+      const layout = reconcileLeadTableLayout(response.layout, allChooserFields);
+      const preference = reconcilePinnedColumnPreference({ pinnedOrder: layout.pinnedOrder, preFreezePositions: layout.preFreezePositions }, allChooserFields, layout.visibleColumnKeys);
+      setVisibleColumnKeys(layout.visibleColumnKeys); setPinnedPreference(preference); setSavedTableLayout(layout); setPendingColumnKeys(layout.visibleColumnKeys);
+      writeStoredLeadTableLayout(user.id, layout);
+    }).catch(() => { /* cache/default layout remains usable */ });
     return () => { live = false; };
-  }, [user?.id, screen.view, screen.leadFields]);
+  }, [user?.id, screen.leadFields]);
   function saveColumnOrder(order: string[]) {
     columnPreferenceRevision.current += 1;
+    layoutDraftChangedRef.current = true;
     const preference = pendingPinnedPreferenceRef.current || pinnedPreference;
     pendingPinnedPreferenceRef.current = null;
-    const reconciled = reconcileColumns(order, allChooserFields.map((field) => field.key));
-    const reconciledPreference = reconcilePinnedColumnPreference(preference, allChooserFields, reconciled.visible);
-    const visiblePinned = reconciled.visible.filter((key) => reconciledPreference.pinnedOrder.includes(key));
-    const visibleUnpinned = reconciled.visible.filter((key) => !reconciledPreference.pinnedOrder.includes(key));
+    const visible = normalizeColumnKeys(order, allChooserFields, defaultColumnKeys);
+    const reconciledPreference = reconcilePinnedColumnPreference(preference, allChooserFields, visible);
+    const visiblePinned = visible.filter((key) => reconciledPreference.pinnedOrder.includes(key));
+    const visibleUnpinned = visible.filter((key) => !reconciledPreference.pinnedOrder.includes(key));
     const nextPreference = {
       ...reconciledPreference,
-      pinnedOrder: [...visiblePinned, ...reconciledPreference.pinnedOrder.filter((key) => !reconciled.visible.includes(key))],
-      unpinnedOrder: [...visibleUnpinned, ...reconciledPreference.unpinnedOrder.filter((key) => !reconciled.visible.includes(key))],
+      pinnedOrder: [...visiblePinned, ...reconciledPreference.pinnedOrder.filter((key) => !visible.includes(key))],
+      unpinnedOrder: [...visibleUnpinned, ...reconciledPreference.unpinnedOrder.filter((key) => !visible.includes(key))],
     };
-    reconciled.visible = groupPinnedColumns(reconciled.visible, nextPreference.pinnedOrder);
+    const nextVisible = groupPinnedColumns(visible, nextPreference.pinnedOrder);
     setPinnedPreference(nextPreference);
-    writeStoredPinnedColumns(user?.id, nextPreference);
-    setVisibleColumnKeys(reconciled.visible);
-    setPendingColumnKeys(reconciled.visible);
-    writeStoredColumns(user?.id, reconciled.visible);
-    writeStoredKnownColumns(user?.id, reconciled.known);
-    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.visible }) }).catch(() => {});
-    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "POST", body: JSON.stringify({ value: reconciled.known }) }).catch(() => {});
-    return reconciled.visible;
+    setVisibleColumnKeys(nextVisible);
+    setPendingColumnKeys(nextVisible);
+    return nextVisible;
   }
-  function applyColumnSelection() {
-    saveColumnOrder(pendingColumnKeys);
-    setColumnChooserOpen(false);
+  function saveTableLayout() {
+    const layout: LeadTableLayout = { visibleColumnKeys, pinnedOrder: pinnedPreference.pinnedOrder.filter((key) => visibleColumnKeys.includes(key)), preFreezePositions: pinnedPreference.preFreezePositions };
+    setLayoutSaveError("");
+    void api<{ layout: LeadTableLayout }>("/api/leads/table-layout", { method: "PUT", body: JSON.stringify({ layout }) }).then((response) => {
+      const saved = reconcileLeadTableLayout(response.layout, allChooserFields);
+      setSavedTableLayout(saved); layoutDraftChangedRef.current = false; writeStoredLeadTableLayout(user?.id, saved);
+    }).catch((error) => setLayoutSaveError(error instanceof Error ? error.message : "Unable to save layout."));
   }
+  const liveTableLayout: LeadTableLayout = { visibleColumnKeys, pinnedOrder: pinnedPreference.pinnedOrder.filter((key) => visibleColumnKeys.includes(key)), preFreezePositions: pinnedPreference.preFreezePositions };
+  const hasUnsavedLayoutChanges = JSON.stringify(liveTableLayout) !== JSON.stringify(savedTableLayout);
   function resetColumnSelection() {
-    columnPreferenceRevision.current += 1;
-    const defaultPreference = reconcilePinnedColumnPreference(null, allChooserFields, defaultColumnKeys);
-    const defaults = groupPinnedColumns(reconcileColumns(defaultColumnKeys, allChooserFields.map((field) => field.key)).visible, defaultPreference.pinnedOrder);
-    setPendingColumnKeys(defaults);
-    setVisibleColumnKeys(defaults);
-    clearStoredColumns(user?.id);
-    clearStoredPinnedColumns(user?.id);
-    setPinnedPreference(defaultPreference);
-    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
-    void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
-    setColumnChooserOpen(false);
+    const defaults = reconcileLeadTableLayout(null, allChooserFields);
+    pendingPinnedPreferenceRef.current = reconcilePinnedColumnPreference({ pinnedOrder: defaults.pinnedOrder, preFreezePositions: defaults.preFreezePositions }, allChooserFields, defaults.visibleColumnKeys);
+    saveColumnOrder(defaults.visibleColumnKeys);
   }
   function toggleAllColumns() {
     setPendingColumnKeys((current) => pendingAllSelected ? current.filter((key) => !filteredColumnKeys.includes(key)) : [...current, ...filteredColumnKeys.filter((key) => !current.includes(key))]);
@@ -1526,10 +1479,12 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                 })}
               </div>
                <div className="col-menu-footer">
-                 <button type="button" className="col-menu-reset" onClick={resetColumnSelection}>Reset</button>
+                 <button type="button" className="col-menu-reset" onClick={resetColumnSelection}>Reset to default</button>
                  <button type="button" className="col-menu-reset" onClick={resizableColumns.resetAll}>Reset column widths</button>
-                 <button type="button" className="col-menu-apply" onClick={applyColumnSelection}>Apply</button>
+                 {hasUnsavedLayoutChanges && <span className="col-menu-unsaved" role="status">Unsaved changes</span>}
+                 <button type="button" className="col-menu-apply" onClick={saveTableLayout}>Save layout</button>
                </div>
+              {layoutSaveError && <p className="col-menu-save-error" role="alert">{layoutSaveError}</p>}
             </div>}</div></div></div>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
       <div className="lead-selection-bar" role="status" aria-live="polite">
         <span className="lead-selection-count">

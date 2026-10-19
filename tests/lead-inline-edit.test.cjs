@@ -80,7 +80,7 @@ test("picker includes first and last name without auto-showing hidden additions"
   const last = columns.find((column) => column.key === "last_name");
   assert.equal(first.hidden, true);
   assert.equal(last.hidden, true);
-  assert.match(pageSource, /const defaultColumnKeys = baseFields\.map/);
+  assert.match(pageSource, /const defaultColumnKeys = DEFAULT_LEAD_TABLE_COLUMN_KEYS\.filter/);
   assert.match(pageSource, /LEAD_COLUMNS\.filter\(\(field\) => !field\.aliasOf\)/);
 });
 
@@ -99,8 +99,9 @@ test("header column moves use the visible-only order helper", () => {
   assert.deepEqual(moveColumnKey(order, "c", "b", "after"), order);
 });
 
-test("table header reorder shares Columns persistence and preserves sort interaction", () => {
-  assert.match(pageSource, /function saveColumnOrder\(order: string\[\]\)[\s\S]*?setVisibleColumnKeys\(reconciled\.visible\)[\s\S]*?setPendingColumnKeys\(reconciled\.visible\)[\s\S]*?\/api\/user-preferences/);
+test("table header reorder updates the live layout and preserves sort interaction", () => {
+  assert.match(pageSource, /function saveColumnOrder\(order: string\[\]\)[\s\S]*?setVisibleColumnKeys\(nextVisible\)[\s\S]*?setPendingColumnKeys\(nextVisible\)/);
+  assert.match(pageSource, /function saveTableLayout\(\)[\s\S]*?\/api\/leads\/table-layout/);
   assert.match(pageSource, /handleHeaderDragOver[\s\S]*?event\.preventDefault\(\)[\s\S]*?setHeaderDropTarget\(\{ key: targetKey, side \}\)/);
   assert.match(pageSource, /handleHeaderDrop[\s\S]*?headerDropTarget\?\.key === targetKey[\s\S]*?moveVisibleColumn\(sourceKey, dropTarget\.key, dropTarget\.side\)/);
   assert.match(pageSource, /function moveVisibleColumn[\s\S]*?next\.every\([\s\S]*?return false;[\s\S]*?saveColumnOrder\(next\)/);
@@ -114,7 +115,7 @@ test("header keyboard reorder and reset remain available", () => {
   assert.match(pageSource, /moveVisibleColumn\(key, targetKey, event\.key === "ArrowLeft" \? "before" : "after", true\)/);
   assert.match(pageSource, /tabIndex: 0/);
   assert.match(pageSource, /columnOrderAnnouncement/);
-  assert.match(pageSource, /function resetColumnSelection\(\)[\s\S]*?setVisibleColumnKeys\(defaults\)[\s\S]*?method: "DELETE"/);
+  assert.match(pageSource, /function resetColumnSelection\(\)[\s\S]*?saveColumnOrder\(defaults\.visibleColumnKeys\)/);
 });
 
 test("Alt+Left and Alt+Right use one-place visible column moves", () => {

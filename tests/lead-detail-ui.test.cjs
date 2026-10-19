@@ -296,13 +296,14 @@ test("Leads list Columns control renders the column chooser", () => {
   assert.match(cssSource, /\.lead-column-menu/);
 });
 
-test("Leads list column selection persists by user, restores, applies order, and resets", () => {
+test("Leads list layout caches per user, restores from the API, saves explicitly, and resets", () => {
   const pageSource = fs.readFileSync("src/screens/leads/page.tsx", "utf8");
-  assert.match(pageSource, /leads\.columns\.v1/);
+  assert.match(pageSource, /leads\.table-layout\.v1/);
   assert.match(pageSource, /window\.localStorage\.getItem/);
-  assert.match(pageSource, /\/api\/user-preferences/);
-  assert.match(pageSource, /method: "DELETE"/);
-  assert.match(pageSource, /normalizeColumnKeys/);
+  assert.match(pageSource, /\/api\/leads\/table-layout/);
+  assert.match(pageSource, /method: "PUT"/);
+  assert.match(pageSource, /Reset to default/);
+  assert.match(pageSource, /reconcileLeadTableLayout/);
   assert.match(pageSource, /visibleColumnKeys\.map\(\(key\) => allChooserFields\.find/);
 });
 

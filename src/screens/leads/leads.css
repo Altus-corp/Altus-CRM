@@ -39,7 +39,7 @@
 .leads-button:disabled { cursor: not-allowed; opacity: .45; }
 .lead-table-wrap { position: relative; overflow: auto; margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
 .lead-table { --lead-col-line: color-mix(in srgb, var(--line) 48%, transparent); width: 100%; border-collapse: collapse; min-width: 940px; table-layout: fixed; font-size: 12px; }
-.lead-table th { padding: 13px 16px; background: var(--bg-2); color: var(--ink-2); border-bottom: 1px solid var(--line); font-size: 10px; font-weight: 800; text-align: left; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
+.lead-table th { padding: 13px 16px; background: var(--bg-2); color: var(--ink-2); border-bottom: 1px solid var(--line); font-size: 10px; text-align: left; text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
 .lead-sort-button { display: inline-flex; width: 100%; min-width: 0; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
 .lead-header-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lead-sort-button svg { color: var(--ink-2); }
@@ -563,6 +563,8 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .col-menu-apply:hover { background: var(--red-600, #c92832); border-color: var(--red-600, #c92832); }
+.col-menu-unsaved { color: var(--ink-2); font-size: 11px; font-weight: 700; }
+.col-menu-save-error { margin: 0; padding: 0 16px 12px; color: var(--red); font-size: 11px; }
 .lead-table { min-width: 1080px; font-size: 12px; }
 .lead-table th { position: sticky; top: 0; z-index: 1; padding: 12px 16px; background: var(--bg-2); color: var(--ink-1); font-size: 10px; letter-spacing: .08em; }
 .lead-table td { padding: 13px 16px; }
@@ -923,8 +925,8 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 /* Final Manage Leads composition refinement */
 .leads-page { margin-top: -14px; }
 @media (min-width: 641px) {
-  .leads-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-h) - clamp(24px, 4vw, 44px) - 56px); min-height: 0; }
-  .lead-table-wrap { flex: 1 1 auto; min-height: 220px; }
+  .leads-page { display: flex; flex-direction: column; min-height: 0; }
+  .lead-table-wrap { flex: 1 1 auto; min-height: 0; max-height: none; }
 }
 .manage-header { min-height: 40px; margin-bottom: 12px; }
 .manage-heading h1 { font-size: 27px; font-weight: 650; }
@@ -4546,4 +4548,702 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 .lead-table-field-select:focus-visible {
   border-color: var(--red);
   box-shadow: 0 0 0 2px var(--red-tint);
+}
+
+/* Copied from the Tasks & Activity workspace-data table; 15px is the approved exception. */
+.lead-table-wrap {
+  overflow: auto;
+  margin-top: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-1);
+}
+
+.lead-table {
+  width: 100%;
+  background: var(--panel);
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.lead-table th,
+.lead-table td {
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--ink-1);
+  text-align: left;
+}
+
+.lead-table th {
+  background: var(--bg-1);
+  color: var(--ink-2);
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lead-table td {
+  background: var(--panel);
+  font-size: 15px;
+}
+
+.lead-table tbody td:not(:last-child) {
+  border-right: 0;
+}
+
+.lead-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.lead-table tbody tr:hover,
+.lead-table tbody tr:focus-visible,
+.lead-table tbody tr:hover td,
+.lead-table tbody tr:focus-visible td {
+  background: var(--red-050);
+}
+
+.lead-table td:first-child {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.lead-table td strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.lead-table td:last-child {
+  color: var(--ink-2);
+}
+
+/* Sticky cells retain the Tasks table colours while they sit above scrolled content. */
+.lead-table:has(.lead-pinned-cell) thead .lead-table-checkbox-col,
+.lead-table thead .lead-pinned-cell {
+  z-index: 4;
+  background: var(--bg-1);
+}
+
+.lead-table:has(.lead-pinned-cell) tbody .lead-table-checkbox-col,
+.lead-table tbody .lead-pinned-cell {
+  z-index: 2;
+  background: var(--panel);
+}
+
+.lead-table tbody tr:hover .lead-table-checkbox-col,
+.lead-table tbody tr:hover .lead-pinned-cell,
+.lead-table tbody tr:focus-visible .lead-table-checkbox-col,
+.lead-table tbody tr:focus-visible .lead-pinned-cell {
+  background: var(--red-050);
+}
+
+.lead-table tbody tr.is-selected,
+.lead-table tbody tr.is-selected td,
+.lead-table tbody tr.is-selected .lead-table-checkbox-col,
+.lead-table tbody tr.is-selected .lead-pinned-cell {
+  background: var(--red-050);
+}
+
+.lead-table tbody tr.is-selected:hover,
+.lead-table tbody tr.is-selected:hover td,
+.lead-table tbody tr.is-selected:hover .lead-table-checkbox-col,
+.lead-table tbody tr.is-selected:hover .lead-pinned-cell,
+.lead-table tbody tr.is-selected:focus,
+.lead-table tbody tr.is-selected:focus td,
+.lead-table tbody tr.is-selected:focus .lead-table-checkbox-col,
+.lead-table tbody tr.is-selected:focus .lead-pinned-cell {
+  background: var(--red-tint);
+}
+
+.lead-table .is-last-pinned {
+  box-shadow: 7px 0 8px -8px color-mix(in srgb, var(--ink) 72%, transparent);
+}
+
+/* These controls do not exist in Tasks & Activity; only the approved text size changes. */
+.lead-pill,
+.lead-status-select,
+.lead-table-field-select,
+.lead-table-toolbar,
+.lead-table-count-pill,
+.lead-table-toolbar-right {
+  font-size: 15px;
+}
+
+/* Compact the controls above the grid without changing their presentation or behaviour. */
+.leads-page {
+  margin-top: -20px;
+}
+
+.manage-header {
+  margin-bottom: 8px;
+}
+
+.lead-managed-filter-row {
+  gap: 8px;
+  padding-block: 0;
+}
+
+.lead-managed-filter-select {
+  height: 36px;
+  padding: 0 10px;
+}
+
+.call-resolution-summary {
+  gap: 6px;
+  margin: 8px 0;
+  padding: 4px 8px;
+}
+
+.call-resolution-scroll-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+}
+
+.call-resolution-bar {
+  gap: 6px;
+  padding-block: 0;
+}
+
+.call-resolution-chip {
+  padding: 0 10px;
+}
+
+.call-resolution-chip.call-resolution-chip-total {
+  padding: 0 11px;
+}
+
+.system-work-queue-summary {
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+}
+
+.system-work-queue-toggle {
+  gap: 4px;
+  padding: 2px;
+}
+
+.system-work-queue-summary .product-stage-chip {
+  padding: 4px 12px;
+}
+
+.lead-table-toolbar {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+/* Tasks-reference density, scoped to the Leads content area. */
+.leads-page {
+  --lead-reference-card-border: 1px solid var(--line);
+  --lead-reference-card-radius: 10px;
+  --lead-reference-card-shadow: var(--shadow-1);
+  background: var(--bg-1);
+  font-size: 15px;
+}
+
+.manage-header {
+  min-height: 36px;
+  margin-bottom: 8px;
+}
+
+.lead-managed-filter-row {
+  gap: 8px;
+  padding: 0;
+}
+
+.lead-managed-filter-select {
+  height: 34px;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 15px;
+}
+
+.call-resolution-summary {
+  gap: 6px;
+  min-height: 44px;
+  margin: 8px 0;
+  padding: 4px 10px;
+  border: var(--lead-reference-card-border);
+  border-radius: var(--lead-reference-card-radius);
+  background: var(--panel);
+  box-shadow: var(--lead-reference-card-shadow);
+}
+
+.call-resolution-scroll-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+}
+
+.call-resolution-bar {
+  gap: 6px;
+  padding: 0;
+}
+
+.call-resolution-chip,
+.call-resolution-chip.call-resolution-chip-total {
+  height: 30px;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 15px;
+}
+
+.system-work-queue-summary {
+  min-height: 42px;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 4px 12px;
+  border: var(--lead-reference-card-border);
+  border-radius: var(--lead-reference-card-radius);
+  background: var(--panel);
+  box-shadow: var(--lead-reference-card-shadow);
+}
+
+.system-work-queue-summary > span,
+.system-work-queue-summary .product-stage-chip {
+  font-size: 15px;
+}
+
+.system-work-queue-toggle {
+  gap: 4px;
+  padding: 2px;
+}
+
+.system-work-queue-summary .product-stage-chip {
+  min-height: 30px;
+  padding: 0 12px;
+}
+
+.lead-table-toolbar {
+  min-height: 52px;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 6px 14px;
+  border: var(--lead-reference-card-border);
+  border-radius: var(--lead-reference-card-radius);
+  background: var(--panel);
+  box-shadow: var(--lead-reference-card-shadow);
+  color: var(--ink-1);
+  font-size: 15px;
+}
+
+.lead-table-toolbar-right,
+.lead-table-toolbar-right > span,
+.lead-toolbar-rows,
+.lead-toolbar-rows > span,
+.lead-group-by-button,
+.lead-toolbar-columns,
+.lead-toolbar-page,
+.lead-toolbar-page-number,
+.lead-table-count-pill {
+  font-size: 15px;
+}
+
+.lead-table-toolbar-right {
+  gap: 8px;
+}
+
+.lead-group-by-button,
+.lead-toolbar-columns,
+.lead-toolbar-page,
+.lead-toolbar-page-number,
+.lead-table-count-pill,
+.lead-toolbar-rows .lead-control {
+  min-height: 34px;
+  height: 34px;
+}
+
+.lead-group-by-button,
+.lead-toolbar-columns,
+.lead-toolbar-page-number,
+.lead-table-count-pill {
+  padding-inline: 10px;
+}
+
+.lead-toolbar-page {
+  width: 34px;
+  padding: 0;
+}
+
+.lead-table-wrap {
+  margin-top: 0;
+  border: var(--lead-reference-card-border);
+  border-radius: var(--lead-reference-card-radius);
+  background: var(--panel);
+  box-shadow: var(--lead-reference-card-shadow);
+}
+
+.lead-table {
+  background: var(--panel);
+  font-size: 15px;
+}
+
+.lead-table th {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-1);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: normal;
+  line-height: 1.25;
+  text-transform: none;
+}
+
+.lead-sort-button {
+  gap: 6px;
+}
+
+.lead-sort-button svg {
+  color: var(--ink-3);
+}
+
+.lead-table td {
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--panel);
+  color: var(--ink-1);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.lead-table tbody td:not(:last-child) {
+  border-right: 0;
+}
+
+.lead-table td strong,
+.lead-table td:first-child {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.lead-table small,
+.lead-toolbar-rows .lead-control {
+  font-size: 15px;
+}
+
+.lead-table-checkbox {
+  width: 20px;
+  height: 20px;
+}
+
+.lead-row-drag-grip {
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+}
+
+.lead-status-select,
+.lead-table-field-select {
+  min-height: 32px;
+  height: 32px;
+  padding-block: 0;
+  border-color: var(--line);
+  border-radius: 6px;
+  background-color: var(--panel);
+  color: var(--ink-1);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.lead-table:has(.lead-pinned-cell) thead .lead-table-checkbox-col,
+.lead-table thead .lead-pinned-cell {
+  background: var(--panel);
+}
+
+.lead-table:has(.lead-pinned-cell) tbody .lead-table-checkbox-col,
+.lead-table tbody .lead-pinned-cell {
+  background: var(--panel);
+}
+
+.lead-table tbody tr:hover,
+.lead-table tbody tr:focus-visible,
+.lead-table tbody tr:hover td,
+.lead-table tbody tr:focus-visible td,
+.lead-table tbody tr:hover .lead-table-checkbox-col,
+.lead-table tbody tr:hover .lead-pinned-cell,
+.lead-table tbody tr:focus-visible .lead-table-checkbox-col,
+.lead-table tbody tr:focus-visible .lead-pinned-cell {
+  background: var(--bg-1);
+}
+
+.lead-table tbody tr.is-selected,
+.lead-table tbody tr.is-selected td,
+.lead-table tbody tr.is-selected .lead-table-checkbox-col,
+.lead-table tbody tr.is-selected .lead-pinned-cell {
+  background: var(--red-050);
+}
+
+.lead-table tbody tr.is-selected:hover,
+.lead-table tbody tr.is-selected:hover td,
+.lead-table tbody tr.is-selected:hover .lead-table-checkbox-col,
+.lead-table tbody tr.is-selected:hover .lead-pinned-cell,
+.lead-table tbody tr.is-selected:focus,
+.lead-table tbody tr.is-selected:focus td,
+.lead-table tbody tr.is-selected:focus .lead-table-checkbox-col,
+.lead-table tbody tr.is-selected:focus .lead-pinned-cell {
+  background: var(--red-tint);
+}
+
+.lead-pagination {
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 0 14px;
+  border: var(--lead-reference-card-border);
+  border-radius: 0 0 var(--lead-reference-card-radius) var(--lead-reference-card-radius);
+  background: var(--panel);
+  box-shadow: var(--lead-reference-card-shadow);
+  font-size: 15px;
+}
+
+@media (max-width: 720px) {
+  .lead-table-toolbar {
+    min-height: 0;
+  }
+
+  .lead-table-toolbar-right {
+    gap: 6px;
+  }
+}
+
+/* Final compact-control refinement. This follows the prior Leads-only rules. */
+.leads-page .lead-managed-filter-row {
+  gap: 10px;
+}
+
+.leads-page .lead-managed-multiselect {
+  max-width: 260px;
+}
+
+.leads-page .lead-managed-filter-select {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: 34px;
+  padding: 0 36px 0 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 34px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leads-page .lead-managed-filter-select > span {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  display: block;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.leads-page .system-work-queue-summary {
+  min-height: 44px;
+  padding: 6px 12px;
+}
+
+.leads-page .system-work-queue-toggle {
+  gap: 2px;
+  padding: 1px;
+}
+
+.leads-page .system-work-queue-summary .product-stage-chip {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 15px;
+}
+
+.leads-page .lead-table-toolbar {
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.leads-page .lead-table-toolbar-right {
+  gap: 10px;
+}
+
+.leads-page :is(.lead-group-by-button, .lead-toolbar-columns, .lead-toolbar-page, .lead-toolbar-page-number, .lead-table-count-pill, .lead-toolbar-rows .lead-control) {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 15px;
+}
+
+.leads-page .lead-toolbar-page {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+
+.leads-page .lead-table-count-pill {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 12px;
+}
+
+.leads-page .lead-table-toolbar-right > span:not(.lead-table-count-pill),
+.leads-page .lead-toolbar-rows > span {
+  font-size: 14px;
+}
+
+.leads-page .lead-table thead tr,
+.leads-page .lead-table th {
+  height: 44px;
+}
+
+.leads-page .lead-table th {
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.leads-page .lead-table tbody tr {
+  min-height: 56px;
+}
+
+.leads-page .lead-table td {
+  padding: 8px 16px;
+}
+
+.leads-page .lead-table td strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.leads-page .lead-table td strong + small {
+  margin: 0;
+  line-height: 1.1;
+}
+
+.leads-page .lead-table-checkbox {
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 5px;
+}
+
+.leads-page .lead-row-drag-grip {
+  width: 20px;
+  height: 20px;
+  color: #b8bfcc;
+}
+
+.leads-page .lead-row-drag-grip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.leads-page :is(.lead-status-select, .lead-table-field-select) {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background-color: var(--panel);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 15px;
+}
+
+.leads-page .lead-table:has(.lead-pinned-cell) thead .lead-table-checkbox-col,
+.leads-page .lead-table thead .lead-pinned-cell {
+  background: var(--panel);
+}
+
+.leads-page .lead-table:has(.lead-pinned-cell) tbody .lead-table-checkbox-col,
+.leads-page .lead-table tbody .lead-pinned-cell {
+  background: var(--panel);
+}
+
+.leads-page .lead-table tbody tr:hover .lead-table-checkbox-col,
+.leads-page .lead-table tbody tr:hover .lead-pinned-cell,
+.leads-page .lead-table tbody tr:focus-visible .lead-table-checkbox-col,
+.leads-page .lead-table tbody tr:focus-visible .lead-pinned-cell {
+  background: var(--bg-1);
+}
+
+.leads-page .lead-table tbody tr.is-selected .lead-table-checkbox-col,
+.leads-page .lead-table tbody tr.is-selected .lead-pinned-cell {
+  background: var(--red-050);
+}
+
+.leads-page .lead-table tbody tr.is-selected:hover .lead-table-checkbox-col,
+.leads-page .lead-table tbody tr.is-selected:hover .lead-pinned-cell,
+.leads-page .lead-table tbody tr.is-selected:focus .lead-table-checkbox-col,
+.leads-page .lead-table tbody tr.is-selected:focus .lead-pinned-cell {
+  background: var(--red-tint);
+}
+
+/* Keep the table card in the remaining Leads viewport, with its own scroll area. */
+@media (min-width: 641px) {
+  .content:has(> .leads-page) {
+    box-sizing: border-box;
+    flex: 0 1 auto;
+    height: calc(100dvh - var(--topbar-h));
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .content:has(> .leads-page) > .leads-page {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    margin-top: 0;
+    overflow: hidden;
+  }
+
+  .content:has(> .leads-page) > .leads-page > .manage-header,
+  .content:has(> .leads-page) > .leads-page > .call-resolution-summary,
+  .content:has(> .leads-page) > .leads-page > .system-work-queue-summary,
+  .content:has(> .leads-page) > .leads-page > .lead-table-toolbar {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+
+  .content:has(> .leads-page) > .leads-page > .lead-table-wrap {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    margin-bottom: 12px;
+    overflow: auto;
+  }
+}
+
+@media (max-height: 699px) and (min-width: 641px) {
+  .content:has(> .leads-page) {
+    height: auto;
+    overflow: auto;
+  }
+
+  .content:has(> .leads-page) > .leads-page {
+    height: auto;
+    overflow: visible;
+  }
+
+  .content:has(> .leads-page) > .leads-page > .lead-table-wrap {
+    flex: 0 0 auto;
+    min-height: 320px;
+  }
+}
+
+/* Preserve a neutral table-divider edge after the last frozen column. */
+.leads-page .lead-table .is-last-pinned {
+  box-shadow: inset -1px 0 0 var(--line), 7px 0 8px -8px color-mix(in srgb, var(--ink) 28%, transparent);
 }

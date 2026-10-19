@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS user_lead_table_prefs (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  layout JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

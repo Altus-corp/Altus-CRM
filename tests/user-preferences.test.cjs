@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Readable } = require("stream");
-const { route, validateUserPreferenceValue, validateTableColumnWidths } = require("../server/index.cjs");
+const { route, validateUserPreferenceValue, validateTableColumnWidths, validateLeadTableLayout } = require("../server/index.cjs");
 
 function response() { return { status: 0, headers: {}, body: "", setHeader() {}, writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = String(body || ""); } }; }
 function request(method, url, body) { const req = Readable.from([Buffer.from(JSON.stringify(body || {}))]); req.method = method; req.url = url; req.headers = { "x-altus": "1" }; req.socket = { remoteAddress: "127.0.0.1", encrypted: false }; return req; }
@@ -95,4 +95,38 @@ test("table column widths are validated and scoped to the authenticated user", a
   assert.match(validateTableColumnWidths({ unknown: 160 }, { allowedColumns: new Set(["name"]) }).error, /Unknown/);
   assert.match(validateTableColumnWidths({ name: 79 }, { allowedColumns: new Set(["name"]) }).error, /80/);
   assert.match(validateTableColumnWidths({ name: 160.5 }, { allowedColumns: new Set(["name"]) }).error, /whole numbers/);
+});
+
+test("lead table layouts are validated, persisted per user, and absent for a new user", async () => {
+  const rows = new Map(); let sessionUser = "user-a";
+  const db = {
+    sessionUser: async () => sessionUser,
+    userById: async (id) => ({ id, role: "Sales", active: true, offboarded: false }),
+    query: async (sql, params = []) => {
+      if (sql.includes("capability FROM user_capability_overrides")) return { rows: [] };
+      if (sql.startsWith("SELECT value FROM workspace_settings")) return { rows: [] };
+      if (sql.startsWith("SELECT layout")) return { rows: rows.has(params[0]) ? [{ layout: rows.get(params[0]) }] : [] };
+      if (sql.startsWith("INSERT INTO user_lead_table_prefs")) { rows.set(params[0], JSON.parse(params[1])); return { rows: [] }; }
+      return { rows: [] };
+    },
+  };
+  const empty = response();
+  await route(request("GET", "/api/leads/table-layout"), empty, db);
+  assert.deepEqual(JSON.parse(empty.body), { layout: null });
+
+  const layout = { visibleColumnKeys: ["name", "company"], pinnedOrder: ["name"], preFreezePositions: { name: 0 } };
+  const saved = response();
+  await route(request("PUT", "/api/leads/table-layout", { layout }), saved, db);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(rows.get("user-a"), layout);
+
+  sessionUser = "user-b";
+  const other = response();
+  await route(request("GET", "/api/leads/table-layout"), other, db);
+  assert.deepEqual(JSON.parse(other.body), { layout: null });
+
+  const invalid = response();
+  await route(request("PUT", "/api/leads/table-layout", { layout: { ...layout, visibleColumnKeys: ["missing"] } }), invalid, db);
+  assert.equal(invalid.status, 400);
+  assert.match(validateLeadTableLayout({ visibleColumnKeys: ["name"], pinnedOrder: ["unknown"], preFreezePositions: {} }, new Set(["name"])).error, /unknown|invalid/i);
 });

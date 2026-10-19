@@ -237,6 +237,41 @@ async function tablePreferenceDelete(res, db, actor, preference) {
   return json(res, 200, { widths: null });
 }
 
+const LEAD_TABLE_LAYOUT_CORE_KEYS = new Set([...LEAD_TABLE_COLUMN_KEYS, "owner", "stage", "calling_resolution"]);
+function validateLeadTableLayout(layout, allowedColumns) {
+  if (!layout || typeof layout !== "object" || Array.isArray(layout)) return { error: "Layout must be an object." };
+  const visible = layout.visibleColumnKeys;
+  const pinned = layout.pinnedOrder;
+  const positions = layout.preFreezePositions;
+  if (!Array.isArray(visible) || !Array.isArray(pinned) || !positions || typeof positions !== "object" || Array.isArray(positions)) return { error: "Layout must include ordered visible and pinned column arrays." };
+  if (visible.length > 100 || pinned.length > 100) return { error: "Layout may contain at most 100 columns." };
+  const validKeys = (keys) => keys.every((key) => typeof key === "string" && USER_PREFERENCE_KEY_RE.test(key) && allowedColumns.has(key));
+  if (!validKeys(visible) || !validKeys(pinned)) return { error: "Layout contains an unknown column." };
+  if (new Set(visible).size !== visible.length || new Set(pinned).size !== pinned.length || pinned.some((key) => !visible.includes(key))) return { error: "Layout column order is invalid." };
+  const preFreezePositions = {};
+  for (const [key, position] of Object.entries(positions)) {
+    if (!allowedColumns.has(key) || !Number.isInteger(position) || position < 0 || position > 99) return { error: "Layout freeze positions are invalid." };
+    preFreezePositions[key] = position;
+  }
+  return { value: { visibleColumnKeys: visible, pinnedOrder: pinned, preFreezePositions } };
+}
+async function leadTableLayoutGet(res, db, actor) {
+  try {
+    const result = await db.query("SELECT layout FROM user_lead_table_prefs WHERE user_id=$1", [actor.id]);
+    return json(res, 200, { layout: result.rows[0]?.layout ?? null });
+  } catch (error) { if (error?.code === "42P01") return json(res, 200, { layout: null }); throw error; }
+}
+async function leadTableLayoutWrite(req, res, db, actor) {
+  let body; try { body = await readJson(req); } catch { return json(res, 400, { error: "Invalid lead table layout." }); }
+  let allowedColumns = LEAD_TABLE_LAYOUT_CORE_KEYS;
+  try { allowedColumns = new Set([...allowedColumns, ...(await LeadFields.getDefinitions(db)).filter((field) => field.active !== false).map((field) => field.key)]); } catch { /* static Lead-table columns remain valid */ }
+  const checked = validateLeadTableLayout(body?.layout, allowedColumns);
+  if (checked.error) return json(res, 400, { error: checked.error });
+  try { await db.query("INSERT INTO user_lead_table_prefs(user_id,layout,updated_at) VALUES($1,$2::jsonb,now()) ON CONFLICT(user_id) DO UPDATE SET layout=EXCLUDED.layout,updated_at=now()", [actor.id, JSON.stringify(checked.value)]); }
+  catch (error) { if (error?.code !== "42P01") throw error; return json(res, 503, { error: "Lead table layout storage is unavailable." }); }
+  return json(res, 200, { layout: checked.value });
+}
+
 async function leadsCounts(res, db, actor) {
   const expressions = Object.entries(LEAD_COUNT_VIEWS).map(([key, predicate]) => `COUNT(*) FILTER (WHERE COALESCE(l.custom_values->>'archived','false') <> 'true' AND ${predicate})::int AS "${key}"`);
   const params = [];
@@ -1124,6 +1159,11 @@ async function route(req, res, db) {
   if (user && typeof db.query === "function") { try { user.capability_overrides = (await db.query("SELECT capability FROM user_capability_overrides WHERE user_id=$1", [user.id])).rows.map((row) => row.capability); } catch { user.capability_overrides = []; } }
   if (url.pathname === "/api/me" && req.method === "GET") return user ? json(res, 200, { user: await publicCurrentUser(db, user) }) : json(res, 401, { error: "Please sign in." });
   if (!user) return json(res, 401, { error: "Please sign in." });
+  if (url.pathname === "/api/leads/table-layout" && ["GET", "PUT"].includes(req.method)) {
+    if (req.method === "PUT" && !S.csrfValid(req)) return json(res, 403, { error: "Missing request header." });
+    if (req.method === "GET") return leadTableLayoutGet(res, db, user);
+    return leadTableLayoutWrite(req, res, db, user);
+  }
   const tablePreferenceMatch = url.pathname.match(/^\/api\/user-preferences\/table\/([^/]+)$/);
   if (tablePreferenceMatch && ["GET", "PUT", "DELETE"].includes(req.method)) {
     if (["PUT", "DELETE"].includes(req.method) && !S.csrfValid(req)) return json(res, 403, { error: "Missing request header." });
@@ -1351,4 +1391,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, assignLeadRoundRobin, resolutionAllowedForProducts };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, leadTableLayoutGet, leadTableLayoutWrite, validateLeadTableLayout, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, assignLeadRoundRobin, resolutionAllowedForProducts };
