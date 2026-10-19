@@ -862,7 +862,7 @@ async function usersCreate(req, res, db, actor) {
     return userWriteError(res, 500, "Unable to manage users.");
   }
 }
-async function memberRolesList(res, db) { const rows = await db.query("SELECT id,name,access_role FROM member_roles WHERE active=true ORDER BY name,id"); return json(res, 200, { roles: rows.rows }); }
+async function memberRolesList(res, db) { const rows = await db.query("SELECT id,name,access_role,hierarchy_parent_id,hierarchy_rank FROM member_roles WHERE active=true ORDER BY hierarchy_rank DESC,name,id"); return json(res, 200, { roles: rows.rows }); }
 async function userRoleUpdate(req, res, db, actor, id) {
   const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
   if (target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user's role cannot be edited.");
@@ -890,6 +890,43 @@ async function memberRoleDelete(res, db, actor, id, ip) {
     await writeAudit(db, { actorUserId: actor.id, action: "member_role.deleted", entityType: "member_role", entityId: id, oldValue: role.name, newValue: "inactive", ip });
     return json(res, 200, { id, deleted: true });
   } catch { return userWriteError(res, 500, "Unable to delete role."); }
+}
+async function memberRoleHierarchyList(res, db) {
+  const rows = await db.query(`SELECT r.id,r.name,r.access_role,r.hierarchy_parent_id,r.hierarchy_rank,
+    parent.name AS hierarchy_parent_name, count(u.id)::int AS member_count
+    FROM member_roles r
+    LEFT JOIN member_roles parent ON parent.id=r.hierarchy_parent_id
+    LEFT JOIN users u ON u.member_role_id=r.id AND u.active=true AND u.offboarded=false
+    WHERE r.active=true
+    GROUP BY r.id,parent.name
+    ORDER BY r.hierarchy_rank DESC,r.name,r.id`);
+  return json(res, 200, { roles: rows.rows });
+}
+async function memberRoleHierarchyUpdate(req, res, db, actor, id) {
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid hierarchy data."); }
+  const parentId = String(body.hierarchy_parent_id || "").trim() || null;
+  const rank = Math.max(0, Math.min(100, Number.parseInt(String(body.hierarchy_rank ?? "0"), 10) || 0));
+  const role = (await db.query("SELECT id,name,access_role,hierarchy_parent_id,hierarchy_rank FROM member_roles WHERE id=$1 AND active=true", [id])).rows[0];
+  if (!role) return userWriteError(res, 404, "Role not found.");
+  if (parentId === id) return userWriteError(res, 400, "A role cannot report to itself.");
+  let parent = null;
+  if (parentId) {
+    parent = (await db.query("SELECT id,name,hierarchy_parent_id FROM member_roles WHERE id=$1 AND active=true", [parentId])).rows[0];
+    if (!parent) return userWriteError(res, 400, "Choose an active parent role.");
+    let cursor = parent;
+    const visited = new Set([id]);
+    while (cursor) {
+      if (visited.has(cursor.id)) return userWriteError(res, 400, "That parent role would create a circular hierarchy.");
+      visited.add(cursor.id);
+      cursor = cursor.hierarchy_parent_id ? (await db.query("SELECT id,hierarchy_parent_id FROM member_roles WHERE id=$1", [cursor.hierarchy_parent_id])).rows[0] : null;
+    }
+  }
+  if (role.access_role === "Admin" && parentId) return userWriteError(res, 400, "An Admin-level role must remain at the top of the hierarchy.");
+  try {
+    await db.query("UPDATE member_roles SET hierarchy_parent_id=$2,hierarchy_rank=$3 WHERE id=$1", [id, parentId, rank]);
+    await writeAudit(db, { actorUserId: actor.id, action: "member_role.hierarchy_updated", entityType: "member_role", entityId: id, field: "hierarchy_parent_id", oldValue: role.hierarchy_parent_id || "Top level", newValue: parent?.name || "Top level", ip: req.socket.remoteAddress });
+    return json(res, 200, { id, hierarchy_parent_id: parentId, hierarchy_rank: rank });
+  } catch { return userWriteError(res, 500, "Unable to save role hierarchy."); }
 }
 async function departmentsList(res, db) { const rows = await db.query("SELECT id,name FROM departments WHERE active=true UNION SELECT 'department-team-' || md5(btrim(team)), btrim(team) FROM employee_profiles WHERE team IS NOT NULL AND btrim(team) <> '' ORDER BY name,id"); return json(res, 200, { departments: rows.rows }); }
 async function departmentCreate(req, res, db, actor) { let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid department data."); } const name = String(body.name || "").trim(); if (!name || name.length > 80 || !/^[\p{L}][\p{L}0-9 _-]*$/u.test(name)) return userWriteError(res, 400, "Invalid department data."); const id = `department-${crypto.randomUUID()}`; try { await db.query("INSERT INTO departments(id,name) VALUES($1,$2)", [id, name]); await writeAudit(db, { actorUserId: actor.id, action: "department.created", entityType: "department", entityId: id, newValue: name, ip: req.socket.remoteAddress }); return json(res, 201, { id, name }); } catch (error) { if (error.code === "23505") return userWriteError(res, 409, "That department already exists."); throw error; } }
@@ -1226,6 +1263,9 @@ async function route(req, res, db) {
   if (userDeleteMatch && req.method === "DELETE") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users."); return safeUserOperation(res, () => userDelete(req, res, db, user, decodeURIComponent(userDeleteMatch[1]))); }
   if (url.pathname === "/api/member-roles" && req.method === "GET") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRolesList(res, db)); }
   if (url.pathname === "/api/member-roles" && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRoleCreate(req, res, db, user)); }
+  if (url.pathname === "/api/member-roles/hierarchy" && req.method === "GET") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage role hierarchy."); return safeUserOperation(res, () => memberRoleHierarchyList(res, db)); }
+  const memberRoleHierarchyMatch = url.pathname.match(/^\/api\/member-roles\/([^/]+)\/hierarchy$/);
+  if (memberRoleHierarchyMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage role hierarchy."); return safeUserOperation(res, () => memberRoleHierarchyUpdate(req, res, db, user, decodeURIComponent(memberRoleHierarchyMatch[1]))); }
   const memberRoleMatch = url.pathname.match(/^\/api\/member-roles\/([^/]+)$/);
   if (memberRoleMatch && req.method === "DELETE") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage roles."); return safeUserOperation(res, () => memberRoleDelete(res, db, user, decodeURIComponent(memberRoleMatch[1]), req.socket.remoteAddress)); }
   if (url.pathname === "/api/departments" && req.method === "GET") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage departments."); return safeUserOperation(res, () => departmentsList(res, db)); }

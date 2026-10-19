@@ -181,7 +181,16 @@ function parseDate(value, field) {
   const raw = text(value);
   if (!raw) return null;
   let match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(raw);
-  if (!match) { const india = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(raw); if (india) match = [null, india[3], india[2], india[1]]; }
+  if (!match) {
+    const india = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw);
+    if (india) match = [null, india[3], india[2].padStart(2, "0"), india[1].padStart(2, "0")];
+  }
+  // Import sheets often use a compact Excel-style date such as 23-01-27.
+  // Two-digit years intentionally map to 20YY, so 23-01-27 means 23 Jan 2027.
+  if (!match) {
+    const shortIndia = /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2})$/.exec(raw);
+    if (shortIndia) match = [null, `20${shortIndia[3]}`, shortIndia[2].padStart(2, "0"), shortIndia[1].padStart(2, "0")];
+  }
   if (!match) {
     const named = /^(\d{1,2})-([A-Za-z]{3,9})-(\d{4})$/.exec(raw);
     if (named) {
@@ -261,20 +270,20 @@ function rowValues(row, columns, reference, rowNumber) {
   const stage = text(values.stage || "lead").toLowerCase(); if (!masterHas(reference, ["stage", "leadstage"], stage)) errors.push("stage: invalid master value.");
   const permission = text(values.permission || "Pending"); if (!["Yes", "No", "Pending"].includes(permission)) errors.push("permission: must be Yes, No, or Pending.");
   const status = text(values.lead_status); if (status && !masterHas(reference, ["leadstatus", "status"], status)) errors.push("lead_status: invalid master value.");
-  const psoDate = parseDate(values.pso_date, "pso_date"); if (values.pso_date && !psoDate) errors.push("pso_date: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.");
-  const nextFollowup = parseDate(values.next_follow_up_at, "next_follow_up_at"); if (values.next_follow_up_at && !nextFollowup) errors.push("next_follow_up_at: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.");
+  const psoDate = parseDate(values.pso_date, "pso_date"); if (values.pso_date && !psoDate) errors.push("pso_date: invalid date; use 23-Jan-2026, YYYY-MM-DD, DD/MM/YYYY, or DD-MM-YY.");
+  const nextFollowup = parseDate(values.next_follow_up_at, "next_follow_up_at"); if (values.next_follow_up_at && !nextFollowup) errors.push("next_follow_up_at: invalid date; use 23-Jan-2026, YYYY-MM-DD, DD/MM/YYYY, or DD-MM-YY.");
   let ownerId = null; const owner = normalizeEmail(values.owner); if (owner) { ownerId = reference.users.get(owner)?.id || null; if (!ownerId) errors.push("owner: no active user matches that email."); }
   const rawCustom = Object.fromEntries(Object.entries(values).filter(([key]) => key.startsWith("custom:")).map(([key, value]) => [key.slice(7), value]));
   const activeLeadFields = (reference.leadFields || []).filter((field) => field.active !== false);
   const activeLeadFieldKeys = new Set(activeLeadFields.map((field) => field.key));
   for (const [key, type] of Object.entries(SOURCE_CUSTOM_FIELDS)) {
     if (!activeLeadFieldKeys.has(key) || !rawCustom[key]) continue;
-    if (type === "date" && !parseDate(rawCustom[key], key)) errors.push(`${key}: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.`);
+    if (type === "date" && !parseDate(rawCustom[key], key)) errors.push(`${key}: invalid date; use 23-Jan-2026, YYYY-MM-DD, DD/MM/YYYY, or DD-MM-YY.`);
     if (type === "boolean" && !["yes", "true", "1", "no", "false", "0"].includes(text(rawCustom[key]).toLowerCase())) errors.push(`${key}: invalid boolean; use Yes or No.`);
   }
   for (const field of activeLeadFields) {
     if (Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, field.key) || !rawCustom[field.key]) continue;
-    if (field.type === "date" && !parseDate(rawCustom[field.key], field.key)) errors.push(`${field.label}: invalid date; use 23-Jan-2026, YYYY-MM-DD, or DD/MM/YYYY.`);
+    if (field.type === "date" && !parseDate(rawCustom[field.key], field.key)) errors.push(`${field.label}: invalid date; use 23-Jan-2026, YYYY-MM-DD, DD/MM/YYYY, or DD-MM-YY.`);
     if (field.type === "dropdown" && !(field.options || []).some((option) => text(option).toLowerCase() === text(rawCustom[field.key]).toLowerCase())) errors.push(`${field.label}: choose one of ${Array.from(field.options || []).join(", ")}.`);
   }
   const custom_fields = { ...LeadFields.normalizeValues(Object.fromEntries(Object.entries(rawCustom).filter(([key]) => !Object.prototype.hasOwnProperty.call(SOURCE_CUSTOM_FIELDS, key))), activeLeadFields), ...importCustomValues(rawCustom, activeLeadFieldKeys) };

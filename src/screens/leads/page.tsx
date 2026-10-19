@@ -616,6 +616,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [callResolutionMoreOpen, setCallResolutionMoreOpen] = useState(false);
   const [collapsedCallResolutionCount, setCollapsedCallResolutionCount] = useState(0);
   const callResolutionBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const queueSwitch = document.querySelector<HTMLElement>(".leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) .system-work-queue-toggle");
+    const groupBy = document.querySelector<HTMLElement>(".leads-page > .lead-table-toolbar .lead-group-by-wrap");
+    if (queueSwitch && groupBy && queueSwitch.parentElement !== groupBy) groupBy.append(queueSwitch);
+  });
   const callResolutionMeasureRef = useRef<HTMLDivElement>(null);
   const [psoStage, setPsoStage] = useState("Pre PSO");
   const [psoBarVisible, setPsoBarVisible] = useState(false);

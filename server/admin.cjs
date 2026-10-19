@@ -2,7 +2,7 @@
 
 const ADMIN_SCREENS = new Set([
   "dashboard", "call-history", "analytics", "assignment", "panel", "templates",
-  "import-export", "integrations", "audit", "process-flow", "reports", "database-status", "user-management",
+  "import-export", "integrations", "audit", "process-flow", "reports", "database-status", "user-management", "role-hierarchy",
 ]);
 
 async function optionalRows(db, text, params = []) {

@@ -914,7 +914,7 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 /* Final Manage Leads composition refinement */
 .leads-page { margin-top: -14px; }
 @media (min-width: 641px) {
-  .leads-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-h) - clamp(24px, 4vw, 44px) - 56px); min-height: 0; }
+  .leads-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-h) - clamp(24px, 4vw, 44px) - 12px); min-height: 0; }
   .lead-table-wrap { flex: 1 1 auto; min-height: 220px; }
 }
 .manage-header { min-height: 40px; margin-bottom: 12px; }
@@ -4357,6 +4357,64 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
   margin-bottom: 14px;
   gap: 12px;
 }
+
+/* Compact the daily lead-workspace controls without reducing table space. */
+.leads-page > .manage-header { margin-bottom: 6px; }
+.leads-page > .call-resolution-summary { padding: 5px 10px; margin-bottom: 7px; }
+.leads-page > .system-work-queue-summary { padding: 6px 12px; margin-bottom: 7px; }
+.leads-page > .lead-table-toolbar { margin-bottom: 7px; }
+.leads-page > .lead-table-wrap { margin-top: 0; }
+
+/* When no product-stage chips are active, keep the queue switch beside Group By. */
+.leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) {
+  position: relative;
+  z-index: 6;
+  height: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+.leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) > span { display: none; }
+.leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) .system-work-queue-toggle {
+  position: absolute;
+  top: 21px;
+  left: 215px;
+  gap: 7px;
+}
+.leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) .product-stage-chip {
+  min-height: 34px;
+  padding-inline: 15px;
+}
+@media (max-width: 760px) {
+  .leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) {
+    position: static;
+    height: auto;
+    margin-bottom: 7px;
+    padding: 6px 12px;
+    overflow: visible;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) .system-work-queue-toggle { position: static; }
+}
+
+/* The switch is moved into the toolbar group so it participates in normal layout. */
+.lead-table-toolbar .lead-group-by-wrap { display: flex; align-items: center; gap: 12px; }
+.lead-table-toolbar .lead-group-by-wrap .system-work-queue-toggle { position: static; gap: 7px; }
+.lead-table-toolbar .lead-group-by-wrap .system-work-queue-toggle .product-stage-chip { min-height: 34px; padding-inline: 15px; }
+.lead-table-toolbar:has(.system-work-queue-toggle) .lead-table-count-pill { display: none; }
+.lead-table-toolbar:has(.system-work-queue-toggle) .lead-table-toolbar-right > span:nth-child(2) { display: none; }
+
+/* Dense list mode: fit roughly 10–12 leads before the table needs scrolling. */
+@media (min-width: 641px) {
+  .leads-page > .lead-table-wrap { flex: 0 0 auto; height: clamp(560px, 78dvh, 760px); min-height: 560px; }
+  .lead-table th { padding-block: 10px; }
+  .lead-table td { padding-block: 8px; }
+  .lead-table td small { margin-top: 1px; line-height: 1.25; }
+}
 .lead-group-by-wrap {
   position: relative;
 }
@@ -4538,3 +4596,10 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
   border-color: var(--red);
   box-shadow: 0 0 0 2px var(--red-tint);
 }
+
+/* Compact the daily lead-workspace controls without reducing table space. */
+.leads-page > .manage-header { margin-bottom: 6px; }
+.leads-page > .call-resolution-summary { padding: 5px 10px; margin-bottom: 7px; }
+.leads-page > .system-work-queue-summary { padding: 6px 12px; margin-bottom: 7px; }
+.leads-page > .lead-table-toolbar { margin-bottom: 7px; }
+.leads-page > .lead-table-wrap { margin-top: 0; }

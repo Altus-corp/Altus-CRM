@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../shared/api/client";
 
-export type AdminScreenKey = "dashboard" | "call-history" | "analytics" | "assignment" | "panel" | "user-management" | "templates" | "import-export" | "integrations" | "audit" | "process-flow" | "reports" | "database-status" | "dropdown-management";
+export type AdminScreenKey = "dashboard" | "call-history" | "analytics" | "assignment" | "panel" | "user-management" | "role-hierarchy" | "templates" | "import-export" | "integrations" | "audit" | "process-flow" | "reports" | "database-status" | "dropdown-management";
 type AdminValue = string | number | boolean | null;
 type AdminRow = Record<string, AdminValue>;
 type AdminResponse = { screen: AdminScreenKey; metrics?: AdminRow; rows?: AdminRow[]; rules?: AdminRow[]; note?: string };
@@ -17,6 +17,7 @@ export const ADMIN_SCREEN_COPY: Record<AdminScreenKey, { title: string; descript
   assignment: { title: "Assignment", description: "Review the current owner pool, unassigned work, and assignment rules." },
   panel: { title: "Admin Panel", description: "Manage the workspace members and review their access status." },
   "user-management": { title: "User Management", description: "Create users, assign roles, manage access, passwords, and account status." },
+  "role-hierarchy": { title: "Role Hierarchy", description: "Set reporting relationships between roles and prepare manager visibility rules." },
   templates: { title: "Templates", description: "Review the available communication templates and their channels." },
   "import-export": { title: "Import / Export", description: "Review the data movement workspace and its current availability." },
   integrations: { title: "Integrations", description: "Review connected integration names and enabled status." },

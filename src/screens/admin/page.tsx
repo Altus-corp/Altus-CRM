@@ -10,6 +10,7 @@ import { LeadFieldManager } from "./lead-field-manager";
 import { ProductStageManager } from "./product-stage-manager";
 import { AssignmentRuleManager } from "./assignment-rule-manager";
 import { UserManagement } from "./user-management";
+import { RoleHierarchyManager } from "./role-hierarchy-manager";
 
 function label(value: string) { return value.replaceAll("_", " "); }
 type AdminRow = Record<string, string | number | boolean | null>;
@@ -113,6 +114,7 @@ function MemberAccessDialog({ view, canAssignAdminRole }: { view: ReturnType<typ
 export function AdminPage({ screen }: { screen: AdminScreenKey }) {
   if (screen === "dropdown-management") return <main className="admin-page"><AdminPageHeader title="Dropdown Management" description="Configure dropdown definitions and managed options." /><DropdownManagement /></main>;
   if (screen === "integrations") return <main className="admin-page"><AdminPageHeader title="Integrations" description="Connect website forms and external platforms to receive leads automatically." /><IntegrationManager /></main>;
+  if (screen === "role-hierarchy") return <main className="admin-page"><AdminPageHeader title="Role Hierarchy" description="Define reporting relationships between roles before applying manager-level data visibility." /><RoleHierarchyManager /></main>;
   const view = useAdminScreen(screen);
   const { user } = useAuth();
   const canResetPasswords = hasCapability(user?.role, "users.reset_password");
