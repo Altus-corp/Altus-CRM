@@ -21,7 +21,7 @@ test("shell includes debounced keyboard search states and lead navigation", () =
 test("quick-navigation chevron is rendered independently of the expanded search state", () => {
   const source = shell();
   assert.match(source, /expanded \? "navbar-search is-expanded" : "navbar-search"/);
-  assert.match(source, /className="navbar-action-button topbar-module-toggle"/);
+  assert.match(source, /className="navbar-action-button topbar-module-toggle topbar-nav-reveal-tab"/);
   assert.match(source, /aria-controls="topbar-module-links"/);
 });
 

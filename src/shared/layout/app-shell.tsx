@@ -7,9 +7,9 @@ import { displayRole, usePermission } from "../auth/permissions";
 import { signOut } from "../auth/sign-out";
 import { api } from "../api/client";
 import { getTheme, setTheme } from "../theme/theme";
-import { Bell, ChevronDown, ChevronLeft, ChevronRight, Moon, Plus, Search, Sun, Upload } from "lucide-react";
+import { Bell, ChevronDown, ChevronUp, Moon, Plus, Search, Sun, Upload } from "lucide-react";
 import { LeadNavbarActionsContext, type LeadNavbarActions } from "./lead-navbar-actions";
-import { focusFirstNavigationLink, restoreNavigationFocus, shouldOpenNavigationShortcut } from "./navbar-auto-hide";
+import { focusFirstNavigationLink, NavbarAutoHideController, restoreNavigationFocus, shouldOpenNavigationShortcut } from "./navbar-auto-hide";
 import { visibleTopbarModules } from "./nav-access";
 import "./app-shell.css";
 
@@ -135,20 +135,33 @@ export function AppShell() {
   const [leadNavbarActions, setLeadNavbarActions] = useState<LeadNavbarActions | null>(null);
   const [topbarModulesOpen, setTopbarModulesOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null); const topbarRef = useRef<HTMLElement>(null);
-  const openNavigationRef = useRef<HTMLButtonElement>(null); const firstNavigationLinkRef = useRef<HTMLAnchorElement>(null); const previousNavigationFocusRef = useRef<HTMLElement | null>(null);
-  function openKeyboardNavigation(origin?: HTMLElement | null) { previousNavigationFocusRef.current = origin || document.activeElement as HTMLElement | null; setTopbarModulesOpen(true); requestAnimationFrame(() => focusFirstNavigationLink(firstNavigationLinkRef.current)); }
+  const openNavigationRef = useRef<HTMLButtonElement>(null); const firstNavigationLinkRef = useRef<HTMLAnchorElement>(null); const topbarNavigationRef = useRef<HTMLElement>(null); const previousNavigationFocusRef = useRef<HTMLElement | null>(null);
+  const navigationAutoHideRef = useRef<NavbarAutoHideController | null>(null);
+  if (!navigationAutoHideRef.current) navigationAutoHideRef.current = new NavbarAutoHideController(setTopbarModulesOpen);
+  const navigationAutoHide = navigationAutoHideRef.current;
+  function openKeyboardNavigation(origin?: HTMLElement | null) { previousNavigationFocusRef.current = origin || document.activeElement as HTMLElement | null; navigationAutoHide.open(); requestAnimationFrame(() => focusFirstNavigationLink(firstNavigationLinkRef.current)); }
   const canImportLeads = usePermission("leads.import");
   const isLeadsScreen = ["/leads", "/lead-master"].includes(location.pathname);
   const homeHref = showAdminNav ? "/leads" : "/lead-master";
   const currentHref = `${location.pathname}${location.search}`;
   const topbarModules = visibleTopbarModules(authLoading ? false : showAdminNav);
-  useEffect(() => { setTopbarModulesOpen(false); }, [location.pathname]);
+  useEffect(() => { navigationAutoHide.close(); }, [location.pathname, navigationAutoHide]);
   useEffect(() => {
     if (!topbarModulesOpen) return;
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { setTopbarModulesOpen(false); restoreNavigationFocus(previousNavigationFocusRef.current, document.body); } else if (shouldOpenNavigationShortcut(event)) { event.preventDefault(); openKeyboardNavigation(); } };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { navigationAutoHide.close(); restoreNavigationFocus(previousNavigationFocusRef.current, document.body); } else if (shouldOpenNavigationShortcut(event)) { event.preventDefault(); openKeyboardNavigation(); } };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [topbarModulesOpen]);
+  }, [topbarModulesOpen, navigationAutoHide]);
+  useEffect(() => {
+    const closeOnTouchOutside = (event: PointerEvent) => {
+      if (event.pointerType === "mouse") return;
+      const target = event.target as Node | null;
+      if (target && (topbarNavigationRef.current?.contains(target) || openNavigationRef.current?.contains(target))) return;
+      navigationAutoHide.schedule();
+    };
+    document.addEventListener("pointerdown", closeOnTouchOutside);
+    return () => { document.removeEventListener("pointerdown", closeOnTouchOutside); navigationAutoHide.dispose(); };
+  }, [navigationAutoHide]);
   function toggleTheme() { const next = theme === "light" ? "dark" : "light"; setTheme(next); setCurrentTheme(next); }
   const adminNavbar = <Navbar collapsed={false} showAdmin={showAdminNav} includeCore={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
   return <LeadNavbarActionsContext.Provider value={setLeadNavbarActions}><div ref={shellRef} className={showAdminNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
@@ -157,10 +170,11 @@ export function AppShell() {
     <main className="main">
       <header ref={topbarRef} className="topbar topbar-without-navigation">
         <Link className="topbar-logo topbar-brand-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>
-        <nav id="topbar-module-links" className={topbarModulesOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation">{topbarModules.map((module, index) => <NavLink ref={index === 0 ? firstNavigationLinkRef : undefined} key={module.id} to={module.path} aria-label={module.label} title={module.label} onClick={() => setTopbarModulesOpen(false)}><span>{module.label}</span></NavLink>)}</nav>
+        <div className="topbar-nav-hover-zone" aria-hidden="true" onMouseEnter={() => navigationAutoHide.enter()} onMouseLeave={() => navigationAutoHide.leave()} />
+        <button ref={openNavigationRef} className="navbar-action-button topbar-module-toggle topbar-nav-reveal-tab" type="button" aria-label={topbarModulesOpen ? "Hide quick navigation" : "Show quick navigation"} aria-expanded={topbarModulesOpen} aria-controls="topbar-module-links" onMouseEnter={() => navigationAutoHide.enter()} onMouseLeave={() => navigationAutoHide.leave()} onClick={() => { if (topbarModulesOpen) navigationAutoHide.close(); else { navigationAutoHide.open(); navigationAutoHide.schedule(); } }}>{topbarModulesOpen ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}</button>
+        <nav ref={topbarNavigationRef} id="topbar-module-links" className={topbarModulesOpen ? "topbar-module-links is-open" : "topbar-module-links"} aria-label="Quick navigation" aria-hidden={!topbarModulesOpen} inert={!topbarModulesOpen} onMouseEnter={() => navigationAutoHide.enter()} onMouseLeave={() => navigationAutoHide.leave()} onPointerDown={(event) => { if (event.pointerType !== "mouse") { navigationAutoHide.open(); navigationAutoHide.schedule(); } }} onFocusCapture={() => navigationAutoHide.setFocusHeld(true)} onBlurCapture={() => requestAnimationFrame(() => { if (!topbarNavigationRef.current?.contains(document.activeElement)) navigationAutoHide.setFocusHeld(false); })}>{topbarModules.map((module, index) => <NavLink ref={index === 0 ? firstNavigationLinkRef : undefined} key={module.id} to={module.path} aria-label={module.label} title={module.label} onFocus={() => navigationAutoHide.setFocusHeld(true)} onClick={() => navigationAutoHide.navigationSelected()}><span>{module.label}</span></NavLink>)}</nav>
         <div className="topbar-right">
           <div className="top-actions">
-            <button className="navbar-action-button topbar-module-toggle" type="button" aria-label={topbarModulesOpen ? "Hide quick navigation" : "Show quick navigation"} aria-expanded={topbarModulesOpen} aria-controls="topbar-module-links" onClick={() => setTopbarModulesOpen((open) => !open)}>{topbarModulesOpen ? <ChevronLeft size={18} aria-hidden="true" /> : <ChevronRight size={18} aria-hidden="true" />}</button>
             {isLeadsScreen && <div className="navbar-lead-actions"><GlobalSearch /><button className="navbar-action-button navbar-action-button--round" type="button" disabled={!canImportLeads || !leadNavbarActions} onClick={() => leadNavbarActions?.openBulkUpload()} aria-label="Bulk upload leads" title="Bulk upload leads"><Upload size={18} aria-hidden="true" /></button>{canCreateLead && <button className="navbar-action-button navbar-action-button--round" type="button" disabled={!leadNavbarActions} onClick={() => leadNavbarActions?.openNewLead()} aria-label="Add new lead" title="Add new lead"><Plus size={18} strokeWidth={2.5} aria-hidden="true" /></button>}</div>}
             <button className="navbar-action-button navbar-action-button--round top-action-icon" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`} title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}>{theme === "light" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}</button>
             <button className="navbar-action-button navbar-action-button--round topbar-notification-btn" type="button" aria-label="Notifications" title="Notifications"><Bell size={18} aria-hidden="true" /></button>
