@@ -162,6 +162,7 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
   const [editing, setEditing] = useState(false); const [editingLeadId, setEditingLeadId] = useState<string | null>(null); const [editForm, setEditForm] = useState<LeadFormState>(EMPTY_LEAD_FORM);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({}); const [editSaving, setEditSaving] = useState(false); const [editSuccess, setEditSuccess] = useState(""); const [editError, setEditError] = useState("");
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const inlineFieldSavingRef = useRef(new Set<string>());
   const [movingCallResolutionLeadIds, setMovingCallResolutionLeadIds] = useState<string[]>([]);
   const movingCallResolutionRef = useRef(false);
   const [userOptions, setUserOptions] = useState<DropdownOption[]>([]);
@@ -283,6 +284,10 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
     const column = LEAD_COLUMNS.find((candidate) => candidate.key === field);
     const configuredField = leadFields.find((candidate) => candidate.key === field && candidate.active);
     if (!configuredField && !column?.editable) throw new Error("This column is read-only.");
+    const savingKey = `${id}:${field}`;
+    // Ignore repeat clicks while this exact inline value is already being saved.
+    if (inlineFieldSavingRef.current.has(savingKey)) return;
+    inlineFieldSavingRef.current.add(savingKey);
     const optimisticValue = configuredField?.type === "boolean" ? value === "true" ? true : value === "false" ? false : null : value;
     const previousData = data;
     const previousDetail = detail;
@@ -290,7 +295,10 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
       if (configuredField) {
         const customValues = lead.custom_values && typeof lead.custom_values === "object" ? lead.custom_values : {};
         const leadFieldValues = customValues.lead_fields && typeof customValues.lead_fields === "object" ? customValues.lead_fields as Record<string, unknown> : {};
-        return { ...lead, custom_values: { ...customValues, lead_fields: { ...leadFieldValues, [field]: optimisticValue } } };
+        // List rows also contain materialized top-level values. Update both
+        // copies optimistically so the controlled select reflects the new
+        // choice immediately, rather than only after a page reload.
+        return { ...lead, [field]: optimisticValue, custom_values: { ...customValues, lead_fields: { ...leadFieldValues, [field]: optimisticValue } } };
       }
       return { ...lead, [field]: optimisticValue };
     };
@@ -310,9 +318,25 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
       // Reconcile after restoring the snapshot in case another server-side change happened concurrently.
       void load(true);
       throw cause;
+    } finally {
+      inlineFieldSavingRef.current.delete(savingKey);
     }
   }
-  async function moveLeadsToCallingResolution(ids: string[], value: string) {
+  async function updateProductStage(id: string, stage: string) {
+    const previousData = data; const previousDetail = detail;
+    const applyStage = (lead: Lead) => ({ ...lead, stage });
+    setData((current) => current ? { ...current, items: current.items.map((lead) => lead.id === id ? applyStage(lead) : lead) } : current);
+    setDetail((current) => current?.lead.id === id ? { ...current, lead: applyStage(current.lead) } : current);
+    try {
+      const response = await api<{ lead: Lead }>(`/api/leads/${encodeURIComponent(id)}/product-stage`, { method: "POST", body: JSON.stringify({ stage }) });
+      setData((current) => current ? { ...current, items: current.items.map((lead) => lead.id === id ? { ...lead, ...response.lead } : lead) } : current);
+      setDetail((current) => current?.lead.id === id ? { ...current, lead: { ...current.lead, ...response.lead } } : current);
+      return response.lead;
+    } catch (cause) {
+      setData(previousData); setDetail(previousDetail); setError(cause instanceof Error ? cause.message : "Unable to change product stage."); void load(true); throw cause;
+    }
+  }
+  async function moveLeadsToCallingResolution(ids: string[], value: string, productCode?: string) {
     const uniqueIds = [...new Set(ids)].filter(Boolean);
     if (!canEdit || movingCallResolutionRef.current) return { moved: 0, failed: 0, already: 0 };
     if (uniqueIds.length > LEAD_ROW_DROP_LIMIT) {
@@ -321,7 +345,8 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
       return { moved: 0, failed: 0, already: 0 };
     }
     const leads = uniqueIds.map((id) => data?.items.find((lead) => lead.id === id)).filter((lead): lead is Lead => Boolean(lead));
-    const { moveIds, already } = planResolutionDrop(leads, value);
+    const planned = planResolutionDrop(leads, value);
+    const { moveIds, already } = productCode ? { moveIds: uniqueIds, already: 0 } : planned;
     if (!moveIds.length) {
       showToast(`All ${already} selected lead${already === 1 ? " already has" : "s already have"} ${value}.`);
       return { moved: 0, failed: 0, already };
@@ -331,6 +356,23 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
     const failures: string[] = [];
     let moved = 0;
     try {
+      if (productCode) {
+        const previousData = data;
+        const updateProductResolution = (lead: Lead): Lead => {
+          if (!moveIds.includes(lead.id)) return lead;
+          const customValues = lead.custom_values && typeof lead.custom_values === "object" ? lead.custom_values : {};
+          const leadFieldValues = customValues.lead_fields && typeof customValues.lead_fields === "object" ? customValues.lead_fields as Record<string, unknown> : {};
+          return { ...lead, proposed_solution: productCode, calling_resolution: value, custom_values: { ...customValues, lead_fields: { ...leadFieldValues, proposed_solution: productCode, calling_resolution: value } } };
+        };
+        setData((current) => current ? { ...current, items: current.items.map(updateProductResolution) } : current);
+        try {
+          const result = await api<{ updated: number }>("/api/leads/bulk-product-resolution", { method: "POST", body: JSON.stringify({ ids: moveIds, product_code: productCode, resolution: value }) });
+          moved = result.updated || 0;
+        } catch (cause) {
+          setData(previousData);
+          failures.push(cause instanceof Error ? cause.message : "Unable to update product and calling resolution.");
+        }
+      } else {
       for (const id of moveIds) {
         try {
           await api(`/api/leads/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ field: "calling_resolution", value }) });
@@ -338,6 +380,7 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
         } catch (cause) {
           failures.push(cause instanceof Error ? cause.message : "Unable to update calling resolution.");
         }
+      }
       }
       const message = resolutionMoveSummary(moved, failures);
       if (failures.length) setError(message);
@@ -371,7 +414,7 @@ export function useLeadsScreen(forcedWorkQueue: "lead_master" | "focused_calling
   const extendedFilterFields = [...filterFieldDropdown.options, ...[...ADDITIONAL_LEAD_FIELDS, ...SYSTEM_LEAD_FIELDS].map((field, index) => ({ id: `phase1-${field.key}`, dropdown_id: "filter_field", label: field.label, value: field.key, semantic_key: null, sort_order: 1000 + index, is_active: true }))].filter((option, index, all) => all.findIndex((candidate) => candidate.value === option.value) === index);
   const canLogCall = canCall && detail?.lead.permission === "Yes";
   const callDisabledReason = !canCall ? "Your role cannot log calls." : "Permission to Call is required.";
-  return { data, detail, detailLoading, error, filters, filtersActive, managedFilterDropdowns: leadFilterDropdowns, managedFilters, loading, page, pageSize, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, savedFilters, quickFilterLoading, advancedConditions, advancedJoin, advancedOpen, editingQuickFilter, toast, draftConditions, draftJoin, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, products, leadFields, leadFieldsLoading, leadFieldsError, editing, editForm, setEditing, setEditForm, formErrors, editSaving, editSuccess, editError, canEdit, canChangePermission, canCall, canLogCall, callDisabledReason, canConvertAccount, canImport, canAssign, canDelete, bulkImportLabel, statusUpdatingId, movingCallResolutionLeadIds, statusOptions: LEAD_STATUS_OPTIONS, sortBy, sortDir, changeSort, formatDate, load, openDetail, beginEdit, cancelEdit, closeDetail: () => { setDetail(null); setEditingLeadId(null); setActivityKind(null); setActivityItems([]); const next = new URLSearchParams(searchParams); next.delete("open"); setSearchParams(next); }, closeNewLead, createNewLead, saveLeadEdit, updateLeadStatus, updateLeadField, moveLeadsToCallingResolution, updateStage, updatePermission, reassignByRoundRobin, convertLead, archiveLeads, permanentlyDeleteLeads, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, updateManagedFilter, chooseWorkQueue, clearFilters, changePageSize, saveSavedFilter, applySavedFilter, deleteSavedFilter, openAdvancedFilter, applyAdvancedFilter, updateCondition, addCondition, removeCondition, setAdvancedOpen, setDraftJoin, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)), activityKind, activityItems, activityPage, activityTotal, activityLoading, activityError, activityForm, setActivityForm, loadActivity, closeActivity: () => { setActivityKind(null); setActivityItems([]); }, addActivity, rescheduleActivity, bulkUploadOpen, bulkFile, bulkPreview, bulkResult, bulkLoading, bulkError, bulkAllowDuplicates, setBulkAllowDuplicates, openBulkUpload, closeBulkUpload, downloadBulkTemplate, previewBulkUpload, applyBulkUpload, selectedLeadIds, selectAllView, setSelectAllView, toggleSelectLead, toggleSelectAll, clearSelection, userOptions, dropdownOptions: { leadType: leadTypeDropdown.options, stage: stageDropdown.options, permission: permissionDropdown.options, businessCategory: businessCategoryDropdown.options, callingResolution: callingResolutionDropdown.options, rating: ratingDropdown.options, leadSource: leadSourceDropdown.options, join: joinDropdown.options, filterField: extendedFilterFields, filterOperator: filterOperatorDropdown.options, pageSize: pageSizeDropdown.options.length ? pageSizeDropdown.options : DEFAULT_PAGE_SIZE_OPTIONS, noteVisibility: noteVisibilityDropdown.options, notifyBefore: notifyBeforeDropdown.options }, dropdownDefaults: { leadType: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue } };
+  return { data, detail, detailLoading, error, filters, filtersActive, managedFilterDropdowns: leadFilterDropdowns, managedFilters, loading, page, pageSize, totalPages, view, viewCounts, viewGroups: LEAD_VIEW_GROUPS, viewOptions: VIEW_OPTIONS, currentViewLabel, viewMenuOpen, activeViewIndex, viewMenuRef, viewButtonRef, viewOptionRefs, savedFilters, quickFilterLoading, advancedConditions, advancedJoin, advancedOpen, editingQuickFilter, toast, draftConditions, draftJoin, newLeadOpen: searchParams.get("new") === "1", newLeadForm, setNewLeadForm, products, leadFields, leadFieldsLoading, leadFieldsError, editing, editForm, setEditing, setEditForm, formErrors, editSaving, editSuccess, editError, canEdit, canChangePermission, canCall, canLogCall, callDisabledReason, canConvertAccount, canImport, canAssign, canDelete, bulkImportLabel, statusUpdatingId, movingCallResolutionLeadIds, statusOptions: LEAD_STATUS_OPTIONS, sortBy, sortDir, changeSort, formatDate, load, openDetail, beginEdit, cancelEdit, closeDetail: () => { setDetail(null); setEditingLeadId(null); setActivityKind(null); setActivityItems([]); const next = new URLSearchParams(searchParams); next.delete("open"); setSearchParams(next); }, closeNewLead, createNewLead, saveLeadEdit, updateLeadStatus, updateLeadField, updateProductStage, moveLeadsToCallingResolution, updateStage, updatePermission, reassignByRoundRobin, convertLead, archiveLeads, permanentlyDeleteLeads, chooseView, openViewMenu, closeViewMenu, handleViewButtonKeyDown, handleViewOptionKeyDown, updateFilter, updateManagedFilter, chooseWorkQueue, clearFilters, changePageSize, saveSavedFilter, applySavedFilter, deleteSavedFilter, openAdvancedFilter, applyAdvancedFilter, updateCondition, addCondition, removeCondition, setAdvancedOpen, setDraftJoin, previousPage: () => setPage((value) => Math.max(1, value - 1)), nextPage: () => setPage((value) => Math.min(totalPages, value + 1)), activityKind, activityItems, activityPage, activityTotal, activityLoading, activityError, activityForm, setActivityForm, loadActivity, closeActivity: () => { setActivityKind(null); setActivityItems([]); }, addActivity, rescheduleActivity, bulkUploadOpen, bulkFile, bulkPreview, bulkResult, bulkLoading, bulkError, bulkAllowDuplicates, setBulkAllowDuplicates, openBulkUpload, closeBulkUpload, downloadBulkTemplate, previewBulkUpload, applyBulkUpload, selectedLeadIds, selectAllView, setSelectAllView, toggleSelectLead, toggleSelectAll, clearSelection, userOptions, dropdownOptions: { leadType: leadTypeDropdown.options, stage: stageDropdown.options, permission: permissionDropdown.options, businessCategory: businessCategoryDropdown.options, callingResolution: callingResolutionDropdown.options, rating: ratingDropdown.options, leadSource: leadSourceDropdown.options, join: joinDropdown.options, filterField: extendedFilterFields, filterOperator: filterOperatorDropdown.options, pageSize: pageSizeDropdown.options.length ? pageSizeDropdown.options : DEFAULT_PAGE_SIZE_OPTIONS, noteVisibility: noteVisibilityDropdown.options, notifyBefore: notifyBeforeDropdown.options }, dropdownDefaults: { leadType: leadTypeDropdown.defaultValue, permission: permissionDropdown.defaultValue } };
 }
 
 export function fieldValue(lead: Lead, key: string) {

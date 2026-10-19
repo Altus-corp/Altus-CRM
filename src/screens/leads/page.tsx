@@ -907,7 +907,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const coreColumns: LeadColumn[] = [
     ...LEAD_COLUMNS.filter((field) => CORE_TABLE_COLUMN_KEYS.has(field.key)).map((field) => ({ ...field, displayKey: CORE_TABLE_DATA_KEYS[field.key] || field.key })),
     { key: "owner", label: "Assigned to", input: "text", editable: false, displayKey: "owner", storage: { kind: "column", key: "owner_user_id" } },
-    { key: "stage", label: "Stage", input: "text", editable: false, displayKey: "stage", storage: { kind: "column", key: "stage" } },
+    { key: "stage", label: "Stage", input: "dropdown", editable: true, displayKey: "stage", storage: { kind: "column", key: "stage" } },
     { key: "calling_resolution", label: "Calling Resolution", input: "dropdown", editable: true, displayKey: "calling_resolution", storage: { kind: "custom", key: "calling_resolution" } },
   ];
   const tableColumns = mergeCoreAndConfiguredTableColumns(coreColumns, configuredFields);
@@ -919,26 +919,43 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [groupByOpen, setGroupByOpen] = useState(false);
   const selectedProductCodes = screen.managedFilters.products || [];
   const [productStageOptions, setProductStageOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [productCallResolutionOptions, setProductCallResolutionOptions] = useState<Array<{ id: string; value: string; label: string }>>([]);
+  const [productCallResolutionOptions, setProductCallResolutionOptions] = useState<Array<{ id: string; value: string; label: string; productCode: string }>>([]);
   const [callResolutionsByProductCode, setCallResolutionsByProductCode] = useState<Record<string, Array<{ value: string; label: string }>>>({});
-  const [callResolutionRefresh, setCallResolutionRefresh] = useState(0);
+  const [stagesByProductCode, setStagesByProductCode] = useState<Record<string, Array<{ value: string; label: string }>>>({});
+  // Product configuration is immutable for the lifetime of this screen in normal
+  // use. Cache it so an inline product change does not repeatedly make the same
+  // network requests and make the sheet feel slow.
+  const loadedProductConfigurationIds = useRef(new Set<string>());
+  const loadingProductConfigurationIds = useRef(new Set<string>());
   const visibleProposedSolutionProducts = Array.from(new Set((screen.data?.items || []).flatMap((lead) => resolutionProductCodesForProposedSolution(fieldValue(lead, "proposed_solution"), screen.products))));
   useEffect(() => {
-    const refreshWhenVisible = () => { if (document.visibilityState === "visible") setCallResolutionRefresh((value) => value + 1); };
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => { window.removeEventListener("focus", refreshWhenVisible); document.removeEventListener("visibilitychange", refreshWhenVisible); };
-  }, []);
-  useEffect(() => {
     const visibleProducts = screen.products.filter((product) => visibleProposedSolutionProducts.includes(product.code));
-    if (!visibleProducts.length) { setCallResolutionsByProductCode({}); return; }
+    const productsToLoad = visibleProducts.filter((product) => !loadedProductConfigurationIds.current.has(product.id) && !loadingProductConfigurationIds.current.has(product.id));
+    if (!productsToLoad.length) return;
+    productsToLoad.forEach((product) => loadingProductConfigurationIds.current.add(product.id));
     let live = true;
-    void Promise.all(visibleProducts.map(async (product) => {
-      const response = await api<{ resolutions: Array<{ label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/call-resolutions`);
-      return [product.code, (response.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ value: resolution.label, label: resolution.label }))] as const;
-    })).then((entries) => { if (live) setCallResolutionsByProductCode(Object.fromEntries(entries)); }).catch(() => { if (live) setCallResolutionsByProductCode({}); });
+    void Promise.all(productsToLoad.map(async (product) => {
+      const [stageResponse, resolutionResponse] = await Promise.all([
+        api<{ stages: Array<{ label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/stages`),
+        api<{ resolutions: Array<{ label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/call-resolutions`),
+      ]);
+      return {
+        id: product.id,
+        code: product.code,
+        stages: (stageResponse.stages || []).filter((stage) => stage.active).map((stage) => ({ value: stage.label, label: stage.label })),
+        resolutions: (resolutionResponse.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ value: resolution.label, label: resolution.label })),
+      };
+    })).then((entries) => {
+      if (!live) {
+        entries.forEach((entry) => loadingProductConfigurationIds.current.delete(entry.id));
+        return;
+      }
+      entries.forEach((entry) => { loadedProductConfigurationIds.current.add(entry.id); loadingProductConfigurationIds.current.delete(entry.id); });
+      setStagesByProductCode((current) => ({ ...current, ...Object.fromEntries(entries.map((entry) => [entry.code, entry.stages])) }));
+      setCallResolutionsByProductCode((current) => ({ ...current, ...Object.fromEntries(entries.map((entry) => [entry.code, entry.resolutions])) }));
+    }).catch(() => { productsToLoad.forEach((product) => loadingProductConfigurationIds.current.delete(product.id)); });
     return () => { live = false; };
-  }, [screen.products, visibleProposedSolutionProducts.join("|"), callResolutionRefresh]);
+  }, [screen.products, visibleProposedSolutionProducts.join("|")]);
   useEffect(() => { if (!selectedProductCodes.length && (screen.managedFilters.product_stage || []).length) screen.updateManagedFilter("product_stage", []); }, [selectedProductCodes.join("|"), screen.managedFilters.product_stage?.join("|")]);
   useEffect(() => {
     const selectedProducts = screen.products.filter((product) => selectedProductCodes.includes(product.code) || selectedProductCodes.includes(product.label));
@@ -960,7 +977,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     let live = true;
     void Promise.all(selectedProducts.map(async (product) => {
       const response = await api<{ resolutions: Array<{ id: string; label: string; active: boolean }> }>(`/api/products/${encodeURIComponent(product.id)}/call-resolutions`);
-      return (response.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ id: `${product.id}:${resolution.id}`, value: resolution.label, label: resolution.label }));
+      return (response.resolutions || []).filter((resolution) => resolution.active).map((resolution) => ({ id: `${product.id}:${resolution.id}`, value: resolution.label, label: resolution.label, productCode: product.code }));
     })).then((groups) => {
       if (!live) return;
       const seen = new Set<string>();
@@ -1202,6 +1219,18 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     const displayKey = field.displayKey || field.key;
     if (displayKey === "name") return <><strong>{displayField(fieldValue(lead, displayKey))}</strong><small>{displayField(lead.email)}</small></>;
     const configuredKey = canonicalManagedFieldKey(field.key);
+    if (configuredKey === "proposed_solution") {
+      const value = String(fieldValue(lead, displayKey) || "");
+      const productOptions = screen.products.map((product) => ({ value: product.code, label: product.label }));
+      const options = value && !productOptions.some((option) => option.value === value) ? [{ value, label: value }, ...productOptions] : productOptions;
+      return <select className="lead-table-field-select" aria-label={`Change proposed solution for ${lead.name}`} value={value} disabled={!screen.canEdit} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, configuredKey, event.target.value).catch(() => undefined); }}><option value="">Select product</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+    }
+    if (field.key === "stage") {
+      const proposedSolution = String(fieldValue(lead, "proposed_solution") || "");
+      const stageOptions = resolutionProductCodesForProposedSolution(proposedSolution, screen.products).flatMap((code) => stagesByProductCode[code] || []).filter((option, index, options) => options.findIndex((candidate) => candidate.value === option.value) === index);
+      const value = String(fieldValue(lead, "stage") || "");
+      return <select className="lead-table-field-select" aria-label={`Change stage for ${lead.name}`} value={stageOptions.some((option) => option.value === value) ? value : ""} disabled={!screen.canEdit || !stageOptions.length} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateProductStage(lead.id, event.target.value).catch(() => undefined); }}><option value="">{stageOptions.length ? "Select stage" : "Select a product first"}</option>{stageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+    }
     const configured = configuredFieldsByKey.get(configuredKey);
     const isCallingResolution = configuredKey === "calling_resolution";
     if (!isCallingResolution && !isInlineTableSelectField(configured)) return displayField(fieldValue(lead, displayKey));
@@ -1210,7 +1239,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     const productOptions = configuredKey === "calling_resolution" ? callResolutionOptionsForProposedSolution(proposedSolution, screen.products, callResolutionsByProductCode) : [];
     const baseOptions = configured?.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured?.options || []).map((option) => ({ value: option, label: option })))];
     const value = configured?.type === "boolean" ? currentValue === true ? "true" : currentValue === false ? "false" : "" : String(currentValue || "");
-    const options = value && !baseOptions.some((option) => option.value === value) ? [{ value, label: value }, ...baseOptions] : baseOptions;
+    const options = productOptions.length ? baseOptions : value && !baseOptions.some((option) => option.value === value) ? [{ value, label: value }, ...baseOptions] : baseOptions;
     return <select className="lead-table-field-select" aria-label={`Change ${configured?.label || field.label} for ${lead.name}`} value={value} disabled={!screen.canEdit || screen.movingCallResolutionLeadIds.includes(lead.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, configuredKey, event.target.value).catch(() => undefined); }}>
       {options.map((option) => <option key={option.value || "empty"} value={option.value}>{option.label}</option>)}
     </select>;
@@ -1230,18 +1259,18 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     if (!productCodes.length || productCodes.some((code) => !callResolutionsByProductCode[code])) return null;
     return productCodes.some((code) => (callResolutionsByProductCode[code] || []).some((option) => option.value === value));
   }
-  function resolutionDropUnavailable(value: string) { return draggedLeads.length > 0 && draggedLeads.every((lead) => resolutionValidityForLead(lead, value) === false); }
-  function canDropOnResolution(value: string) { return screen.canEdit && draggedLeadIds.length > 0 && !screen.movingCallResolutionLeadIds.length && !resolutionDropUnavailable(value); }
+  function resolutionDropUnavailable(value: string, productCode?: string) { return !productCode && draggedLeads.length > 0 && draggedLeads.every((lead) => resolutionValidityForLead(lead, value) === false); }
+  function canDropOnResolution(value: string, productCode?: string) { return screen.canEdit && draggedLeadIds.length > 0 && !screen.movingCallResolutionLeadIds.length && !resolutionDropUnavailable(value, productCode); }
   function startLeadRowDrag(event: React.DragEvent<HTMLElement>, lead: Lead) { const ids = leadIdsForResolutionDrop(lead.id, selectedIds); setDraggedLeadIds(ids); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-lead-ids", JSON.stringify(ids)); const image = document.createElement("div"); image.className = "lead-row-drag-image"; image.textContent = ids.length === 1 ? String(fieldValue(lead, "name") || "Lead") : `${ids.length} leads`; document.body.appendChild(image); event.dataTransfer.setDragImage(image, 8, 8); window.setTimeout(() => image.remove(), 0); }
-  async function dropOnCallingResolution(event: React.DragEvent<HTMLButtonElement>, value: string, label: string) {
+  async function dropOnCallingResolution(event: React.DragEvent<HTMLButtonElement>, value: string, label: string, productCode?: string) {
     event.preventDefault();
-    if (!canDropOnResolution(value)) return;
-    if (draggedLeadIds.length > LEAD_ROW_DROP_LIMIT) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value); return; }
+    if (!canDropOnResolution(value, productCode)) return;
+    if (draggedLeadIds.length > LEAD_ROW_DROP_LIMIT) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value, productCode); return; }
     const { moveIds, already } = planResolutionDrop(draggedLeads, value);
-    if (!moveIds.length) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value); return; }
+    if (!moveIds.length && !productCode) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value); return; }
     if (draggedLeadIds.length > 1 && !window.confirm(`Move ${moveIds.length} leads to ${label}?${already ? ` ${already} already has it.` : ""}`)) return;
     setActiveResolutionDrop(null);
-    await screen.moveLeadsToCallingResolution(draggedLeadIds, value);
+    await screen.moveLeadsToCallingResolution(draggedLeadIds, value, productCode);
   }
   function archiveSelectedLeads() { if (selectedIds.length && window.confirm(`Archive ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}? You can restore archived data later through an administrator.`)) void screen.archiveLeads(selectedIds); }
   function deleteSelectedLeads() { if (!selectedIds.length) return; const accepted = window.confirm(`Permanently delete ${selectedIds.length} selected lead${selectedIds.length === 1 ? "" : "s"}, including their linked activity? This cannot be undone.`); if (!accepted) return; if (window.prompt('Type DELETE to permanently remove the selected leads.') === "DELETE") void screen.permanentlyDeleteLeads(selectedIds); }
@@ -1444,7 +1473,8 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
             <span className="call-resolution-label">Total</span>
           </button>
           {activeCallResolutionOptions.map((option, index) => {
-            const isDropTarget = canDropOnResolution(option.value);
+            const productCode = "productCode" in option && typeof option.productCode === "string" ? option.productCode : undefined;
+            const isDropTarget = canDropOnResolution(option.value, productCode);
             const isNoDrop = draggedLeadIds.length > 0 && !isDropTarget;
             return <button
               key={option.id || option.value}
@@ -1454,7 +1484,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
               onDragOver={(event) => { if (!isDropTarget) { event.dataTransfer.dropEffect = "none"; return; } event.preventDefault(); event.dataTransfer.dropEffect = "move"; setActiveResolutionDrop(option.value); }}
               onDragEnter={() => { if (isDropTarget) setActiveResolutionDrop(option.value); }}
               onDragLeave={() => setActiveResolutionDrop((current) => current === option.value ? null : current)}
-              onDrop={(event) => { void dropOnCallingResolution(event, option.value, option.label); }}
+              onDrop={(event) => { void dropOnCallingResolution(event, option.value, option.label, productCode); }}
             >
               <span className="call-resolution-dot" />
               <strong>{callResolutionCounts.get(option.value) || 0}</strong>
