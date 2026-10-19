@@ -14,6 +14,7 @@ import "./leads.css";
 
 const LEADS_COLUMN_PREFERENCE_KEY = "leads.columns.v1";
 const LEADS_COLUMN_KNOWN_PREFERENCE_KEY = "leads.columns.known.v1";
+const LEADS_COLUMN_PINNED_PREFERENCE_KEY = "leads.columns.pinned.v1";
 const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
@@ -39,6 +40,50 @@ function clearStoredColumns(userId: string | undefined) {
   if (!userId) return;
   try { window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_PREFERENCE_KEY, userId)); window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_KNOWN_PREFERENCE_KEY, userId)); } catch { /* localStorage is optional */ }
 }
+type PinnedColumnPreference = { pinnedOrder: string[]; unpinnedOrder: string[]; preFreezePositions: Record<string, number> };
+function readStoredPinnedColumns(userId: string | undefined): unknown | null {
+  if (!userId) return null;
+  try { const raw = window.localStorage.getItem(columnStorageKey(LEADS_COLUMN_PINNED_PREFERENCE_KEY, userId)); return raw === null ? null : JSON.parse(raw); } catch { return null; }
+}
+function writeStoredPinnedColumns(userId: string | undefined, preference: PinnedColumnPreference) {
+  if (!userId) return;
+  try { window.localStorage.setItem(columnStorageKey(LEADS_COLUMN_PINNED_PREFERENCE_KEY, userId), JSON.stringify(preference)); } catch { /* localStorage is optional */ }
+}
+function clearStoredPinnedColumns(userId: string | undefined) { if (userId) try { window.localStorage.removeItem(columnStorageKey(LEADS_COLUMN_PINNED_PREFERENCE_KEY, userId)); } catch { /* localStorage is optional */ } }
+export function reconcilePinnedColumnPreference(saved: unknown | null, fields: readonly { key: string }[], fallbackOrder: readonly string[]): PinnedColumnPreference {
+  const valid = new Set(fields.map((field) => field.key));
+  const onlyValid = (value: unknown) => Array.isArray(value) ? [...new Set(value.filter((key): key is string => typeof key === "string" && valid.has(key)))] : [];
+  const record = saved && typeof saved === "object" && !Array.isArray(saved) ? saved as Partial<PinnedColumnPreference> : null;
+  const pinnedOrder = saved === null ? (valid.has("name") ? ["name"] : []) : onlyValid(Array.isArray(saved) ? saved : record?.pinnedOrder);
+  const unpinnedOrder = onlyValid(record?.unpinnedOrder).filter((key) => !pinnedOrder.includes(key));
+  for (const key of fallbackOrder) if (valid.has(key) && !pinnedOrder.includes(key) && !unpinnedOrder.includes(key)) unpinnedOrder.push(key);
+  const preFreezePositions: Record<string, number> = {};
+  if (record?.preFreezePositions && typeof record.preFreezePositions === "object") for (const [key, position] of Object.entries(record.preFreezePositions)) if (valid.has(key) && Number.isInteger(position) && position >= 0) preFreezePositions[key] = position;
+  return { pinnedOrder, unpinnedOrder, preFreezePositions };
+}
+export function groupPinnedColumns(order: readonly string[], pinned: readonly string[]) {
+  const pinnedSet = new Set(pinned);
+  return [...pinned.filter((key) => order.includes(key)), ...order.filter((key) => !pinnedSet.has(key))];
+}
+export function columnLayoutOrder(preference: PinnedColumnPreference, available: readonly string[]) {
+  const availableKeys = new Set(available);
+  const ordered = [...preference.pinnedOrder, ...preference.unpinnedOrder].filter((key, index, all) => availableKeys.has(key) && all.indexOf(key) === index);
+  return [...ordered, ...available.filter((key) => !ordered.includes(key))];
+}
+export function movePinnedColumnWithinGroup(preference: PinnedColumnPreference, fromKey: string, toKey: string, side: "before" | "after") {
+  const sourceIsPinned = preference.pinnedOrder.includes(fromKey);
+  const targetIsPinned = preference.pinnedOrder.includes(toKey);
+  if (sourceIsPinned !== targetIsPinned) return preference;
+  const group = sourceIsPinned ? preference.pinnedOrder : preference.unpinnedOrder;
+  const nextGroup = moveColumnKey(group, fromKey, toKey, side);
+  return sourceIsPinned ? { ...preference, pinnedOrder: nextGroup } : { ...preference, unpinnedOrder: nextGroup };
+}
+export function pinnedColumnOffsets(pinnedOrder: readonly string[], widths: Record<string, number>, selectionWidth: number) {
+  const offsets = new Map<string, number>();
+  let left = selectionWidth;
+  for (const key of pinnedOrder) { offsets.set(key, left); left += widths[key] || 0; }
+  return offsets;
+}
 function normalizeColumnKeys(value: unknown, fields: readonly { key: string }[], defaults: readonly string[]) {
   const valid = new Set(fields.map((field) => field.key));
   const saved = Array.isArray(value) ? keepAllowedColumnOrder(value.filter((key): key is string => typeof key === "string" && COLUMN_KEY_PATTERN.test(key)), valid) : [];
@@ -59,13 +104,13 @@ export function moveColumnKey(order: readonly string[], fromKey: string, toKey: 
   return next;
 }
 
-function SortableLeadHeader({ label, sortKey, sortBy, sortDir, onSort, headerProps, resizeHandle }: { label: string; sortKey: string; sortBy: string | null; sortDir: "asc" | "desc" | null; onSort: (sort: string) => void; headerProps?: React.ThHTMLAttributes<HTMLTableCellElement>; resizeHandle?: React.ReactNode }) {
+function SortableLeadHeader({ label, sortKey, sortBy, sortDir, onSort, headerProps, resizeHandle, pinControl: _pinControl }: { label: string; sortKey: string; sortBy: string | null; sortDir: "asc" | "desc" | null; onSort: (sort: string) => void; headerProps?: React.ThHTMLAttributes<HTMLTableCellElement>; resizeHandle?: React.ReactNode; pinControl?: React.ReactNode }) {
   const direction = sortBy === sortKey ? sortDir : null;
   const SortIcon = direction === "asc" ? ChevronUp : direction === "desc" ? ChevronDown : ChevronsUpDown;
   return <th scope="col" {...headerProps} aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}><button type="button" className={`lead-sort-button${direction ? " is-sorted" : ""}`} onClick={() => onSort(sortKey)}><span className="lead-header-label">{label}</span><SortIcon size={14} strokeWidth={2} aria-hidden="true" /></button>{resizeHandle}</th>;
 }
 
-function LeadTableHeader({ fields, renderFieldHeader, selectAll, statusHeader }: { fields: LeadColumn[]; renderFieldHeader: (field: LeadColumn) => React.ReactNode; selectAll: React.ReactNode; statusHeader: React.ReactNode }) {
+function LeadTableHeader({ fields, renderFieldHeader, selectAll, statusHeader, selectionSticky: _selectionSticky }: { fields: LeadColumn[]; renderFieldHeader: (field: LeadColumn) => React.ReactNode; selectAll: React.ReactNode; statusHeader: React.ReactNode; selectionSticky?: boolean }) {
   return <thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">{selectAll}</label></th>{fields.map(renderFieldHeader)}{statusHeader}{/* <th scope="col">Status</th> */}</tr></thead>;
 }
 
@@ -75,7 +120,7 @@ export function isLeadRowDragInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest(ROW_DRAG_INTERACTIVE_SELECTOR));
 }
 
-function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, onDragStart: startDrag, onDragEnd: endDrag }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; moving: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; onDragStart: (event: React.DragEvent<HTMLElement>, lead: Lead) => void; onDragEnd: () => void }) {
+function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, onDragStart: startDrag, onDragEnd: endDrag, selectionSticky, pinnedCellStyle }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; moving: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; onDragStart: (event: React.DragEvent<HTMLElement>, lead: Lead) => void; onDragEnd: () => void; selectionSticky: boolean; pinnedCellStyle: (key: string) => React.CSSProperties | undefined }) {
   const [hasFinePointer, setHasFinePointer] = useState(false);
   const suppressClickRef = useRef(false);
   useEffect(() => { const media = window.matchMedia("(pointer: fine)"); const sync = () => setHasFinePointer(media.matches); sync(); media.addEventListener("change", sync); return () => media.removeEventListener("change", sync); }, []);
@@ -85,8 +130,10 @@ function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSe
   const onDragStart = (event: React.DragEvent<HTMLElement>, _lead?: Lead) => { suppressClickRef.current = true; startDrag(event, lead); };
   const onDragEnd = () => { endDrag(); window.setTimeout(() => { suppressClickRef.current = false; }, 0); };
   const onRowPointerDown = () => { suppressClickRef.current = false; };
-  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => { event.stopPropagation(); onDragStart(event, lead); }} onDragEnd={(event) => { event.stopPropagation(); onDragEnd(); }}><GripVertical size={14} aria-hidden="true" /></button>}</td>{fields.map((field) => <td key={field.key} data-lead-row-no-drag={field.input === "dropdown" || field.input === "boolean" ? "true" : undefined}>{renderField(lead, field)}</td>)}<td data-lead-row-no-drag="true" onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "\u2014"}</option>)}</select></td></tr>;
-  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}</td>{fields.map((field) => <td key={field.key}>{renderField(lead, field)}</td>)}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
+  const lastPinnedKey = fields.filter((field) => pinnedCellStyle(field.key)).at(-1)?.key;
+  const cells = fields.map((field) => <td key={field.key} className={pinnedCellStyle(field.key) ? `lead-pinned-cell${field.key === lastPinnedKey ? " is-last-pinned" : ""}` : undefined} style={pinnedCellStyle(field.key)} data-lead-row-no-drag={field.input === "dropdown" || field.input === "boolean" ? "true" : undefined}>{renderField(lead, field)}</td>);
+  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => { event.stopPropagation(); onDragStart(event, lead); }} onDragEnd={(event) => { event.stopPropagation(); onDragEnd(); }}><GripVertical size={14} aria-hidden="true" /></button>}</td>{cells}<td data-lead-row-no-drag="true" onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "\u2014"}</option>)}</select></td></tr>;
+  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}</td>{cells}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
 }
 
 function displayField(value: unknown) {
@@ -921,7 +968,16 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
     }).catch(() => { if (live) setProductCallResolutionOptions([]); });
     return () => { live = false; };
   }, [screen.products, selectedProductCodes.join("|")]);
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys));
+  const [pinnedPreference, setPinnedPreference] = useState<PinnedColumnPreference>(() => {
+    const order = normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys);
+    return reconcilePinnedColumnPreference(readStoredPinnedColumns(user?.id), allChooserFields, order);
+  });
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(() => {
+    const order = normalizeColumnKeys(readStoredColumns(user?.id), allChooserFields, defaultColumnKeys);
+    const preference = reconcilePinnedColumnPreference(readStoredPinnedColumns(user?.id), allChooserFields, order);
+    return groupPinnedColumns(order, preference.pinnedOrder);
+  });
+  const pinnedColumnKeys = pinnedPreference.pinnedOrder;
   function reconcileColumns(visible: unknown, known: unknown) {
     const allowed = new Set(allChooserFields.map((field) => field.key));
     const saved = normalizeColumnKeys(visible, allChooserFields, defaultColumnKeys);
@@ -931,10 +987,17 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   useEffect(() => {
     const reconciled = reconcileColumns(visibleColumnKeys, readStoredKnownColumns(user?.id));
     if (reconciled.visible.every((key, index) => key === visibleColumnKeys[index]) && reconciled.visible.length === visibleColumnKeys.length) return;
-    setVisibleColumnKeys(reconciled.visible);
+    setVisibleColumnKeys(groupPinnedColumns(reconciled.visible, pinnedPreference.pinnedOrder));
     writeStoredColumns(user?.id, reconciled.visible);
     writeStoredKnownColumns(user?.id, reconciled.known);
   }, [screen.view, screen.leadFields]);
+  useEffect(() => {
+    const reconciled = reconcilePinnedColumnPreference(readStoredPinnedColumns(user?.id), allChooserFields, visibleColumnKeys);
+    if (JSON.stringify(reconciled) === JSON.stringify(pinnedPreference)) return;
+    setPinnedPreference(reconciled);
+    writeStoredPinnedColumns(user?.id, reconciled);
+    setVisibleColumnKeys((current) => groupPinnedColumns(current, reconciled.pinnedOrder));
+  }, [screen.leadFields, user?.id]);
 
   /* Enhanced column chooser state */
   const [columnSearch, setColumnSearch] = useState("");
@@ -944,6 +1007,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [headerDropTarget, setHeaderDropTarget] = useState<{ key: string; side: "before" | "after" } | null>(null);
   const [columnOrderAnnouncement, setColumnOrderAnnouncement] = useState("");
   const columnPreferenceRevision = useRef(0);
+  const pendingPinnedPreferenceRef = useRef<PinnedColumnPreference | null>(null);
   const tableWrapRef = useRef<HTMLDivElement>(null);
   const suppressHeaderSortClickRef = useRef(false);
   const filteredChooserFields = columnSearch ? allChooserFields.filter((f) => f.label.toLowerCase().includes(columnSearch.toLowerCase())) : allChooserFields;
@@ -962,6 +1026,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
       const savedVisible = Array.isArray(visibleResponse.value) ? visibleResponse.value : null;
       if (!live || columnPreferenceRevision.current !== requestRevision || !savedVisible) return;
       const reconciled = reconcileColumns(savedVisible, knownResponse.value);
+      reconciled.visible = groupPinnedColumns(reconciled.visible, pinnedPreference.pinnedOrder);
       setVisibleColumnKeys(reconciled.visible);
       writeStoredColumns(user.id, reconciled.visible);
       writeStoredKnownColumns(user.id, reconciled.known);
@@ -974,7 +1039,20 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }, [user?.id, screen.view, screen.leadFields]);
   function saveColumnOrder(order: string[]) {
     columnPreferenceRevision.current += 1;
+    const preference = pendingPinnedPreferenceRef.current || pinnedPreference;
+    pendingPinnedPreferenceRef.current = null;
     const reconciled = reconcileColumns(order, allChooserFields.map((field) => field.key));
+    const reconciledPreference = reconcilePinnedColumnPreference(preference, allChooserFields, reconciled.visible);
+    const visiblePinned = reconciled.visible.filter((key) => reconciledPreference.pinnedOrder.includes(key));
+    const visibleUnpinned = reconciled.visible.filter((key) => !reconciledPreference.pinnedOrder.includes(key));
+    const nextPreference = {
+      ...reconciledPreference,
+      pinnedOrder: [...visiblePinned, ...reconciledPreference.pinnedOrder.filter((key) => !reconciled.visible.includes(key))],
+      unpinnedOrder: [...visibleUnpinned, ...reconciledPreference.unpinnedOrder.filter((key) => !reconciled.visible.includes(key))],
+    };
+    reconciled.visible = groupPinnedColumns(reconciled.visible, nextPreference.pinnedOrder);
+    setPinnedPreference(nextPreference);
+    writeStoredPinnedColumns(user?.id, nextPreference);
     setVisibleColumnKeys(reconciled.visible);
     setPendingColumnKeys(reconciled.visible);
     writeStoredColumns(user?.id, reconciled.visible);
@@ -989,10 +1067,13 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }
   function resetColumnSelection() {
     columnPreferenceRevision.current += 1;
-    const defaults = reconcileColumns(defaultColumnKeys, allChooserFields.map((field) => field.key)).visible;
+    const defaultPreference = reconcilePinnedColumnPreference(null, allChooserFields, defaultColumnKeys);
+    const defaults = groupPinnedColumns(reconcileColumns(defaultColumnKeys, allChooserFields.map((field) => field.key)).visible, defaultPreference.pinnedOrder);
     setPendingColumnKeys(defaults);
     setVisibleColumnKeys(defaults);
     clearStoredColumns(user?.id);
+    clearStoredPinnedColumns(user?.id);
+    setPinnedPreference(defaultPreference);
     void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
     void api(`/api/user-preferences/${encodeURIComponent(LEADS_COLUMN_KNOWN_PREFERENCE_KEY)}`, { method: "DELETE" }).catch(() => {});
     setColumnChooserOpen(false);
@@ -1002,11 +1083,15 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }
   function togglePendingColumn(key: string) { setPendingColumnKeys((current) => current.includes(key) ? current.filter((k) => k !== key) : [...current, key]); }
   function handleColumnDragStart(key: string) { const index = pendingColumnKeys.indexOf(key); setDragColumnIdx(index >= 0 ? index : null); }
-  function handleColumnDragOver(event: React.DragEvent, targetKey: string) { event.preventDefault(); if (dragColumnIdx === null) return; setPendingColumnKeys((current) => { const targetIdx = current.indexOf(targetKey); if (targetIdx < 0 || dragColumnIdx === targetIdx) return current; const next = [...current]; const [moved] = next.splice(dragColumnIdx, 1); next.splice(targetIdx, 0, moved); return next; }); setDragColumnIdx((current) => { const targetIdx = pendingColumnKeys.indexOf(targetKey); return targetIdx >= 0 ? targetIdx : current; }); }
+  function handleColumnDragOver(event: React.DragEvent, targetKey: string) { event.preventDefault(); if (dragColumnIdx === null) return; setPendingColumnKeys((current) => { const sourceKey = current[dragColumnIdx]; const targetIdx = current.indexOf(targetKey); if (!sourceKey || targetIdx < 0 || dragColumnIdx === targetIdx || pinnedColumnKeys.includes(sourceKey) !== pinnedColumnKeys.includes(targetKey)) return current; const next = [...current]; const [moved] = next.splice(dragColumnIdx, 1); next.splice(targetIdx, 0, moved); return next; }); setDragColumnIdx((current) => { const targetIdx = pendingColumnKeys.indexOf(targetKey); return targetIdx >= 0 ? targetIdx : current; }); }
   function handleColumnDragEnd() { setDragColumnIdx(null); }
   function moveVisibleColumn(fromKey: string, toKey: string, side: "before" | "after", announce = false) {
-    const next = moveColumnKey(visibleColumnKeys, fromKey, toKey, side);
-    if (next.every((key, index) => key === visibleColumnKeys[index])) return false;
+    const pinned = new Set(pinnedColumnKeys);
+    if (pinned.has(fromKey) !== pinned.has(toKey)) return false;
+    const nextPreference = movePinnedColumnWithinGroup(pinnedPreference, fromKey, toKey, side);
+    const next = columnLayoutOrder(nextPreference, visibleColumnKeys);
+    if (next.every((key, index) => key === visibleColumnKeys[index]) && next.length === visibleColumnKeys.length) return false;
+    pendingPinnedPreferenceRef.current = nextPreference;
     const saved = saveColumnOrder(next);
     if (announce) {
       const field = allChooserFields.find((item) => item.key === fromKey);
@@ -1018,6 +1103,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   function handleHeaderDragOver(event: React.DragEvent<HTMLTableCellElement>, targetKey: string) {
     event.preventDefault();
     if (!headerDragKey || headerDragKey === targetKey) return;
+    if (pinnedColumnKeys.includes(headerDragKey) !== pinnedColumnKeys.includes(targetKey)) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const side = event.clientX < bounds.left + bounds.width / 2 ? "before" : "after";
     setHeaderDropTarget({ key: targetKey, side });
@@ -1044,7 +1130,29 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }
   function headerProps(key: string): React.ThHTMLAttributes<HTMLTableCellElement> {
     const dropSide = headerDropTarget?.key === key ? headerDropTarget.side : null;
-    return { className: `lead-column-header${headerDragKey === key ? " is-dragging" : ""}${dropSide ? ` drop-${dropSide}` : ""}`, draggable: true, tabIndex: 0, onDragStart: (event) => handleHeaderDragStart(event, key), onDragOver: (event) => handleHeaderDragOver(event, key), onDrop: (event) => handleHeaderDrop(event, key), onDragEnd: handleHeaderDragEnd, onKeyDown: (event) => handleHeaderKeyDown(event, key) };
+    const pinned = pinnedOffsets.has(key);
+    const lastPinnedKey = fields.filter((field) => pinnedColumnKeys.includes(field.key)).at(-1)?.key;
+    return { className: `lead-column-header${pinned ? " lead-pinned-cell" : ""}${key === lastPinnedKey ? " is-last-pinned" : ""}${headerDragKey === key ? " is-dragging" : ""}${dropSide ? ` drop-${dropSide}` : ""}`, style: pinned ? pinnedCellStyle(key) : undefined, draggable: true, tabIndex: 0, onDragStart: (event) => handleHeaderDragStart(event, key), onDragOver: (event) => handleHeaderDragOver(event, key), onDrop: (event) => handleHeaderDrop(event, key), onDragEnd: handleHeaderDragEnd, onKeyDown: (event) => handleHeaderKeyDown(event, key) };
+  }
+  function togglePinnedColumn(key: string) {
+    const isPinned = pinnedPreference.pinnedOrder.includes(key);
+    const unpinnedOrder = [...pinnedPreference.unpinnedOrder];
+    const preFreezePositions = { ...pinnedPreference.preFreezePositions };
+    let nextPreference: PinnedColumnPreference;
+    if (isPinned) {
+      const priorPosition = preFreezePositions[key];
+      const insertAt = Number.isInteger(priorPosition) ? Math.min(Math.max(priorPosition, 0), unpinnedOrder.length) : 0;
+      unpinnedOrder.splice(insertAt, 0, key);
+      nextPreference = { pinnedOrder: pinnedPreference.pinnedOrder.filter((item) => item !== key), unpinnedOrder, preFreezePositions };
+    } else {
+      const currentPosition = unpinnedOrder.indexOf(key);
+      if (currentPosition >= 0) unpinnedOrder.splice(currentPosition, 1);
+      preFreezePositions[key] = currentPosition >= 0 ? currentPosition : 0;
+      nextPreference = { pinnedOrder: [...pinnedPreference.pinnedOrder, key], unpinnedOrder, preFreezePositions };
+    }
+    const next = columnLayoutOrder(nextPreference, visibleColumnKeys);
+    pendingPinnedPreferenceRef.current = nextPreference;
+    saveColumnOrder(next);
   }
   const fields = visibleColumnKeys.map((key) => allChooserFields.find((field) => field.key === key)).filter((field): field is (typeof allChooserFields)[number] => Boolean(field));
   const leadTableDefaultWidths = useMemo(() => Object.fromEntries([...allChooserFields.map((field) => [field.key, LEAD_TABLE_WIDTH_DEFAULTS[field.key] || 160]), ["lead_status", LEAD_TABLE_WIDTH_DEFAULTS.lead_status]]), [allChooserFields]);
@@ -1053,6 +1161,14 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   function resizeHandle(columnKey: string, label: string) {
     return <button type="button" className="lead-column-resize-handle" aria-label={`Resize ${label} column`} title={`Resize ${label} column`} {...resizableColumns.resizeHandleProps(columnKey)} />;
   }
+  const hasPinnedColumns = pinnedColumnKeys.some((key) => visibleColumnKeys.includes(key));
+  const pinnedOffsets = pinnedColumnOffsets(pinnedColumnKeys.filter((key) => visibleColumnKeys.includes(key)), Object.fromEntries(fields.map((field) => [field.key, resizableColumns.widthFor(field.key)])), LEAD_TABLE_SELECTION_COLUMN_WIDTH);
+  function pinnedCellStyle(key: string): React.CSSProperties | undefined {
+    const left = pinnedOffsets.get(key);
+    if (left === undefined) return undefined;
+    return { left: `${left}px`, "--pinned-divider": key === fields.filter((field) => pinnedColumnKeys.includes(field.key)).at(-1)?.key ? "1" : "0" } as React.CSSProperties;
+  }
+  const pinControl = (_field: LeadColumn) => null;
   const configuredCallResolutionField = activeConfiguredFields.find((field) => field.key === "calling_resolution" && field.type === "dropdown");
   // Prefer the options defined by Admin in Lead Fields. The legacy dropdown is only a fallback.
   const callResolutionOptions = configuredCallResolutionField
@@ -1373,6 +1489,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     <label key={field.key} className={`col-menu-item${dragColumnIdx !== null && idx === dragColumnIdx ? " col-dragging" : ""}`} draggable onDragStart={() => handleColumnDragStart(field.key)} onDragOver={(e) => handleColumnDragOver(e, field.key)} onDragEnd={handleColumnDragEnd}>
                       <input type="checkbox" checked={pendingColumnKeys.includes(field.key)} onChange={() => togglePendingColumn(field.key)} />
                       <span>{field.label}</span>
+                      <button type="button" className="col-menu-pin" onClick={(event) => { event.preventDefault(); event.stopPropagation(); togglePinnedColumn(field.key); }}>{pinnedColumnKeys.includes(field.key) ? "Unfreeze" : "Freeze"}</button>
                       <span className="col-menu-drag-handle" aria-hidden="true">⠿</span>
                     </label>
                   );
@@ -1394,7 +1511,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         </span>
         <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
-    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div></>}
+    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" style={{ width: `${LEAD_TABLE_SELECTION_COLUMN_WIDTH}px` }} />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectionSticky={hasPinnedColumns} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} pinControl={pinControl(field)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{pinControl(field)}{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} selectionSticky={hasPinnedColumns} pinnedCellStyle={pinnedCellStyle} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div

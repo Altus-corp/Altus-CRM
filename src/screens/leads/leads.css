@@ -515,6 +515,8 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 .col-menu-item:hover { background: var(--bg-2); }
 .col-menu-item input { width: 16px; height: 16px; accent-color: var(--red); cursor: pointer; }
 .col-menu-item > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-menu-pin { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink-2); cursor: pointer; font: inherit; font-size: 10px; font-weight: 700; }
+.col-menu-pin:hover, .col-menu-pin:focus-visible { border-color: var(--red); color: var(--red); outline: none; }
 .col-menu-drag-handle {
   flex-shrink: 0;
   cursor: grab;
@@ -569,6 +571,13 @@ body.is-resizing-column, body.is-resizing-column * { cursor: col-resize !importa
 .lead-table td:first-child { color: var(--ink-2); font-family: var(--mono); font-size: 11px; }
 .lead-table td strong { color: var(--ink); font-size: 12px; }
 .lead-table small { color: var(--ink-2); }
+.lead-table:has(.lead-pinned-cell) .lead-table-checkbox-col, .lead-table .lead-pinned-cell { position: sticky; background: var(--panel); }
+.lead-table:has(.lead-pinned-cell) thead .lead-table-checkbox-col, .lead-table thead .lead-pinned-cell { z-index: 4; background: var(--bg-2); }
+.lead-table:has(.lead-pinned-cell) tbody .lead-table-checkbox-col, .lead-table tbody .lead-pinned-cell { z-index: 2; }
+.lead-table:has(.lead-pinned-cell) .lead-table-checkbox-col { left: 0; }
+.lead-table tbody tr:hover .lead-table-checkbox-col, .lead-table tbody tr:hover .lead-pinned-cell, .lead-table tbody tr:focus-visible .lead-table-checkbox-col, .lead-table tbody tr:focus-visible .lead-pinned-cell { background: var(--red-050); }
+.lead-table tbody tr.is-selected .lead-table-checkbox-col, .lead-table tbody tr.is-selected .lead-pinned-cell { background: var(--red-050); }
+.lead-table .is-last-pinned { box-shadow: 7px 0 8px -8px color-mix(in srgb, var(--ink) 72%, transparent); }
 .lead-pill { min-width: 58px; justify-content: center; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--info) 18%, transparent); border-radius: 999px; background: var(--info-bg); color: var(--info); line-height: 1.1; }
 .lead-status-select { min-width: 92px; max-width: 140px; min-height: 30px; padding: 0 24px 0 10px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line)); border-radius: 999px; background: var(--panel); color: var(--red); font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
 .lead-status-select:disabled { cursor: wait; opacity: .65; }
