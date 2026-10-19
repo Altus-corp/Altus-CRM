@@ -30,6 +30,7 @@ function MasterSidebar({
   hideMasterNavigation: boolean;
 }) {
   const leadMasterActive = currentHref.startsWith("/lead-master");
+  const productMasterActive = currentHref.startsWith("/product-master");
 
   return <aside className="sidebar master-sidebar">
     <div className="master-sidebar-brand">
@@ -47,11 +48,10 @@ function MasterSidebar({
           <span className="master-navigation-icon" aria-hidden="true">◫</span>
           <span>Lead Master</span>
         </NavLink>}
-      {!hideMasterNavigation && <div className="master-navigation-placeholder" aria-label="Product Master is planned">
+      {!hideMasterNavigation && <NavLink to="/product-master" end className={productMasterActive ? "master-navigation-placeholder active" : "master-navigation-placeholder"}>
         <span className="master-navigation-icon" aria-hidden="true">□</span>
         <span>Product Master</span>
-        <small>Planned</small>
-      </div>}
+      </NavLink>}
       {!hideMasterNavigation && <div className="master-navigation-placeholder" aria-label="My Master is planned">
         <span className="master-navigation-icon" aria-hidden="true">◇</span>
         <span>My Master</span>

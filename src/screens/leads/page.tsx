@@ -652,6 +652,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const [callResolutionMoreOpen, setCallResolutionMoreOpen] = useState(false);
   const [collapsedCallResolutionCount, setCollapsedCallResolutionCount] = useState(0);
   const callResolutionBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const queueSwitch = document.querySelector<HTMLElement>(".leads-page > .system-work-queue-summary:not(:has(> .product-stage-chip)) .system-work-queue-toggle");
+    const groupBy = document.querySelector<HTMLElement>(".leads-page > .lead-table-toolbar .lead-group-by-wrap");
+    if (queueSwitch && groupBy && queueSwitch.parentElement !== groupBy) groupBy.append(queueSwitch);
+  });
   const callResolutionMeasureRef = useRef<HTMLDivElement>(null);
   const [psoStage, setPsoStage] = useState("Pre PSO");
   const [psoBarVisible, setPsoBarVisible] = useState(false);
@@ -1155,11 +1160,9 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }
   const selectedCallResolutions = screen.managedFilters.calling_resolution || [];
   const selectedProductStages = screen.managedFilters.product_stage || [];
-  const callResolutionCounts = new Map<string, number>();
-  for (const lead of screen.data?.items || []) {
-    const resolution = String(fieldValue(lead, "calling_resolution") || "");
-    if (resolution) callResolutionCounts.set(resolution, (callResolutionCounts.get(resolution) || 0) + 1);
-  }
+  // These are aggregate counts from the API with the selected resolution chip
+  // excluded, so selecting one chip does not make every other chip show zero.
+  const callResolutionCounts = new Map<string, number>(Object.entries(screen.data?.call_resolution_counts || {}).map(([resolution, count]) => [resolution, Number(count) || 0]));
   function applyCallResolutionFilter(value: string) {
     screen.updateManagedFilter("calling_resolution", selectedCallResolutions.includes(value)
       ? selectedCallResolutions.filter((selected) => selected !== value)

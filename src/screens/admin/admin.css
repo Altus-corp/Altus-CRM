@@ -454,7 +454,39 @@
 .assignment-lead-table td small { color: var(--ink-2); }
 .assignment-pagination { justify-content: flex-end; color: var(--ink-2); font-size: 12px; }
 .assignment-pagination span:first-child { margin-right: auto; }
+.admin-audit-card { padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); box-shadow: var(--shadow-sm); }
+.admin-audit-list { display: grid; gap: 8px; }
+.admin-audit-list article { display: grid; grid-template-columns: minmax(190px, .9fr) minmax(280px, 1.5fr) minmax(120px, .55fr); gap: 18px; align-items: center; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-1); }
+.admin-audit-actor, .admin-audit-change { display: grid; gap: 4px; min-width: 0; }
+.admin-audit-actor strong, .admin-audit-change strong { color: var(--ink); font-size: 14px; }
+.admin-audit-actor span, .admin-audit-change span, .admin-audit-record { color: var(--ink-2); font-size: 12px; line-height: 1.45; }
+.admin-audit-change em { font-style: normal; text-decoration: line-through; color: var(--ink-2); }
+.admin-audit-change b { color: var(--ink); }
+.admin-audit-record { text-align: right; word-break: break-word; }
+.role-hierarchy-page { display: grid; gap: 18px; }
+.role-hierarchy-intro { display: flex; justify-content: space-between; gap: 20px; align-items: start; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); box-shadow: var(--shadow-sm); }
+.role-hierarchy-intro h2 { margin: 2px 0 6px; color: var(--ink); font-size: 25px; }
+.role-hierarchy-intro p:not(.eyebrow) { max-width: 700px; margin: 0; color: var(--ink-2); line-height: 1.55; }
+.role-hierarchy-intro button { min-height: 38px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-1); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; }
+.role-hierarchy-rules { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 12px 16px; border: 1px solid var(--red-200); border-radius: 9px; background: var(--red-tint); color: var(--ink-1); font-size: 13px; }
+.role-hierarchy-rules strong { color: var(--red); }
+.role-hierarchy-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
+.role-hierarchy-card { display: grid; gap: 13px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow-sm); }
+.role-hierarchy-card.is-admin { border-color: var(--red-200); background: linear-gradient(135deg, var(--red-tint), var(--panel) 55%); }
+.role-hierarchy-card-title { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.role-hierarchy-card-title > div { display: grid; gap: 4px; }
+.role-hierarchy-card-title strong { color: var(--ink); font-size: 16px; }
+.role-hierarchy-card-title span, .role-hierarchy-card label small { color: var(--ink-2); font-size: 12px; }
+.role-hierarchy-card-title small { padding: 4px 7px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; }
+.role-hierarchy-card label { display: grid; gap: 6px; color: var(--ink-1); font-size: 12px; font-weight: 700; }
+.role-hierarchy-card select, .role-hierarchy-card input { min-height: 39px; width: 100%; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-1); color: var(--ink); font: inherit; }
+.role-hierarchy-card select:disabled, .role-hierarchy-card input:disabled { opacity: .65; cursor: not-allowed; }
+.role-hierarchy-card .admin-create-submit { justify-self: start; }
+.role-hierarchy-notice, .role-hierarchy-hint { margin: 0; color: #087a59; font-size: 13px; font-weight: 600; }
+.role-hierarchy-hint { color: var(--ink-2); font-weight: 500; }
 @media (max-width: 760px) { .assignment-manual-form { grid-template-columns: 1fr; } .assignment-selected-leads { grid-column: auto; } }
+@media (max-width: 760px) { .admin-audit-card { padding: 16px; } .admin-audit-list article { grid-template-columns: 1fr; gap: 8px; } .admin-audit-record { text-align: left; } }
+@media (max-width: 620px) { .role-hierarchy-intro { flex-direction: column; } }
 @media (max-width: 1000px) { .assignment-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .assignment-filter-actions { justify-content: flex-end; } }
 @media (max-width: 760px) { .assignment-filter-row { grid-template-columns: 1fr; } .assignment-action-bar { align-items: stretch; flex-direction: column; } .assignment-action-bar > strong { margin-right: 0; } .assignment-action-bar label { min-width: 0; } .assignment-pagination { justify-content: space-between; flex-wrap: wrap; } .assignment-pagination span:first-child { width: 100%; } }
 @media (max-width: 760px) { .assignment-rule-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -1222,6 +1222,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .master-navigation-toggle.active { background: var(--red-tint); color: var(--red); }
 .master-navigation-icon { display: grid; width: 20px; place-items: center; font-size: 18px; line-height: 1; }
 .master-navigation-placeholder { color: var(--ink-2); }
+.master-navigation-placeholder { text-decoration: none; }
+.master-navigation-placeholder:hover,
+.master-navigation-placeholder:focus-visible { background: var(--bg-2); color: var(--ink); outline: none; }
+.master-navigation-placeholder.active { background: var(--red-tint); color: var(--red); }
 .master-navigation-placeholder small { color: var(--ink-3); font-size: 10px; font-weight: 600; }
 .master-admin-navigation { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .master-admin-navigation nav { padding: 0; overflow: visible; }

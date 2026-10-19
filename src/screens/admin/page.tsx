@@ -10,6 +10,7 @@ import { LeadFieldManager } from "./lead-field-manager";
 import { ProductStageManager } from "./product-stage-manager";
 import { AssignmentRuleManager } from "./assignment-rule-manager";
 import { UserManagement } from "./user-management";
+import { RoleHierarchyManager } from "./role-hierarchy-manager";
 
 function label(value: string) { return value.replaceAll("_", " "); }
 type AdminRow = Record<string, string | number | boolean | null>;
@@ -49,6 +50,22 @@ function AdminDashboard({ view }: { view: ReturnType<typeof useAdminScreen> }) {
 }
 function display(value: unknown) { if (value === null || value === undefined || value === "") return "—"; if (typeof value === "boolean") return value ? "Yes" : "No"; return String(value); }
 
+function auditTime(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  return date && !Number.isNaN(date.valueOf()) ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date) : "Unknown time";
+}
+
+function AuditActivity({ rows }: { rows: AdminRow[] }) {
+  return <section className="admin-audit-card" aria-labelledby="audit-activity-heading">
+    <div className="admin-section-heading"><div><h2 id="audit-activity-heading">Recent changes</h2><p>Shows who made the change, when it happened, and the value before and after the update.</p></div><span className="admin-form-hint">Latest {rows.length} entries</span></div>
+    {rows.length ? <div className="admin-audit-list">{rows.map((row, index) => <article key={String(row.id ?? index)}>
+      <div className="admin-audit-actor"><strong>{display(row.user_name)}</strong><span>{auditTime(row.occurred_at)} · {display(row.user_change_count)} total activities</span></div>
+      <div className="admin-audit-change"><strong>{label(String(row.action || "activity"))}</strong><span>{row.field ? `${label(String(row.field))}: ` : ""}<em>{display(row.old_value)}</em> → <b>{display(row.new_value)}</b></span></div>
+      <span className="admin-audit-record">{label(String(row.entity_type || "record"))} · {display(row.entity_id)}</span>
+    </article>)}</div> : <p className="admin-information-empty">No audit activity has been recorded yet.</p>}
+  </section>;
+}
+
 function AdminInformation({ screen, view }: { screen: "templates" | "audit" | "process-flow" | "database-status"; view: ReturnType<typeof useAdminScreen> }) {
   const rows = view.data?.rows || [];
   const metrics = Object.entries(view.data?.metrics || {});
@@ -66,7 +83,7 @@ function AdminInformation({ screen, view }: { screen: "templates" | "audit" | "p
     {!view.loading && !view.error && <div className="admin-information-content">
       {metrics.length > 0 && <section className="admin-information-metrics" aria-label="Workspace summary">{metrics.map(([key, value]) => <article key={key}><span>{label(key)}</span><strong>{display(value)}</strong></article>)}</section>}
       {view.data?.note && <p className="admin-note">{view.data.note}</p>}
-      {screen === "process-flow" ? <section className="admin-process-flow" aria-labelledby="process-flow-heading"><div className="admin-section-heading"><div><h2 id="process-flow-heading">{copy.section}</h2><p>{copy.detail}</p></div></div>{rows.length ? <ol>{rows.map((row, index) => <li key={String(row.step ?? index)}><span>{display(row.step)}</span><strong>{display(row.name)}</strong></li>)}</ol> : <p className="admin-information-empty">{copy.empty}</p>}</section> : <section className="admin-information-card" aria-labelledby="information-records-heading"><div className="admin-section-heading"><div><h2 id="information-records-heading">{copy.section}</h2><p>{copy.detail}</p></div>{rows.length > 0 && <span className="admin-form-hint">{rows.length} {rows.length === 1 ? "record" : "records"}</span>}</div>{rows.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr>{columns.map((column) => <th key={column}>{label(column)}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={String(row.id ?? row.source_id ?? index)}>{columns.map((column) => <td key={column}>{display(row[column])}</td>)}</tr>)}</tbody></table></div> : <p className="admin-information-empty">{copy.empty}</p>}</section>}
+      {screen === "audit" ? <AuditActivity rows={rows} /> : screen === "process-flow" ? <section className="admin-process-flow" aria-labelledby="process-flow-heading"><div className="admin-section-heading"><div><h2 id="process-flow-heading">{copy.section}</h2><p>{copy.detail}</p></div></div>{rows.length ? <ol>{rows.map((row, index) => <li key={String(row.step ?? index)}><span>{display(row.step)}</span><strong>{display(row.name)}</strong></li>)}</ol> : <p className="admin-information-empty">{copy.empty}</p>}</section> : <section className="admin-information-card" aria-labelledby="information-records-heading"><div className="admin-section-heading"><div><h2 id="information-records-heading">{copy.section}</h2><p>{copy.detail}</p></div>{rows.length > 0 && <span className="admin-form-hint">{rows.length} {rows.length === 1 ? "record" : "records"}</span>}</div>{rows.length ? <div className="admin-table-wrap"><table className="admin-table"><thead><tr>{columns.map((column) => <th key={column}>{label(column)}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={String(row.id ?? row.source_id ?? index)}>{columns.map((column) => <td key={column}>{display(row[column])}</td>)}</tr>)}</tbody></table></div> : <p className="admin-information-empty">{copy.empty}</p>}</section>}
     </div>}
   </main>;
 }
@@ -97,6 +114,7 @@ function MemberAccessDialog({ view, canAssignAdminRole }: { view: ReturnType<typ
 export function AdminPage({ screen }: { screen: AdminScreenKey }) {
   if (screen === "dropdown-management") return <main className="admin-page"><AdminPageHeader title="Dropdown Management" description="Configure dropdown definitions and managed options." /><DropdownManagement /></main>;
   if (screen === "integrations") return <main className="admin-page"><AdminPageHeader title="Integrations" description="Connect website forms and external platforms to receive leads automatically." /><IntegrationManager /></main>;
+  if (screen === "role-hierarchy") return <main className="admin-page"><AdminPageHeader title="Role Hierarchy" description="Define reporting relationships between roles before applying manager-level data visibility." /><RoleHierarchyManager /></main>;
   const view = useAdminScreen(screen);
   const { user } = useAuth();
   const canResetPasswords = hasCapability(user?.role, "users.reset_password");

@@ -85,6 +85,7 @@ export const ADMIN_NAV_GROUPS = [
       { to: "/reports", label: "Reports" },
       { to: "/admin/panel", label: "Admin Panel", placeholder: true },
       { to: "/admin/users", label: "User Management", placeholder: true },
+      { to: "/admin/role-hierarchy", label: "Role Hierarchy", placeholder: true },
       { to: "/admin/dropdowns", label: "Dropdown Management", placeholder: true },
       { to: "/admin/templates", label: "Templates", placeholder: true },
       { to: "/admin/import-export", label: "Import / Export", placeholder: true },
