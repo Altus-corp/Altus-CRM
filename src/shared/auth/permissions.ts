@@ -6,6 +6,7 @@ export const CAPABILITIES = {
   "leads.call": ["Owner", "Admin", "Sales"],
   "leads.permission": ["Owner", "Admin"],
   "leads.assign": ["Owner", "Admin"],
+  "teams.manage": ["Owner", "Admin"],
   "leads.export": ["Owner", "Admin"],
   "leads.import": ["Owner", "Admin", "Sales"],
   "leads.delete": ["Owner", "Admin"],

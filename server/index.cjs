@@ -897,7 +897,16 @@ async function usersCreate(req, res, db, actor) {
     return userWriteError(res, 500, "Unable to manage users.");
   }
 }
-async function memberRolesList(res, db) { const rows = await db.query("SELECT id,name,access_role,hierarchy_parent_id,hierarchy_rank FROM member_roles WHERE active=true ORDER BY hierarchy_rank DESC,name,id"); return json(res, 200, { roles: rows.rows }); }
+async function memberRolesList(res, db) {
+  try {
+    const rows = await db.query("SELECT id,name,access_role,hierarchy_parent_id,hierarchy_rank FROM member_roles WHERE active=true ORDER BY hierarchy_rank DESC,name,id");
+    return json(res, 200, { roles: rows.rows });
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    const rows = await db.query("SELECT id,name,access_role FROM member_roles WHERE active=true ORDER BY name,id");
+    return json(res, 200, { roles: rows.rows });
+  }
+}
 async function userRoleUpdate(req, res, db, actor, id) {
   const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
   if (target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user's role cannot be edited.");
@@ -1169,6 +1178,7 @@ async function assignmentManualWrite(req, res, db, actor) {
   if (!ownerIds.length || !leadIds.length) return userWriteError(res, 400, "Choose at least one lead and one active user.");
   const ownerRows = (await db.query("SELECT id,name FROM users WHERE id = ANY($1::text[]) AND active=true AND offboarded=false", [ownerIds])).rows;
   if (ownerRows.length !== ownerIds.length) return userWriteError(res, 400, "One or more selected users are inactive or unavailable.");
+  if (requireCapability("teams.manage", actor) && !canManageAllTeams(actor)) { const allowed = await db.query("SELECT tm.user_id FROM crm_team_members tm JOIN crm_teams t ON t.id=tm.team_id WHERE t.manager_user_id=$1 AND t.active=true AND tm.user_id=ANY($2::text[])", [actor.id, ownerIds]); if (allowed.rows.length !== ownerIds.length) return userWriteError(res, 403, "You can assign leads only to members of your own team."); }
   const ownerById = new Map(ownerRows.map((owner) => [owner.id, owner]));
   const owners = ownerIds.map((id) => ownerById.get(id));
   await transaction(db, async (tx) => {
@@ -1185,6 +1195,47 @@ async function assignmentManualWrite(req, res, db, actor) {
   const distribution = Object.fromEntries(owners.map((owner) => [owner.id, leadIds.filter((_, index) => owners[index % owners.length].id === owner.id).length]));
   return json(res, 200, { assigned: leadIds.length, owners: owners.map((owner) => ({ id: owner.id, name: owner.name })), distribution });
 }
+async function userAssignmentAccessWrite(req, res, db, actor, id) {
+  const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid assignment access data."); }
+  if (typeof body.enabled !== "boolean") return userWriteError(res, 400, "Choose whether assignment access is enabled.");
+  if (!requireCapability("leads.assign", actor)) return userWriteError(res, 403, "You do not have permission to grant assignment access.");
+  if (!body.enabled && ["Owner", "Admin", "Super Admin"].includes(target.role)) return userWriteError(res, 400, "Admin-role users always have assignment access.");
+  try {
+    const existing = await db.query("SELECT 1 FROM user_capability_overrides WHERE user_id=$1 AND capability='leads.assign'", [id]);
+    const previouslyEnabled = ["Owner", "Admin", "Super Admin"].includes(target.role) || existing.rows.length > 0;
+    await transaction(db, async (tx) => {
+      if (body.enabled) await tx.query("INSERT INTO user_capability_overrides(user_id,capability) VALUES($1,'leads.assign') ON CONFLICT DO NOTHING", [id]);
+      else await tx.query("DELETE FROM user_capability_overrides WHERE user_id=$1 AND capability='leads.assign'", [id]);
+      await writeAudit(tx, { actorUserId: actor.id, action: "member.assignment_access_updated", entityType: "user", entityId: id, field: "leads.assign", oldValue: previouslyEnabled ? "granted" : "revoked", newValue: body.enabled ? "granted" : "revoked", ip: req.socket.remoteAddress });
+    });
+    return json(res, 200, { user_id: id, assignment_access: body.enabled || ["Owner", "Admin", "Super Admin"].includes(target.role) });
+  } catch (error) { return userWriteError(res, 500, error?.code === "42P01" ? "Assignment access requires the user access migration to be applied." : "Unable to update assignment access."); }
+}
+async function userTeamAccessWrite(req, res, db, actor, id) {
+  const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found.");
+  let body; try { body = await readJson(req); } catch { return userWriteError(res, 400, "Invalid team access data."); }
+  if (typeof body.enabled !== "boolean") return userWriteError(res, 400, "Choose whether team access is enabled.");
+  if (!requireCapability("users.manage", actor)) return userWriteError(res, 403, "You do not have permission to grant team access.");
+  if (!body.enabled && ["Owner", "Admin", "Super Admin"].includes(target.role)) return userWriteError(res, 400, "Admin-role users always have team access.");
+  try { await transaction(db, async (tx) => { if (body.enabled) await tx.query("INSERT INTO user_capability_overrides(user_id,capability) VALUES($1,'teams.manage') ON CONFLICT DO NOTHING", [id]); else await tx.query("DELETE FROM user_capability_overrides WHERE user_id=$1 AND capability='teams.manage'", [id]); await writeAudit(tx, { actorUserId: actor.id, action: "member.team_access_updated", entityType: "user", entityId: id, field: "teams.manage", newValue: body.enabled ? "granted" : "revoked", ip: req.socket.remoteAddress }); }); return json(res, 200, { user_id: id, team_access: body.enabled || ["Owner", "Admin", "Super Admin"].includes(target.role) }); } catch (error) { return userWriteError(res, 500, error?.code === "42P01" ? "Team access requires the user access migration to be applied." : "Unable to update team access."); }
+}
+function canManageAllTeams(actor) { return ["Owner", "Admin", "Super Admin"].includes(actor.role); }
+async function teamsList(res, db, actor) {
+  const rows = await db.query(`SELECT t.id,t.name,t.manager_user_id,t.active,m.name AS manager_name,COALESCE(json_agg(json_build_object('id',u.id,'name',u.name) ORDER BY u.name) FILTER (WHERE u.id IS NOT NULL),'[]') AS members FROM crm_teams t JOIN users m ON m.id=t.manager_user_id LEFT JOIN crm_team_members tm ON tm.team_id=t.id LEFT JOIN users u ON u.id=tm.user_id WHERE ($1::boolean OR t.manager_user_id=$2) GROUP BY t.id,m.name ORDER BY t.name`, [canManageAllTeams(actor), actor.id]);
+  const users = await db.query("SELECT id,name FROM users WHERE active=true AND offboarded=false ORDER BY name,id");
+  return json(res, 200, { teams: rows.rows, users: users.rows });
+}
+async function teamWrite(req, res, db, actor) {
+  let body; try { body=await readJson(req); } catch { return userWriteError(res,400,"Invalid team."); }
+  const name=String(body.name||"").trim(); if (!name || name.length>100) return userWriteError(res,400,"Enter a team name.");
+  const id=`team-${crypto.randomUUID()}`; await transaction(db, async(tx)=>{ await tx.query("INSERT INTO crm_teams(id,name,manager_user_id,created_by_user_id) VALUES($1,$2,$3,$3)",[id,name,actor.id]); await writeAudit(tx,{actorUserId:actor.id,action:"team.created",entityType:"team",entityId:id,newValue:name,ip:req.socket.remoteAddress}); }); return json(res,201,{id});
+}
+async function teamMembersWrite(req,res,db,actor,id) {
+  let body; try { body=await readJson(req); } catch { return userWriteError(res,400,"Invalid team members."); }
+  const team=(await db.query("SELECT id,manager_user_id FROM crm_teams WHERE id=$1 AND active=true",[id])).rows[0]; if(!team) return userWriteError(res,404,"Team not found."); if(!canManageAllTeams(actor)&&team.manager_user_id!==actor.id) return userWriteError(res,403,"You can manage only your own team.");
+  const ids=[...new Set((Array.isArray(body.user_ids)?body.user_ids:[]).map(String))]; const valid=(await db.query("SELECT id FROM users WHERE id=ANY($1::text[]) AND active=true AND offboarded=false",[ids])).rows; if(valid.length!==ids.length)return userWriteError(res,400,"Only active users created by Admin can be added."); await transaction(db,async(tx)=>{await tx.query("DELETE FROM crm_team_members WHERE team_id=$1",[id]); for(const member of ids) await tx.query("INSERT INTO crm_team_members(team_id,user_id,added_by_user_id) VALUES($1,$2,$3)",[id,member,actor.id]); await writeAudit(tx,{actorUserId:actor.id,action:"team.members_updated",entityType:"team",entityId:id,newValue:String(ids.length),ip:req.socket.remoteAddress});}); return json(res,200,{id});
+}
 async function masterWrite(req, res, db, actor, id = null) {
   const body = await readJson(req); const masterType = String(body.master_type || "").trim(); const label = String(body.label || "").trim();
   if (!masterType || !label) return userWriteError(res, 400, "Invalid master value.");
@@ -1199,7 +1250,7 @@ async function targetWrite(req, res, db, actor, id = null) { const body = await 
 async function settingsList(res, db) { const rows = await db.query("SELECT setting_key,value,active,updated_at FROM workspace_settings ORDER BY setting_key", []); return json(res, 200, { settings: rows.rows }); }
 async function settingWrite(req, res, db, actor) { const body = await readJson(req); const key = String(body.setting_key || "").trim(); if (!key || body.value === undefined) return userWriteError(res, 400, "Invalid workspace setting."); await transaction(db, async (tx) => { const previous = (await tx.query("SELECT value FROM workspace_settings WHERE setting_key = $1", [key])).rows[0]?.value ?? null; await tx.query("INSERT INTO workspace_settings(setting_key,value,active,updated_by,updated_at) VALUES ($1,$2,true,$3,now()) ON CONFLICT (setting_key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()", [key, body.value, actor.id]); await writeAudit(tx, { actorUserId: actor.id, action: "workspace_setting.updated", entityType: "workspace_setting", entityId: key, oldValue: JSON.stringify(previous), newValue: JSON.stringify(body.value), ip: req.socket.remoteAddress }); }); return json(res, 200, { setting_key: key }); }
 async function employeesList(res, db) { const rows = await db.query("SELECT u.id,u.name,u.email,u.role,u.active,u.offboarded,e.serial,e.cell,e.products,e.backup_user_id,e.lead_transfer_allowed,e.colour,e.team FROM users u LEFT JOIN employee_profiles e ON e.user_id=u.id ORDER BY u.name,u.id", []); return json(res, 200, { employees: rows.rows }); }
-async function userOptionsList(res, db) { const rows = await db.query("SELECT id,name FROM users WHERE active=true AND offboarded=false ORDER BY name,id", []); return json(res, 200, { options: rows.rows.map(({ id, name }) => ({ id, name })) }); }
+async function userOptionsList(res, db, actor = null) { const rows = actor && requireCapability("teams.manage", actor) && !canManageAllTeams(actor) ? await db.query("SELECT u.id,u.name FROM crm_team_members tm JOIN crm_teams t ON t.id=tm.team_id JOIN users u ON u.id=tm.user_id WHERE t.manager_user_id=$1 AND t.active=true AND u.active=true AND u.offboarded=false ORDER BY u.name,u.id", [actor.id]) : await db.query("SELECT id,name FROM users WHERE active=true AND offboarded=false ORDER BY name,id", []); return json(res, 200, { options: rows.rows.map(({ id, name }) => ({ id, name })) }); }
 async function employeeWrite(req, res, db, actor, id = null) { const body = await readJson(req); const userId = String(body.user_id || id || "").trim(); const role = body.role ? String(body.role) : null; if (!userId || (role && !USER_ROLES.includes(role))) return userWriteError(res, 400, "Invalid employee."); const target = await db.userById(userId); if (!target) return userWriteError(res, 404, "User not found."); if ((target.role === "Owner" || role === "Owner") && actor.role !== "Owner") return userWriteError(res, 403, "Owner accounts cannot be edited."); await transaction(db, async (tx) => { await tx.query("INSERT INTO employee_profiles(user_id,serial,cell,products,backup_user_id,lead_transfer_allowed,colour,team,active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(user_id) DO UPDATE SET serial=EXCLUDED.serial,cell=EXCLUDED.cell,products=EXCLUDED.products,backup_user_id=EXCLUDED.backup_user_id,lead_transfer_allowed=EXCLUDED.lead_transfer_allowed,colour=EXCLUDED.colour,team=EXCLUDED.team,active=EXCLUDED.active", [userId, body.serial || null, body.cell || null, body.products || [], body.backup_user_id || null, body.lead_transfer_allowed === true, body.colour || null, body.team || null, body.active !== false]); await tx.query("UPDATE users SET role=COALESCE($2,role),active=$3 WHERE id=$1", [userId, role, body.active !== false]); await writeAudit(tx, { actorUserId: actor.id, action: "employee.updated", entityType: "user", entityId: userId, oldValue: target.role, newValue: role || target.role, ip: req.socket.remoteAddress }); }); return json(res, 200, { user_id: userId }); }
 async function employeeOffboard(req, res, db, actor, id) { const body = await readJson(req); const replacement = body.replacement_user_id ? String(body.replacement_user_id) : null; const target = await db.userById(id); if (!target) return userWriteError(res, 404, "User not found."); if (target.id === actor.id || target.role === "Owner" || target.role === "Super Admin") return userWriteError(res, 403, "This user cannot be offboarded."); await transaction(db, async (tx) => { await tx.query("UPDATE leads SET owner_user_id = $2 WHERE owner_user_id = $1", [id, replacement]); await tx.query("DELETE FROM credentials WHERE user_id=$1", [id]); await tx.query("DELETE FROM sessions WHERE user_id=$1", [id]); await tx.query("UPDATE users SET active=false,offboarded=true WHERE id=$1", [id]); await tx.query("UPDATE employee_profiles SET active=false,offboarded_at=now() WHERE user_id=$1", [id]); await writeAudit(tx, { actorUserId: actor.id, action: "employee.offboarded", entityType: "user", entityId: id, oldValue: id, newValue: replacement || "unassigned", ip: req.socket.remoteAddress }); }); return json(res, 200, { user: publicMember({ ...target, active: false }) }); }
 function staticFile(req, res) {
@@ -1284,12 +1335,14 @@ async function route(req, res, db) {
   if (dropdownDeactivateMatch && req.method === "POST") return safeDropdownOperation(res, () => Dropdowns.deactivateDefinition(req, res, db, user, decodeURIComponent(dropdownDeactivateMatch[1])));
   const dropdownMatch = url.pathname.match(/^\/api\/dropdowns\/([^/]+)$/);
   if (dropdownMatch && req.method === "POST") return safeDropdownOperation(res, () => Dropdowns.updateDefinition(req, res, db, user, decodeURIComponent(dropdownMatch[1])));
-  if (url.pathname === "/api/user-options" && req.method === "GET") return safeUserOperation(res, () => userOptionsList(res, db));
+  if (url.pathname === "/api/user-options" && req.method === "GET") return safeUserOperation(res, () => userOptionsList(res, db, user));
   const adminMatch = url.pathname.match(/^\/api\/admin\/([^/]+)$/);
   if (adminMatch && req.method === "GET") {
-    if (!requireCapability("nav.admin", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
-    if (!ADMIN_SCREENS.has(adminMatch[1])) return json(res, 404, { error: "Not found." });
-    return adminScreen(res, db, adminMatch[1]);
+    const screen = adminMatch[1];
+    const requiredCapability = screen === "assignment" ? "leads.assign" : "nav.admin";
+    if (!requireCapability(requiredCapability, user)) return json(res, 403, { error: "You do not have permission to access this resource." });
+    if (!ADMIN_SCREENS.has(screen)) return json(res, 404, { error: "Not found." });
+    return adminScreen(res, db, screen);
   }
   if (url.pathname === "/api/users" && req.method === "GET") {
     if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage users.");
@@ -1316,6 +1369,10 @@ async function route(req, res, db) {
   if (integrationToggleMatch && req.method === "POST") { if (!requireCapability("workspace.manage", user)) return userWriteError(res, 403, "You do not have permission to manage integrations."); return safeUserOperation(res, () => Integrations.toggleConnection(req, res, db, user, decodeURIComponent(integrationToggleMatch[1]))); }
   const accessMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/access$/);
   if (accessMatch && ["GET", "POST"].includes(req.method)) { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user access."); const targetId = decodeURIComponent(accessMatch[1]); return safeUserOperation(res, () => req.method === "GET" ? userAccessList(res, db, user, targetId) : userAccessWrite(req, res, db, user, targetId)); }
+  const assignmentAccessMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/assignment-access$/);
+  if (assignmentAccessMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user access."); return safeUserOperation(res, () => userAssignmentAccessWrite(req, res, db, user, decodeURIComponent(assignmentAccessMatch[1]))); }
+  const teamAccessMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/team-access$/);
+  if (teamAccessMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user access."); return safeUserOperation(res, () => userTeamAccessWrite(req, res, db, user, decodeURIComponent(teamAccessMatch[1]))); }
   const userRoleMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/role$/);
   if (userRoleMatch && req.method === "POST") { if (!requireCapability("users.manage", user)) return userWriteError(res, 403, "You do not have permission to manage user roles."); return userRoleUpdate(req, res, db, user, decodeURIComponent(userRoleMatch[1])); }
   const userStatusMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/status$/);
@@ -1336,6 +1393,10 @@ async function route(req, res, db) {
   if (url.pathname === "/api/assignment-rules" && req.method === "GET") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRulesList(res, db)); }
   if (url.pathname === "/api/assignment-rules" && req.method === "POST") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRuleWrite(req, res, db, user)); }
   if (url.pathname === "/api/assignment-rules/manual" && req.method === "POST") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to assign leads."); return assignmentManualWrite(req, res, db, user); }
+  if (url.pathname === "/api/teams" && req.method === "GET") { if (!requireCapability("teams.manage", user)) return userWriteError(res,403,"You do not have permission to manage teams."); return safeUserOperation(res,()=>teamsList(res,db,user)); }
+  if (url.pathname === "/api/teams" && req.method === "POST") { if (!requireCapability("teams.manage", user)) return userWriteError(res,403,"You do not have permission to manage teams."); return safeUserOperation(res,()=>teamWrite(req,res,db,user)); }
+  const teamMembersMatch=url.pathname.match(/^\/api\/teams\/([^/]+)\/members$/);
+  if(teamMembersMatch && req.method==="POST") { if(!requireCapability("teams.manage",user)) return userWriteError(res,403,"You do not have permission to manage teams."); try { return await teamMembersWrite(req,res,db,user,decodeURIComponent(teamMembersMatch[1])); } catch (error) { console.error("team member update failed", error?.code || "unknown", error?.message || ""); return userWriteError(res,500,"Unable to save team members."); } }
   const assignmentRuleMatch = url.pathname.match(/^\/api\/assignment-rules\/([^/]+)$/);
   if (assignmentRuleMatch && req.method === "PATCH") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRuleWrite(req, res, db, user, decodeURIComponent(assignmentRuleMatch[1]))); }
   if (assignmentRuleMatch && req.method === "DELETE") { if (!requireCapability("leads.assign", user)) return userWriteError(res, 403, "You do not have permission to manage assignment rules."); return safeUserOperation(res, () => assignmentRuleDelete(res, db, user, decodeURIComponent(assignmentRuleMatch[1]), req.socket.remoteAddress)); }

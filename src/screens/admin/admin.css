@@ -484,6 +484,24 @@
 .role-hierarchy-card .admin-create-submit { justify-self: start; }
 .role-hierarchy-notice, .role-hierarchy-hint { margin: 0; color: #087a59; font-size: 13px; font-weight: 600; }
 .role-hierarchy-hint { color: var(--ink-2); font-weight: 500; }
+.assignment-access-manager { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); box-shadow: var(--shadow-sm); }
+.assignment-access-manager > div:last-child { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.assignment-access-manager label { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-1); cursor: pointer; }
+.assignment-access-manager input { width: 17px; height: 17px; margin: 0; accent-color: var(--red); }
+.assignment-access-manager label > span { display: grid; min-width: 0; gap: 2px; }
+.assignment-access-manager strong { overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.assignment-access-manager small, .assignment-access-manager em { color: var(--ink-2); font-size: 11px; font-style: normal; }
+.assignment-access-manager em { margin-left: auto; text-align: right; }
+.admin-page > .assignment-access-manager > form { display: flex; align-items: center; gap: 10px; max-width: 720px; margin-top: 14px; }
+.admin-page > .assignment-access-manager > form input { flex: 1; min-width: 0; min-height: 42px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-1); color: var(--ink); font: inherit; }
+.admin-page > .assignment-access-manager > form input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
+.admin-page > .assignment-access-manager > form .admin-create-submit { min-height: 42px; white-space: nowrap; }
+@media (max-width: 620px) { .admin-page > .assignment-access-manager > form { align-items: stretch; flex-direction: column; } }
+.team-member-list { display:flex; flex-wrap:wrap; gap:8px; }
+.team-member-list span { display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:999px; background:var(--bg-1); color:var(--ink); font-size:13px; font-weight:700; }
+.team-member-list button,.team-member-picker button { border:0; background:transparent; color:var(--red); font:inherit; font-weight:800; cursor:pointer; }
+.team-member-picker { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line-2); }
+.team-member-picker button { padding:8px 10px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--ink-1); }
 @media (max-width: 760px) { .assignment-manual-form { grid-template-columns: 1fr; } .assignment-selected-leads { grid-column: auto; } }
 @media (max-width: 760px) { .admin-audit-card { padding: 16px; } .admin-audit-list article { grid-template-columns: 1fr; gap: 8px; } .admin-audit-record { text-align: left; } }
 @media (max-width: 620px) { .role-hierarchy-intro { flex-direction: column; } }

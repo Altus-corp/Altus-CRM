@@ -82,6 +82,7 @@ export const ADMIN_NAV_GROUPS = [
       { to: "/admin/dashboard", label: "Dashboard" },
       { to: "/leads?view=new_leads", label: "Leads", countKey: "new_leads" },
       { to: "/admin/assignment", label: "Assignment" },
+      { to: "/members", label: "Members" },
       { to: "/reports", label: "Reports" },
       { to: "/admin/panel", label: "Admin Panel", placeholder: true },
       { to: "/admin/users", label: "User Management", placeholder: true },
@@ -381,6 +382,8 @@ function ResponsiveCoreNav({ currentHref }: { currentHref?: string }) {
 export function Navbar({
   collapsed = false,
   showAdmin = false,
+  showAssignment = false,
+  showTeams = false,
   includeCore = true,
   responsive = false,
   counts = {},
@@ -391,6 +394,8 @@ export function Navbar({
 }: {
   collapsed?: boolean;
   showAdmin?: boolean;
+  showAssignment?: boolean;
+  showTeams?: boolean;
   includeCore?: boolean;
   responsive?: boolean;
   counts?: Record<string, number | null>;
@@ -400,13 +405,13 @@ export function Navbar({
   toggleNavGroup?: (label: string) => void;
 } = {}) {
   const claimed = new Set<string>();
-  const adminGroups = showAdmin
+  const adminGroups = (showAdmin || showAssignment || showTeams)
     ? React.createElement(
         "div",
         { className: "nav-admin-groups", key: "admin-groups" },
         ADMIN_NAV_GROUPS.map((group) =>
           React.createElement("section", { className: "nav-group", key: group.label },
-            !collapsed && group.label && React.createElement("h2", { className: "nav-group-label" },
+            showAdmin && !collapsed && group.label && React.createElement("h2", { className: "nav-group-label" },
               React.createElement("button", {
                 type: "button",
                 className: "nav-group-toggle",
@@ -415,10 +420,10 @@ export function Navbar({
                 onClick: () => toggleNavGroup(group.label),
               }, group.label),
             ),
-            (!group.collapsible || !collapsedGroups[group.label] || collapsed) && React.createElement("div", {
+            (!group.collapsible || !collapsedGroups[group.label] || collapsed || !showAdmin) && React.createElement("div", {
               id: `nav-group-${group.label.replace(/\s+/g, "-").toLowerCase()}`,
               className: "nav-group-items",
-            }, ...group.items.map((item) => navLink(item, collapsed, counts, countsLoading, activeHref(currentHref, item, claimed)))),
+            }, ...group.items.filter((item) => showAdmin || (showAssignment && item.to === "/admin/assignment") || (showTeams && item.to === "/members")).map((item) => navLink(item, collapsed, counts, countsLoading, activeHref(currentHref, item, claimed)))),
           ),
         ),
       )
