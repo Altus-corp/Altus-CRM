@@ -128,6 +128,9 @@ export function AppShell() {
   const { user, logout, loading: authLoading } = useAuth();
   const canCreateLead = usePermission("leads.edit");
   const showAdminNav = usePermission("nav.admin");
+  const canManageAssignment = usePermission("leads.assign");
+  const canManageTeams = usePermission("teams.manage");
+  const showAssignmentNav = showAdminNav || canManageAssignment || canManageTeams;
   const isAdminRole = user?.role?.trim().toLowerCase() === "admin";
   const { counts, loading: countsLoading } = useLeadNavCounts(showAdminNav);
   const { collapsedGroups, toggleNavGroup } = useNavGroupState();
@@ -150,10 +153,10 @@ export function AppShell() {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [topbarModulesOpen]);
   function toggleTheme() { const next = theme === "light" ? "dark" : "light"; setTheme(next); setCurrentTheme(next); }
-  const adminNavbar = <Navbar collapsed={false} showAdmin={showAdminNav} includeCore={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
-  return <LeadNavbarActionsContext.Provider value={setLeadNavbarActions}><div ref={shellRef} className={showAdminNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
+  const adminNavbar = <Navbar collapsed={false} showAdmin={showAdminNav} showAssignment={canManageAssignment} showTeams={canManageTeams} includeCore={false} currentHref={currentHref} counts={counts} countsLoading={countsLoading} collapsedGroups={collapsedGroups} toggleNavGroup={toggleNavGroup} />;
+  return <LeadNavbarActionsContext.Provider value={setLeadNavbarActions}><div ref={shellRef} className={showAssignmentNav ? "shell sidebar-shell admin-shell" : "shell sidebar-shell"}>
     <button ref={openNavigationRef} className="open-navigation-shortcut" type="button" onClick={() => openKeyboardNavigation(openNavigationRef.current)}>Open navigation</button>
-    <MasterSidebar currentHref={currentHref} showAdmin={showAdminNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole || location.pathname.startsWith("/admin/")} />
+    <MasterSidebar currentHref={currentHref} showAdmin={showAssignmentNav} adminNavbar={adminNavbar} theme={theme} hideMasterNavigation={isAdminRole} />
     <main className="main">
       <header ref={topbarRef} className="topbar topbar-without-navigation">
         <Link className="topbar-logo topbar-brand-logo" to={homeHref} aria-label="Go to dashboard"><img className="brand-mark" src={theme === "dark" ? "/altus-lockup-white.webp" : "/altus-lockup.webp"} alt="" /><span>Altus <b>CRM</b></span></Link>

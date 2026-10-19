@@ -6,6 +6,7 @@ const CAPABILITIES = Object.freeze({
   "leads.call": Object.freeze(["Owner", "Admin", "Sales"]),
   "leads.permission": Object.freeze(["Owner", "Admin"]),
   "leads.assign": Object.freeze(["Owner", "Admin"]),
+  "teams.manage": Object.freeze(["Owner", "Admin"]),
   "leads.export": Object.freeze(["Owner", "Admin"]),
   "leads.import": Object.freeze(["Owner", "Admin", "Sales"]),
   "leads.delete": Object.freeze(["Owner", "Admin"]),

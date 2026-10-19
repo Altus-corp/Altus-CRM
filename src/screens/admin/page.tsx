@@ -1,5 +1,5 @@
 import { useAdminScreen, type AdminScreenKey } from "./function";
-import { hasCapability } from "../../shared/auth/permissions";
+import { hasCapability, usePermission } from "../../shared/auth/permissions";
 import { useAuth } from "../../shared/auth/auth";
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -119,7 +119,7 @@ export function AdminPage({ screen }: { screen: AdminScreenKey }) {
   const { user } = useAuth();
   const canResetPasswords = hasCapability(user?.role, "users.reset_password");
   const canAddPerson = hasCapability(user?.role, "users.manage");
-  const canManageAssignment = hasCapability(user?.role, "leads.assign");
+  const canManageAssignment = usePermission("leads.assign");
   const canManageAccess = canAddPerson;
   if (screen === "dashboard") return <AdminDashboard view={view} />;
   if (screen === "user-management" && canAddPerson) return <main className="admin-page"><AdminPageHeader title={view.title} description={view.description} /><UserManagement /></main>;
