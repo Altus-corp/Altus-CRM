@@ -399,7 +399,7 @@ async function leadsList(req, res, db, url, actor) {
   // Keep every other active filter, but intentionally exclude this one chip's
   // calling-resolution condition for the chip aggregate.
   const resolutionCountWhere = callingResolutionFilterSql
-    ? where.map((clause) => clause === callingResolutionFilterSql ? `(${[...new Set(callingResolutionFilterSql.match(/\$\d+/g) || [])].map((placeholder) => `${placeholder} IS NOT NULL`).join(" AND ")})` : clause)
+    ? where.map((clause) => clause === callingResolutionFilterSql ? `(${[...new Set(callingResolutionFilterSql.match(/\$\d+/g) || [])].map((placeholder) => `${placeholder}::text IS NOT NULL`).join(" AND ")})` : clause)
     : where;
   const resolutionCountSql = resolutionCountWhere.length ? "WHERE " + resolutionCountWhere.join(" AND ") : "";
   const [count, resolutionCountRows] = await Promise.all([

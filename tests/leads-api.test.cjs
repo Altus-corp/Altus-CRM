@@ -85,10 +85,25 @@ test("lead list uses parameterized filters and caps page size at 100", async () 
   assert.equal(res.status, 200);
   assert.equal(body.page_size, 100);
   assert.equal(body.items.length, 1);
-  assert.equal(calls.length, 2, "count and primary list query");
+  assert.equal(calls.length, 3, "count, resolution-count, and primary list queries");
   assert.deepEqual(calls[0].params, ["%fixture%", "lead"]);
-  assert.match(calls[1].sql, /LIMIT \$3 OFFSET \$4/);
-  assert.deepEqual(calls[1].params.slice(-2), [100, 0]);
+  assert.match(calls[2].sql, /LIMIT \$3 OFFSET \$4/);
+  assert.deepEqual(calls[2].params.slice(-2), [100, 0]);
+});
+
+test("selected calling-resolution filters keep typed parameters in the resolution-count query", async () => {
+  const calls = [];
+  const db = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return sql.startsWith("SELECT count") ? { rows: [{ total: 1 }] } : { rows: [] };
+  } };
+  const query = "managed_filters=" + encodeURIComponent(JSON.stringify({ calling_resolution: ["Registered"] }));
+  const res = response();
+  await leadsList(getRequest(`/api/leads?${query}`), res, db, new URL(`http://localhost/api/leads?${query}`));
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 3);
+  assert.match(calls[1].sql, /\$1::text IS NOT NULL/);
+  assert.deepEqual(calls[1].params, ["Registered"]);
 });
 
 test("lead list rejects invalid sort and silently ignored query values", async () => {
@@ -113,7 +128,7 @@ test("lead list accepts every server sort allow-list key and keeps nulls last in
     const res = response();
     await leadsList(getRequest(`/api/leads?sort=${sort}&direction=${direction}`), res, { query: async (sql, params) => { calls.push({ sql, params }); return sql.startsWith("SELECT count") ? { rows: [{ total: 0 }] } : { rows: [] }; } }, new URL(`http://localhost/api/leads?sort=${sort}&direction=${direction}`));
     assert.equal(res.status, 200, `${sort} ${direction}`);
-    assert.match(calls[1].sql, new RegExp(`ORDER BY .+ ${direction.toUpperCase()} NULLS LAST, l\\.id ASC`));
+    assert.match(calls[2].sql, new RegExp(`ORDER BY .+ ${direction.toUpperCase()} NULLS LAST, l\\.id ASC`));
   }
 });
 
