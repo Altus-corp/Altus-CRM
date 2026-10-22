@@ -23,7 +23,7 @@ import { ForgotPasswordPage, ResetPasswordPage } from "./screens/password-reset/
 import { MembersPage } from "./screens/members/page";
 import "./shared/theme/tokens.css";
 
-const adminScreen = (screen: import("./screens/admin/function").AdminScreenKey) => <RequireCapability capability={screen === "assignment" ? "leads.assign" : "nav.admin"}><AdminPage screen={screen} /></RequireCapability>;
+const adminScreen = (screen: import("./screens/admin/function").AdminScreenKey) => screen === "assignment" ? <RequireCapability capability="leads.assign"><AdminPage screen={screen} /></RequireCapability> : <RequireCapability capability="nav.admin"><AdminPage screen={screen} /></RequireCapability>;
 function hasAllLeadsAccess(role: string | undefined) { return ["owner", "admin", "super admin"].includes(String(role || "").trim().toLowerCase()); }
 function LeadsRoute() { const { user } = useAuth(); const location = useLocation(); return hasAllLeadsAccess(user?.role) ? <LeadsPage /> : <Navigate to={`/lead-master${location.search}`} replace />; }
 function DefaultRoute() { const { user } = useAuth(); const location = useLocation(); const canManageTeams = usePermission("teams.manage"); if (location.pathname === "/members") return canManageTeams ? <MembersPage /> : <Navigate to="/lead-master" replace />; return <Navigate to={hasAllLeadsAccess(user?.role) ? "/leads" : "/lead-master"} replace />; }

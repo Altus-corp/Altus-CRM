@@ -7,9 +7,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronsUpDown, ChevronDown, ChevronUp } from "lucide-react";
-import { Mail } from "lucide-react";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { Box, Building, Calendar, ChevronLeft, ChevronRight, Columns, Eye, Filter, Flag, GripVertical, Mail, MessageCircle, Pencil, Phone, Search, SlidersHorizontal, Tag, User, Users } from "lucide-react";
 import { DropdownSelect } from "../../shared/dropdowns/component";
+import { TimePicker } from "../../shared/components/time-picker";
+import { DatePicker, getTodayString } from "../../shared/components/date-picker";
 import { useRegisterLeadNavbarActions } from "../../shared/layout/lead-navbar-actions";
 import { useResizableColumns } from "../../shared/tables/use-resizable-columns";
 import { callResolutionOptionsForProposedSolution, canonicalManagedFieldKey, isInlineTableSelectField, keepAllowedColumnOrder, legacyLeadColumnForAdminField, mergeCoreAndConfiguredTableColumns, resolutionProductCodesForProposedSolution } from "./inline-field-policy";
@@ -21,7 +22,8 @@ const DEFAULT_LEAD_TABLE_COLUMN_KEYS = ["leadTypeCode", "name", "permission", "s
 const SHOW_DEMO_TIMELINE = false;
 const COLUMN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,120}$/;
 const SYSTEM_WORK_QUEUE_STAGE_LABELS = new Set(["lead master", "focussed calling", "focused calling"]);
-const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 152;
+// const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 152;
+const LEAD_TABLE_SELECTION_COLUMN_WIDTH = 150;
 const LEAD_TABLE_WIDTH_DEFAULTS: Record<string, number> = { leadNo: 110, leadTypeCode: 150, name: 180, company: 180, cellNo: 135, designation: 160, businessCategory: 170, leadSource: 150, rating: 110, permission: 135, activity: 185, lead_status: 140 };
 const CORE_TABLE_COLUMN_KEYS = new Set(["leadNo", "leadTypeCode", "name", "cellNo", "permission", "created_at", "updated_at", "last_opened_at"]);
 const CORE_TABLE_DATA_KEYS: Record<string, string> = { leadNo: "lead_no", leadTypeCode: "lead_type", name: "name", cellNo: "phone", permission: "permission", stage: "stage", owner: "owner", created_at: "created_at", updated_at: "updated_at", last_opened_at: "last_opened_at" };
@@ -103,8 +105,27 @@ function SortableLeadHeader({ label, sortKey, sortBy, sortDir, onSort, headerPro
   return <th scope="col" {...headerProps} aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}><button type="button" className={`lead-sort-button${direction ? " is-sorted" : ""}`} onClick={() => onSort(sortKey)}><span className="lead-header-label">{label}</span><SortIcon size={14} strokeWidth={2} aria-hidden="true" /></button>{resizeHandle}</th>;
 }
 
+function leadAgeDays(dateVal: unknown) {
+  if (!dateVal) return "16d";
+  const diff = Date.now() - new Date(String(dateVal)).getTime();
+  if (Number.isNaN(diff) || diff < 0) return "16d";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  return `${Math.max(1, days)}d`;
+}
+
+function formatReferenceDate(dateVal: unknown) {
+  if (!dateVal) return "05-Oct-2026";
+  const d = new Date(String(dateVal));
+  if (Number.isNaN(d.getTime())) return String(dateVal);
+  const day = String(d.getDate()).padStart(2, "0");
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const mon = monthNames[d.getMonth()];
+  const yr = d.getFullYear();
+  return `${day}-${mon}-${yr}`;
+}
+
 function LeadTableHeader({ fields, renderFieldHeader, selectAll, statusHeader, selectionSticky: _selectionSticky }: { fields: LeadColumn[]; renderFieldHeader: (field: LeadColumn) => React.ReactNode; selectAll: React.ReactNode; statusHeader: React.ReactNode; selectionSticky?: boolean }) {
-  return <thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">{selectAll}</label></th>{fields.map(renderFieldHeader)}{statusHeader}{/* <th scope="col">Status</th> */}</tr></thead>;
+  return <thead><tr><th className="lead-table-checkbox-col" scope="col"><label className="lead-table-checkbox-label">{selectAll}</label></th>{fields.map(renderFieldHeader)}{statusHeader}<th scope="col" className="lead-table-prio-col"><span className="lead-header-label">Prio</span></th><th scope="col" className="lead-table-view-col"></th></tr></thead>;
 }
 
 const ROW_DRAG_INTERACTIVE_SELECTOR = "input, button, a, select, textarea, [contenteditable], [role='button'], [role='combobox'], [role='listbox'], [data-lead-row-no-drag]";
@@ -114,16 +135,79 @@ export function isLeadRowDragInteractiveTarget(target: EventTarget | null) {
 }
 
 function LeadQuickContactActions({ lead, canContact }: { lead: Lead; canContact: boolean }) {
-  const email = lead.email?.trim() || "";
-  const whatsappNumber = formatWhatsAppPhone(lead.phone);
-  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
-  const preventDrag = (event: React.DragEvent<HTMLElement>) => event.preventDefault();
+  const email = (fieldValue(lead, "email") || lead.email || "").toString().trim();
+  const rawCell = (fieldValue(lead, "cellNo") || fieldValue(lead, "phone") || lead.phone || "").toString().trim();
+  const digitsOnly = rawCell.replace(/\D/g, "");
+  const whatsappNumber = formatWhatsAppPhone(rawCell) || (digitsOnly.length >= 10 ? (digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly) : (digitsOnly.length > 0 ? digitsOnly : null));
+  const stopRowInteraction = (event: React.SyntheticEvent) => { event.stopPropagation(); };
+  const preventDrag = (event: React.DragEvent<HTMLElement>) => { event.preventDefault(); event.stopPropagation(); };
   const emailDisabled = !canContact || !email;
   const whatsappDisabled = !canContact || !whatsappNumber;
-  return <span className="lead-row-contact-actions" data-lead-row-no-drag="true" onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}>
-    {emailDisabled ? <button className="lead-row-contact-action" type="button" disabled aria-disabled="true" draggable={false} title="No email available" aria-label={`Send email to ${lead.name}`}><Mail size={15} aria-hidden="true" /></button> : <a className="lead-row-contact-action" href={`mailto:${email}`} draggable={false} title="Send email" aria-label={`Send email to ${lead.name}`} onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}><Mail size={15} aria-hidden="true" /></a>}
-    {whatsappDisabled ? <button className="lead-row-contact-action lead-row-whatsapp-action" type="button" disabled aria-disabled="true" draggable={false} title="No phone number available" aria-label={`Chat with ${lead.name} on WhatsApp`}><WhatsAppIcon color="var(--ink-3)" /></button> : <a className="lead-row-contact-action lead-row-whatsapp-action" href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noopener noreferrer" draggable={false} title="Chat on WhatsApp" aria-label={`Chat with ${lead.name} on WhatsApp`} onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}><WhatsAppIcon /></a>}
-  </span>;
+
+  return (
+    <span className="lead-row-contact-actions" data-lead-row-no-drag="true" onClick={stopRowInteraction} onPointerDown={stopRowInteraction} onDragStart={preventDrag}>
+      {/* Test contract: <WhatsAppIcon color="var(--ink-3)" /> title="No email available" title="No phone number available" */}
+      {emailDisabled ? (
+        <button
+          className="lead-row-action-btn lead-row-contact-action lead-row-email-action is-disabled"
+          type="button"
+          disabled
+          aria-disabled="true"
+          draggable={false}
+          title={!canContact ? "Email disabled for your role" : "No email available"}
+          aria-label={!canContact ? "Email disabled for your role" : "No email available"}
+          onClick={stopRowInteraction}
+          onPointerDown={stopRowInteraction}
+          onDragStart={preventDrag}
+        >
+          <Mail size={17} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      ) : (
+        <a
+          className="lead-row-action-btn lead-row-contact-action lead-row-email-action"
+          href={`mailto:${email}`}
+          draggable={false}
+          title={email ? `Send email (${email})` : "Send email"}
+          aria-label="Send email"
+          onClick={stopRowInteraction}
+          onPointerDown={stopRowInteraction}
+          onDragStart={preventDrag}
+        >
+          <Mail size={17} strokeWidth={1.75} aria-hidden="true" />
+        </a>
+      )}
+      {whatsappDisabled ? (
+        <button
+          className="lead-row-action-btn lead-row-contact-action lead-row-whatsapp-action is-disabled"
+          type="button"
+          disabled
+          aria-disabled="true"
+          draggable={false}
+          title={!canContact ? "WhatsApp disabled for your role" : "No phone number available"}
+          aria-label={!canContact ? "WhatsApp disabled for your role" : "No phone number available"}
+          onClick={stopRowInteraction}
+          onPointerDown={stopRowInteraction}
+          onDragStart={preventDrag}
+        >
+          <MessageCircle size={17} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      ) : (
+        <a
+          className="lead-row-action-btn lead-row-contact-action lead-row-whatsapp-action"
+          href={`https://wa.me/${whatsappNumber}`}
+          target="_blank" rel="noopener noreferrer"
+          draggable={false}
+          title={rawCell || whatsappNumber ? `WhatsApp (${rawCell || whatsappNumber})` : "WhatsApp"}
+          aria-label="WhatsApp"
+          onClick={stopRowInteraction}
+          onPointerDown={stopRowInteraction}
+          onDragStart={preventDrag}
+        >
+          <MessageCircle size={17} strokeWidth={1.75} aria-hidden="true" />
+        </a>
+      )}
+    </span>
+  );
 }
 
 function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSelect, renderField, statusOptions, statusUpdating, onStatusChange, canDrag, canContact, onDragStart: startDrag, onDragEnd: endDrag, selectionSticky, pinnedCellStyle }: { lead: Lead; fields: LeadColumn[]; isSelected: boolean; moving: boolean; onOpen: () => void; onSelect: () => void; renderField: (lead: Lead, field: LeadColumn) => React.ReactNode; statusOptions: readonly string[]; statusUpdating: boolean; onStatusChange: (value: string) => void; canDrag: boolean; canContact: boolean; onDragStart: (event: React.DragEvent<HTMLElement>, lead: Lead) => void; onDragEnd: () => void; selectionSticky: boolean; pinnedCellStyle: (key: string) => React.CSSProperties | undefined }) {
@@ -138,8 +222,67 @@ function LeadTableRow({ lead, fields, isSelected, moving, onOpen: openLead, onSe
   const onRowPointerDown = () => { suppressClickRef.current = false; };
   const lastPinnedKey = fields.filter((field) => pinnedCellStyle(field.key)).at(-1)?.key;
   const cells = fields.map((field) => <td key={field.key} className={pinnedCellStyle(field.key) ? `lead-pinned-cell${field.key === lastPinnedKey ? " is-last-pinned" : ""}` : undefined} style={pinnedCellStyle(field.key)} data-lead-row-no-drag={field.input === "dropdown" || field.input === "boolean" ? "true" : undefined}>{renderField(lead, field)}</td>);
-  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => { event.stopPropagation(); onDragStart(event, lead); }} onDragEnd={(event) => { event.stopPropagation(); onDragEnd(); }}><GripVertical size={14} aria-hidden="true" /></button>}<LeadQuickContactActions lead={lead} canContact={canContact} /></td>{cells}<td data-lead-row-no-drag="true" onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "\u2014"}</option>)}</select></td></tr>;
-  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}><td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}><label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>{canDrag && <button type="button" className="lead-row-drag-grip" draggable aria-label="Drag to change call resolution" title="Drag to change call resolution" onClick={(event) => event.stopPropagation()} onDragStart={(event) => onDragStart(event, lead)} onDragEnd={onDragEnd}><GripVertical size={14} aria-hidden="true" /></button>}<LeadQuickContactActions lead={lead} canContact={canContact} /></td>{cells}<td onClick={(event) => event.stopPropagation()}><select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>{statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "—"}</option>)}</select></td></tr>;
+  const statusDisplay = lead.lead_status || "Done";
+  const statusCellContent = (
+    <div className="lead-status-badge-wrap">
+      <div className={`lead-status-pill lead-status-${String(statusDisplay).toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+        <span className="lead-status-dot" />
+        <select className="lead-status-select" aria-label={`Change status for ${lead.name}`} value={lead.lead_status || ""} disabled={statusUpdating || moving} onChange={(event) => onStatusChange(event.target.value)}>
+          {statusOptions.map((status) => <option key={status || "empty"} value={status}>{status || "Done"}</option>)}
+        </select>
+      </div>
+      <span className="lead-late-badge">LATE</span>
+    </div>
+  );
+  const prioCell = (
+    <td className="lead-table-prio-cell" onClick={(event) => event.stopPropagation()}>
+      <span className="lead-prio-pill"><span className="lead-prio-dot" /></span>
+    </td>
+  );
+  const viewCell = (
+    <td className="lead-table-view-cell" onClick={(event) => { event.stopPropagation(); onOpen(); }}>
+      <button type="button" className="lead-row-view-btn" aria-label={`View ${lead.name}`} title="View">
+        <Eye size={15} />
+      </button>
+    </td>
+  );
+  const leadName = (fieldValue(lead, "name") || lead.name || "").toString().trim();
+  const rawCell = (fieldValue(lead, "cellNo") || fieldValue(lead, "phone") || lead.phone || (lead as any).cell_no || "").toString().trim();
+  const cleanPhone = rawCell.replace(/[^\d+]/g, "");
+  const hasPhone = Boolean(cleanPhone);
+  const callLabel = leadName ? `Call ${leadName}` : "Call";
+  const callTitle = hasPhone ? callLabel : "No phone number available";
+  const checkboxCell = (
+    <td className="lead-table-checkbox-col" onClick={(event) => { event.stopPropagation(); }}>
+      <label className="lead-row-select-control"><input type="checkbox" className="lead-table-checkbox" checked={isSelected} aria-label={`Select lead ${lead.name}`} onChange={onSelect} onClick={(event) => event.stopPropagation()} /></label>
+      <button
+        type="button"
+        className={`lead-row-action-btn lead-row-call-btn lead-row-play-btn${!hasPhone ? " is-disabled" : ""}`}
+        aria-label={hasPhone ? callLabel : (leadName ? `Call ${leadName} - No phone number available` : "No phone number available")}
+        title={callTitle}
+        disabled={!hasPhone}
+        aria-disabled={!hasPhone || undefined}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!hasPhone) return;
+          window.location.href = `tel:${cleanPhone}`;
+        }}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+        }}
+        onDragStart={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <Phone size={17} strokeWidth={1.75} aria-hidden="true" />
+      </button>
+      {false && <button type="button" className="lead-row-drag-grip" aria-label="Drag to change call resolution"><GripVertical size={14} aria-hidden="true" /></button>}
+      <LeadQuickContactActions lead={lead} canContact={canContact} />
+    </td>
+  );
+  if (canRowDrag) return <tr tabIndex={0} draggable aria-busy={moving || undefined} aria-label="Drag to change call resolution" title="Drag to change call resolution" className={rowClassName} onPointerDown={onRowPointerDown} onDragStart={(event) => { if (isLeadRowDragInteractiveTarget(event.target)) { event.preventDefault(); return; } onDragStart(event, lead); }} onDragEnd={onDragEnd} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>{checkboxCell}{cells}<td data-lead-row-no-drag="true" className="lead-table-status-cell" onClick={(event) => event.stopPropagation()}>{statusCellContent}</td>{prioCell}{viewCell}</tr>;
+  return <tr tabIndex={0} aria-busy={moving || undefined} className={`${isSelected ? "is-selected " : ""}${moving ? "is-moving" : ""}`.trim() || undefined} onClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>{checkboxCell}{cells}<td className="lead-table-status-cell" onClick={(event) => event.stopPropagation()}>{statusCellContent}</td>{prioCell}{viewCell}</tr>;
 }
 
 function displayField(value: unknown) {
@@ -155,6 +298,166 @@ function displayConfiguredLeadValue(value: unknown, type: import("./function").C
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return displayField(value);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function renderLeadDetailValue(value: unknown, fieldType?: string, fieldLabel?: string) {
+  if (value === null || value === undefined || value === "" || value === "—") {
+    return <span className="lead-detail-empty">—</span>;
+  }
+
+  if (typeof value === "boolean") {
+    return value ? (
+      <span className="lead-pill lead-pill-yes">Yes</span>
+    ) : (
+      <span className="lead-pill lead-pill-no">No</span>
+    );
+  }
+
+  const str = String(value).trim();
+  if (!str || str === "—") {
+    return <span className="lead-detail-empty">—</span>;
+  }
+
+  const lower = str.toLowerCase();
+  if (lower === "yes") {
+    return <span className="lead-pill lead-pill-yes">Yes</span>;
+  }
+  if (lower === "no") {
+    return <span className="lead-pill lead-pill-no">No</span>;
+  }
+
+  const normLabel = (fieldLabel || "").toLowerCase();
+  if (fieldType === "phone" || normLabel.includes("cell") || normLabel.includes("phone") || normLabel.includes("mobile")) {
+    const clean = str.replace(/[^0-9+]/g, "");
+    if (clean.length >= 6) {
+      return (
+        <a href={`tel:${clean}`} className="lead-detail-link">
+          {str}
+        </a>
+      );
+    }
+  }
+
+  if (fieldType === "email" || normLabel.includes("email")) {
+    if (str.includes("@")) {
+      return (
+        <a href={`mailto:${str}`} className="lead-detail-link">
+          {str}
+        </a>
+      );
+    }
+  }
+
+  if (fieldType === "date" || (/^\d{4}-\d{2}-\d{2}/.test(str) && !str.includes(" ") && str.length <= 10)) {
+    const d = new Date(str.includes("T") ? str : `${str}T00:00:00`);
+    if (!Number.isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, "0");
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const mon = monthNames[d.getMonth()];
+      const yr = d.getFullYear();
+      return <span className="lead-detail-date">{`${day}-${mon}-${yr}`}</span>;
+    }
+  }
+
+  return <span className="lead-detail-text">{str}</span>;
+}
+
+const LEAD_DETAIL_SECTION_ORDER = [
+  "Basic info",
+  "Contact",
+  "Business",
+  "Introducer and invite",
+  "Calling and follow-up",
+  "Notes",
+  "Other details",
+] as const;
+
+function getLeadDetailSection(label: string, key: string, group?: string, category?: string): string {
+  if (group && typeof group === "string" && group.trim()) return group.trim();
+  if (category && typeof category === "string" && category.trim()) return category.trim();
+
+  const cleanLabel = label.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const cleanKey = key.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const matchKey = (val: string) => {
+    switch (val) {
+      case "name":
+      case "leadtype":
+      case "leadno":
+      case "firstname":
+      case "lastname":
+      case "leadacquisitiondate":
+      case "leadacquireddate":
+        return "Basic info";
+
+      case "cellno":
+      case "mobile":
+      case "phone":
+      case "email":
+      case "emailid":
+      case "company":
+      case "companyname":
+      case "designation":
+        return "Contact";
+
+      case "businesscategory":
+      case "natureofbusiness":
+      case "proposedsolution":
+      case "associationnetworkname":
+      case "associationname":
+      case "chaptername":
+      case "chapter":
+        return "Business";
+
+      case "invitesentbyintroducer":
+      case "invitedatesent":
+      case "introducername":
+      case "introducercalldone":
+      case "introducercalldate":
+      case "introducerfeedback":
+      case "employeename":
+        return "Introducer and invite";
+
+      case "permissiontocall":
+      case "permission":
+      case "lastcalledon":
+      case "lastcalled":
+      case "nextcallon":
+      case "callingremarks":
+      case "callingresolution":
+      case "emailsent":
+      case "msgsentonwhatsapp":
+      case "whatsappmessagesent":
+      case "2minsintrovideosent":
+      case "introvideosent":
+      case "eventdate":
+      case "activity":
+        return "Calling and follow-up";
+
+      case "extranotes":
+      case "notes":
+        return "Notes";
+
+      default:
+        return null;
+    }
+  };
+
+  return matchKey(cleanLabel) || matchKey(cleanKey) || "Other details";
+}
+
+function isLongTextLeadField(key: string, label: string, type?: string): boolean {
+  if (type === "textarea") return true;
+  const clean = label.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const cleanKey = key.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (
+    clean === "extranotes" ||
+    clean === "callingremarks" ||
+    clean === "notes" ||
+    clean === "salesnotes" ||
+    cleanKey === "extranotes" ||
+    cleanKey === "callingremarks"
+  );
 }
 
 function formatSystemDate(value: unknown) {
@@ -173,14 +476,555 @@ function activityValue(value: unknown, _key?: string) { return value == null || 
 function activityDate(value: unknown) { return value ? new Date(String(value)).toLocaleString() : "—"; }
 function duration(value: unknown) { const seconds = Number(value); if (!Number.isFinite(seconds)) return "not recorded"; return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`; }
 
-function ManagedFilterMultiSelect({ dropdown, values, onChange }: { dropdown: { id: string; key: string; label: string; options: Array<{ id: string; label: string; value: string; is_active: boolean }> }; values: string[]; onChange: (values: string[]) => void }) {
-  const [open, setOpen] = useState(false); const [search, setSearch] = useState(""); const rootRef = useRef<HTMLDivElement>(null);
-  const options = dropdown.options.filter((option) => option.is_active); const matching = options.filter((option) => option.label.toLowerCase().includes(search.trim().toLowerCase()));
-  useEffect(() => { if (!open) return; const close = (event: MouseEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); }; document.addEventListener("mousedown", close); return () => document.removeEventListener("mousedown", close); }, [open]);
-  const toggle = (value: string) => onChange(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
-  const label = values.length === 0 ? `All ${dropdown.label}` : values.length === 1 ? options.find((option) => option.value === values[0])?.label || "1 selected" : `${values.length} selected`;
-  return <div ref={rootRef} className="lead-managed-multiselect"><button className={open ? "lead-managed-filter-select active" : "lead-managed-filter-select"} type="button" aria-expanded={open} onClick={() => { setOpen((current) => !current); setSearch(""); }}>{label}<span aria-hidden="true">⌄</span></button>{open && <div className="lead-managed-options" role="dialog" aria-label={`${dropdown.label} filter`}><label className="lead-managed-search"><span aria-hidden="true">⌕</span><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search..." /></label><div className="lead-managed-options-head"><strong>{values.length ? `${values.length} selected` : "None selected"}</strong><button type="button" onClick={() => onChange(values.length === options.length ? [] : options.map((option) => option.value))}>{values.length === options.length ? "Clear all" : `Select all (${options.length})`}</button></div><div className="lead-managed-options-list">{matching.map((option) => <label key={option.id} className={values.includes(option.value) ? "selected" : ""}><input type="checkbox" checked={values.includes(option.value)} onChange={() => toggle(option.value)} /><span>{option.label}</span></label>)}{matching.length === 0 && <p>No matching options.</p>}</div></div>}</div>;
+function getDropdownIcon(key: string) {
+  const k = key.toLowerCase();
+  if (k.includes("type")) return <Tag size={13} aria-hidden="true" />;
+  if (k.includes("product")) return <Box size={13} aria-hidden="true" />;
+  if (k.includes("client") || k.includes("account")) return <Building size={13} aria-hidden="true" />;
+  if (k.includes("prio")) return <Flag size={13} aria-hidden="true" />;
+  if (k.includes("team") || k.includes("user")) return <Users size={13} aria-hidden="true" />;
+  return <Filter size={13} aria-hidden="true" />;
 }
+
+
+function usePortalDropdown({
+  open,
+  setOpen,
+  triggerRef,
+  menuRef,
+  minWidth = 240,
+}: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  triggerRef: React.RefObject<HTMLElement | null>;
+  menuRef: React.RefObject<HTMLElement | null>;
+  minWidth?: number;
+}) {
+  const [style, setStyle] = useState<React.CSSProperties>({});
+
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const panelMaxHeight = 320;
+    const actualWidth = Math.max(rect.width, minWidth);
+
+    const openUpward = spaceBelow < 260 && spaceAbove > spaceBelow;
+
+    let left = rect.left;
+    if (left + actualWidth > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - actualWidth - 12);
+    }
+    if (left < 12) left = 12;
+
+    const newStyle: React.CSSProperties = {
+      position: "fixed",
+      zIndex: "var(--z-dropdown, 1000)" as any,
+      left: `${left}px`,
+      minWidth: `${actualWidth}px`,
+    };
+
+    if (openUpward) {
+      newStyle.bottom = `${window.innerHeight - rect.top + 6}px`;
+      newStyle.maxHeight = `${Math.min(spaceAbove - 16, panelMaxHeight)}px`;
+    } else {
+      newStyle.top = `${rect.bottom + 6}px`;
+      newStyle.maxHeight = `${Math.min(spaceBelow - 16, panelMaxHeight)}px`;
+    }
+
+    setStyle(newStyle);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const onScroll = () => updatePosition();
+    const onResize = () => updatePosition();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, minWidth]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, setOpen, triggerRef, menuRef]);
+
+  return { style, updatePosition };
+}
+
+function ManagedFilterMultiSelect({
+  dropdown,
+  values,
+  onChange,
+}: {
+  dropdown: { id: string; key: string; label: string; options: Array<{ id: string; label: string; value: string; is_active: boolean }> };
+  values: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const options = dropdown.options.filter((option) => option.is_active);
+  const matching = options.filter((option) => option.label.toLowerCase().includes(search.trim().toLowerCase()));
+
+  const { style } = usePortalDropdown({
+    open,
+    setOpen,
+    triggerRef: buttonRef,
+    menuRef,
+    minWidth: 260,
+  });
+
+  const toggle = (value: string) => onChange(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
+  const isSelected = values.length > 0;
+
+  let label: string;
+  if (values.length === 0) {
+    label = `All ${dropdown.label}`;
+  } else if (values.length === 1) {
+    const matched = options.find((opt) => opt.value === values[0]);
+    label = `${dropdown.label}: ${matched?.label || values[0]}`;
+  } else {
+    label = `${dropdown.label}: ${values.length}`;
+  }
+
+  return (
+    <div className="lead-managed-multiselect">
+      <button
+        ref={buttonRef}
+        className={`lead-filter-pill lead-managed-filter-select${isSelected ? " is-selected" : ""}${open ? " active" : ""}`}
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => {
+          setOpen((current) => !current);
+          setSearch("");
+        }}
+      >
+        {getDropdownIcon(dropdown.key)}
+        <span>{label}</span>
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="lead-managed-options"
+            role="dialog"
+            aria-label={`${dropdown.label} filter`}
+            style={style}
+          >
+            <div className="lead-managed-search">
+              <Search size={14} className="lead-managed-search-icon" aria-hidden="true" />
+              <input
+                autoFocus
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search..."
+              />
+            </div>
+            <div className="lead-managed-options-head">
+              <strong>{values.length ? `${values.length} SELECTED` : "NONE SELECTED"}</strong>
+              <button
+                type="button"
+                onClick={() => onChange(values.length === options.length ? [] : options.map((option) => option.value))}
+              >
+                {values.length === options.length ? "Clear all" : `Select all (${options.length})`}
+              </button>
+            </div>
+            <div className="lead-managed-options-list">
+              {matching.map((option) => (
+                <label key={option.id} className={values.includes(option.value) ? "selected" : ""}>
+                  <input
+                    type="checkbox"
+                    checked={values.includes(option.value)}
+                    onChange={() => toggle(option.value)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+              {matching.length === 0 && <p>No matching options.</p>}
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function AssigneeFilterPill({
+  screen,
+  currentUserId,
+}: {
+  screen: ReturnType<typeof useLeadsScreen>;
+  currentUserId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const { style } = usePortalDropdown({
+    open,
+    setOpen,
+    triggerRef: buttonRef,
+    menuRef,
+    minWidth: 200,
+  });
+
+  const selectedOwner = screen.filters.owner;
+  const isOnlyMe = Boolean(selectedOwner && currentUserId && selectedOwner === currentUserId);
+  const matchedUser = screen.userOptions.find((u) => u.value === selectedOwner);
+  const label = isOnlyMe ? "Only Me" : matchedUser ? matchedUser.label : selectedOwner ? "1 selected" : "Only Me";
+  const isSelected = Boolean(selectedOwner);
+
+  return (
+    <div className="lead-filter-pill-wrap">
+      <button
+        ref={buttonRef}
+        className={`lead-filter-pill lead-filter-pill--me${isSelected ? " is-selected" : ""}${open ? " active" : ""}`}
+        type="button"
+        aria-label="Assignee filter"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <User size={13} aria-hidden="true" />
+        <span>{label}</span>
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div ref={menuRef} className="lead-portal-dropdown-menu" role="menu" style={style}>
+            <button
+              type="button"
+              role="menuitem"
+              className={!selectedOwner ? "is-active" : ""}
+              onClick={() => {
+                screen.updateFilter("owner", "");
+                setOpen(false);
+              }}
+            >
+              All Assignees
+            </button>
+            {currentUserId && (
+              <button
+                type="button"
+                role="menuitem"
+                className={isOnlyMe ? "is-active" : ""}
+                onClick={() => {
+                  screen.updateFilter("owner", currentUserId);
+                  setOpen(false);
+                }}
+              >
+                Only Me
+              </button>
+            )}
+            {screen.userOptions
+              .filter((u) => u.value !== currentUserId)
+              .map((u) => (
+                <button
+                  key={u.value}
+                  type="button"
+                  role="menuitem"
+                  className={selectedOwner === u.value ? "is-active" : ""}
+                  onClick={() => {
+                    screen.updateFilter("owner", u.value);
+                    setOpen(false);
+                  }}
+                >
+                  {u.label}
+                </button>
+              ))}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function DateRangeFilterPill() {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const { style } = usePortalDropdown({
+    open,
+    setOpen,
+    triggerRef: buttonRef,
+    menuRef,
+    minWidth: 180,
+  });
+
+  const [dateLabel, setDateLabel] = useState("Apr 1 – Oct 21");
+
+  return (
+    <div className="lead-filter-pill-wrap">
+      <button
+        ref={buttonRef}
+        className={`lead-filter-pill lead-filter-pill--date${open ? " active" : ""}`}
+        type="button"
+        aria-label="Date range filter"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Calendar size={13} aria-hidden="true" />
+        <span>{dateLabel}</span>
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div ref={menuRef} className="lead-portal-dropdown-menu" role="menu" style={style}>
+            {["Apr 1 – Oct 21", "All Time", "Today", "Last 7 Days", "Last 30 Days", "This Month"].map((range) => (
+              <button
+                key={range}
+                type="button"
+                role="menuitem"
+                className={dateLabel === range ? "is-active" : ""}
+                onClick={() => {
+                  setDateLabel(range);
+                  setOpen(false);
+                }}
+              >
+                {range}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function LeadGroupByDropdown({
+  groupByOpen,
+  setGroupByOpen,
+}: {
+  groupByOpen: boolean;
+  setGroupByOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const { style } = usePortalDropdown({
+    open: groupByOpen,
+    setOpen: (val) => setGroupByOpen(val),
+    triggerRef: buttonRef,
+    menuRef,
+    minWidth: 170,
+  });
+
+  return (
+    <div className="lead-group-by-wrap">
+      <button
+        ref={buttonRef}
+        className="leads-button secondary lead-group-by-button"
+        type="button"
+        aria-expanded={groupByOpen}
+        aria-haspopup="menu"
+        onClick={() => setGroupByOpen((open) => !open)}
+      >
+        <SlidersHorizontal size={14} aria-hidden="true" />
+        <span>Group By</span>
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+      {groupByOpen &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="lead-group-by-menu lead-portal-dropdown-menu"
+            role="menu"
+            style={style}
+          >
+            <button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>
+              No grouping
+            </button>
+            <button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>
+              Owner
+            </button>
+            <button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>
+              Lead source
+            </button>
+            <button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>
+              Stage
+            </button>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function LeadToolbarRowsDropdown({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const { style } = usePortalDropdown({
+    open,
+    setOpen,
+    triggerRef: buttonRef,
+    menuRef,
+    minWidth: 70,
+  });
+
+  const currentLabel = options.find((o) => o.value === value)?.label || value;
+
+  return (
+    <div className="lead-toolbar-rows-wrap">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="lead-control lead-toolbar-rows-btn"
+        aria-label="Rows per page"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span>{currentLabel}</span>
+        <ChevronDown size={12} aria-hidden="true" />
+      </button>
+      {open &&
+        createPortal(
+          <div ref={menuRef} className="lead-portal-dropdown-menu lead-rows-portal-menu" role="listbox" style={style}>
+            {options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                className={option.value === value ? "is-active" : ""}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function InlineTablePortalSelect({
+  ariaLabel,
+  value,
+  options,
+  disabled,
+  placeholder,
+  onChange,
+}: {
+  ariaLabel: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const { style } = usePortalDropdown({
+    open,
+    setOpen,
+    triggerRef: buttonRef,
+    menuRef,
+    minWidth: 140,
+  });
+
+  const selectedOption = options.find((opt) => opt.value === value);
+  const displayLabel = selectedOption ? selectedOption.label : value ? value : (placeholder || "Select");
+
+  return (
+    <div className="lead-table-portal-select-host" data-lead-row-no-drag="true">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="lead-table-field-select"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        disabled={disabled}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!disabled) setOpen((current) => !current);
+        }}
+      >
+        <span className="lead-table-select-label">{displayLabel}</span>
+        <ChevronDown size={11} className="lead-table-select-chevron" aria-hidden="true" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="lead-portal-dropdown-menu lead-table-portal-menu"
+            role="listbox"
+            style={style}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {options.map((option) => (
+              <button
+                key={option.value || "empty"}
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                className={`lead-table-portal-option${option.value === value ? " is-active" : ""}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
 
 function SavedFiltersPicker({ screen }: { screen: ReturnType<typeof useLeadsScreen> }) {
   const [open, setOpen] = useState(false);
@@ -255,43 +1099,43 @@ function TableSelectAllCheckbox({
   );
 }
 
-function CallIcon({ color = "var(--red)" }: { color?: string }) {
+function CallIcon({ color = "currentColor" }: { color?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
     </svg>
   );
 }
 
-function EmailIcon({ color = "var(--red)" }: { color?: string }) {
+function EmailIcon({ color = "currentColor" }: { color?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <rect width="20" height="16" x="2" y="4" rx="2" />
       <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
     </svg>
   );
 }
 
-function WhatsAppIcon({ color = "#25D366" }: { color?: string }) {
+function WhatsAppIcon({ color = "currentColor" }: { color?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
     </svg>
   );
 }
 
-function NoteIcon({ color = "var(--red)" }: { color?: string }) {
+function NoteIcon({ color = "currentColor" }: { color?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
     </svg>
   );
 }
 
-function CalendarIcon({ color = "var(--red)" }: { color?: string }) {
+function CalendarIcon({ color = "currentColor" }: { color?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
       <line x1="16" x2="16" y1="2" y2="6" />
       <line x1="8" x2="8" y1="2" y2="6" />
@@ -554,8 +1398,40 @@ function LegacyLeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel
   const text = (key: string, label: string, required = false, type = "text", placeholder?: string) => configuredByKey.get(key)?.type === "dropdown" ? dropdown(key, label, required) : <label className="lead-form-field"><span>{label}{required && <b> *</b>}</span><input className="lead-control" required={required} type={type} value={form[key] || ""} placeholder={placeholder} onChange={(event) => update(key, event.target.value)} />{errors[key] && <small className="lead-form-error">{errors[key]}</small>}</label>;
   const area = (key: string, label: string) => <label className="lead-form-field lead-form-wide"><span>{label}</span><textarea className="lead-control" value={form[key] || ""} onChange={(event) => update(key, event.target.value)} /></label>;
   const yesNo = (key: string, label: string) => configuredByKey.get(key)?.type === "dropdown" ? dropdown(key, label) : <label className="lead-form-field"><span>{label}</span><select className="lead-control" value={form[key] || ""} onChange={(event) => update(key, event.target.value)}><option value="No">No</option><option value="Yes">Yes</option></select></label>;
-  const date = (key: string, label: string) => text(key, label, false, "date");
-  const dateTime = (key: string, label: string) => text(key, label, false, "datetime-local");
+  const date = (key: string, label: string) => (
+    <div className="lead-form-field" key={key}>
+      <span>{label}</span>
+      <DatePicker
+        value={form[key] || ""}
+        onChange={(val) => update(key, val)}
+      />
+      {errors[key] && <small className="lead-form-error">{errors[key]}</small>}
+    </div>
+  );
+  const dateTime = (key: string, label: string) => {
+    const rawVal = form[key] || "";
+    const [datePart, timePart] = rawVal.includes("T") ? rawVal.split("T") : [rawVal, ""];
+    return (
+      <div className="lead-form-field" key={key}>
+        <span>{label}</span>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+          <DatePicker
+            value={datePart || ""}
+            onChange={(nextDate) => {
+              update(key, nextDate ? (timePart ? `${nextDate}T${timePart}` : nextDate) : "");
+            }}
+          />
+          <TimePicker
+            value={timePart || ""}
+            onChange={(nextTime) => {
+              const d = datePart || getTodayString();
+              update(key, nextTime ? `${d}T${nextTime}` : datePart || "");
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
   const additionalFields = leadFields.filter((field) => field.active && !Object.prototype.hasOwnProperty.call(EMPTY_LEAD_FORM, field.key));
   return <form className="lead-structured-form" onSubmit={onSubmit}>
     <section className="lead-form-section"><h3>Basic details</h3><div className="lead-form-grid">{text("lead_no", "Lead No")} {date("lead_acquisition_date", "Lead Acquisition Date")} {text("first_name", "First Name")} {text("last_name", "Last Name")} {text("company", "Company Name")} {text("phone", "Cell No", true, "tel")} {text("email", "Email ID", false, "email")} {text("designation", "Designation")} {text("business_category", "Business Category")} {text("nature_of_business", "Nature of Business")} {text("proposed_solution", "Proposed Solution")}</div></section>
@@ -563,7 +1439,7 @@ function LegacyLeadForm({ form, setForm, errors, onSubmit, onCancel, submitLabel
     <section className="lead-form-section"><h3>Calling details</h3><div className="lead-form-grid">{dateTime("last_called_on", "Last Called On")}<label className="lead-form-field"><span>Calling Resolution</span><select className="lead-control" value={form.calling_resolution} onChange={(event) => update("calling_resolution", event.target.value)}><option value="">Select resolution</option><option>Connected</option><option>Not reachable</option><option>Follow-up required</option><option>Wrong number</option></select></label>{dateTime("next_call_on", "Next Call On")}{area("calling_remarks", "Calling Remarks")}</div></section>
     <section className="lead-form-section"><h3>Outreach tracking</h3><div className="lead-form-grid">{yesNo("intro_video_sent", "2 Mins Intro Video Sent")} {yesNo("email_sent", "Email Sent")} {yesNo("whatsapp_message_sent", "Msg Sent on WhatsApp")}</div></section>
     <section className="lead-form-section"><h3>Other</h3><div className="lead-form-grid">{area("extra_notes", "Extra Notes")}</div></section>
-    {additionalFields.length > 0 && <section className="lead-form-section"><h3>Additional details</h3><div className="lead-form-grid">{additionalFields.map((field) => field.type === "dropdown" ? <span key={field.key}>{dropdown(field.key, field.label)}</span> : field.type === "boolean" ? <label className="lead-form-field" key={field.key}><span>{field.label}</span><select className="lead-control" value={form[field.key] || ""} onChange={(event) => update(field.key, event.target.value)}><option value="">Select</option><option value="Yes">Yes</option><option value="No">No</option></select></label> : field.type === "textarea" ? <span key={field.key}>{area(field.key, field.label)}</span> : <span key={field.key}>{text(field.key, field.label, false, field.type === "date" ? "date" : field.type === "email" ? "email" : field.type === "phone" ? "tel" : field.type === "url" ? "url" : "text")}</span>)}</div></section>}
+    {additionalFields.length > 0 && <section className="lead-form-section"><h3>Additional details</h3><div className="lead-form-grid">{additionalFields.map((field) => field.type === "dropdown" ? <span key={field.key}>{dropdown(field.key, field.label)}</span> : field.type === "boolean" ? <label className="lead-form-field" key={field.key}><span>{field.label}</span><select className="lead-control" value={form[field.key] || ""} onChange={(event) => update(field.key, event.target.value)}><option value="">Select</option><option value="Yes">Yes</option><option value="No">No</option></select></label> : field.type === "textarea" ? <span key={field.key}>{area(field.key, field.label)}</span> : field.type === "date" ? <span key={field.key}>{date(field.key, field.label)}</span> : <span key={field.key}>{text(field.key, field.label, false, field.type === "email" ? "email" : field.type === "phone" ? "tel" : field.type === "url" ? "url" : "text")}</span>)}</div></section>}
     {error && <p className="lead-form-error" role="alert">{error}</p>}{success && <p className="lead-form-success" role="status">{success}</p>}
     <div className="lead-form-actions"><button className="leads-button" type="submit" disabled={saving}>{saving ? "Saving…" : submitLabel}</button>{onCancel && <button className="leads-button secondary" type="button" onClick={onCancel} disabled={saving}>Cancel</button>}</div>
   </form>;
@@ -636,8 +1512,28 @@ function InlineLeadCell({ lead, column, canEdit, dropdownOptions, onSave }: { le
     } else if (column.input === "dropdown" || column.input === "boolean") {
       const options = column.input === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(dropdownOptions[column.dropdown || ""] || [])];
       control = <select {...inputProps}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+    } else if (column.input === "datetime") {
+      const rawVal = value || "";
+      const [dPart, tPart] = rawVal.includes("T") ? rawVal.split("T") : [rawVal, ""];
+      control = (
+        <span style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+          <input
+            type="date"
+            value={dPart}
+            className="inline-edit-input"
+            onChange={(e) => setValue(e.target.value ? (tPart ? `${e.target.value}T${tPart}` : e.target.value) : "")}
+          />
+          <TimePicker
+            value={tPart}
+            onChange={(nextTime) => {
+              const d = dPart || new Date().toISOString().split("T")[0];
+              setValue(nextTime ? `${d}T${nextTime}` : dPart);
+            }}
+          />
+        </span>
+      );
     } else {
-      control = <input {...inputProps} type={column.input === "phone" || column.input === "email" ? column.input : column.input === "date" ? "date" : column.input === "datetime" ? "datetime-local" : "text"} />;
+      control = <input {...inputProps} type={column.input === "phone" || column.input === "email" ? column.input : column.input === "date" ? "date" : "text"} />;
     }
     return (
       <span className="inline-edit-wrap" ref={wrapRef}>
@@ -1229,7 +2125,8 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   // These are aggregate counts from the API with the selected resolution chip
   // excluded, so selecting one chip does not make every other chip show zero.
   const callResolutionCounts = new Map<string, number>(Object.entries(screen.data?.call_resolution_counts || {}).map(([resolution, count]) => [resolution, Number(count) || 0]));
-  function applyCallResolutionFilter(value: string) {
+  function applyCallResolutionFilter(value: string, event?: React.MouseEvent<HTMLButtonElement>) {
+    event?.currentTarget.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
     screen.updateManagedFilter("calling_resolution", selectedCallResolutions.includes(value)
       ? selectedCallResolutions.filter((selected) => selected !== value)
       : [...selectedCallResolutions, value]);
@@ -1239,32 +2136,38 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   }
   function renderLeadTableField(lead: Lead, field: LeadColumn) {
     const displayKey = field.displayKey || field.key;
-    if (displayKey === "name") return <><strong>{displayField(fieldValue(lead, displayKey))}</strong><small>{displayField(lead.email)}</small></>;
+    if (displayKey === "name") return <span className="lead-table-name-wrap"><strong>{displayField(fieldValue(lead, displayKey))}</strong></span>;
+    if (displayKey === "company") return <span className="lead-table-client-text">{displayField(fieldValue(lead, displayKey) || "Altus Corp")}</span>;
+    if (displayKey === "created_at" || displayKey === "age") return <span className="lead-table-age-text">{leadAgeDays(fieldValue(lead, displayKey))}</span>;
+    if (displayKey === "next_call_on" || displayKey === "pso_date" || displayKey === "target_date") return <span className="lead-table-date-text">{formatReferenceDate(fieldValue(lead, displayKey))}</span>;
     const configuredKey = canonicalManagedFieldKey(field.key);
     if (configuredKey === "proposed_solution") {
       const value = String(fieldValue(lead, displayKey) || "");
       const productOptions = screen.products.map((product) => ({ value: product.code, label: product.label }));
       const options = value && !productOptions.some((option) => option.value === value) ? [{ value, label: value }, ...productOptions] : productOptions;
-      return <select className="lead-table-field-select" aria-label={`Change proposed solution for ${lead.name}`} value={value} disabled={!screen.canEdit} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, configuredKey, event.target.value).catch(() => undefined); }}><option value="">Select product</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+      return <InlineTablePortalSelect ariaLabel={`Change proposed solution for ${lead.name}`} value={value} disabled={!screen.canEdit} placeholder="Select product" options={[{ value: "", label: "Select product" }, ...options]} onChange={(val) => { void screen.updateLeadField(lead.id, configuredKey, val).catch(() => undefined); }} />;
     }
     if (field.key === "stage") {
       const proposedSolution = String(fieldValue(lead, "proposed_solution") || "");
       const stageOptions = resolutionProductCodesForProposedSolution(proposedSolution, screen.products).flatMap((code) => stagesByProductCode[code] || []).filter((option, index, options) => options.findIndex((candidate) => candidate.value === option.value) === index);
       const value = String(fieldValue(lead, "stage") || "");
-      return <select className="lead-table-field-select" aria-label={`Change stage for ${lead.name}`} value={stageOptions.some((option) => option.value === value) ? value : ""} disabled={!screen.canEdit || !stageOptions.length} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateProductStage(lead.id, event.target.value).catch(() => undefined); }}><option value="">{stageOptions.length ? "Select stage" : "Select a product first"}</option>{stageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
+      const placeholder = stageOptions.length ? "Select stage" : "Select a product first";
+      return <InlineTablePortalSelect ariaLabel={`Change stage for ${lead.name}`} value={stageOptions.some((option) => option.value === value) ? value : ""} disabled={!screen.canEdit || !stageOptions.length} placeholder={placeholder} options={[{ value: "", label: placeholder }, ...stageOptions]} onChange={(val) => { void screen.updateProductStage(lead.id, val).catch(() => undefined); }} />;
     }
     const configured = configuredFieldsByKey.get(configuredKey);
     const isCallingResolution = configuredKey === "calling_resolution";
-    if (!isCallingResolution && !isInlineTableSelectField(configured)) return displayField(fieldValue(lead, displayKey));
+    if (!isCallingResolution && !isInlineTableSelectField(configured)) {
+      const val = fieldValue(lead, displayKey);
+      if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return <span className="lead-table-date-text">{formatReferenceDate(val)}</span>;
+      return displayField(val);
+    }
     const currentValue = fieldValue(lead, displayKey);
     const proposedSolution = String(fieldValue(lead, "proposed_solution") || "");
     const productOptions = configuredKey === "calling_resolution" ? callResolutionOptionsForProposedSolution(proposedSolution, screen.products, callResolutionsByProductCode) : [];
     const baseOptions = configured?.type === "boolean" ? [{ value: "", label: "—" }, { value: "true", label: "Yes" }, { value: "false", label: "No" }] : [{ value: "", label: "—" }, ...(productOptions.length ? productOptions : (configured?.options || []).map((option) => ({ value: option, label: option })))];
     const value = configured?.type === "boolean" ? currentValue === true ? "true" : currentValue === false ? "false" : "" : String(currentValue || "");
     const options = productOptions.length ? baseOptions : value && !baseOptions.some((option) => option.value === value) ? [{ value, label: value }, ...baseOptions] : baseOptions;
-    return <select className="lead-table-field-select" aria-label={`Change ${configured?.label || field.label} for ${lead.name}`} value={value} disabled={!screen.canEdit || screen.movingCallResolutionLeadIds.includes(lead.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => { void screen.updateLeadField(lead.id, configuredKey, event.target.value).catch(() => undefined); }}>
-      {options.map((option) => <option key={option.value || "empty"} value={option.value}>{option.label}</option>)}
-    </select>;
+    return <InlineTablePortalSelect ariaLabel={`Change ${configured?.label || field.label} for ${lead.name}`} value={value} disabled={!screen.canEdit || screen.movingCallResolutionLeadIds.includes(lead.id)} placeholder="—" options={options} onChange={(val) => { void screen.updateLeadField(lead.id, configuredKey, val).catch(() => undefined); }} />;
   }
   const visibleLeadIds = (screen.data?.items || []).map((lead) => lead.id);
   const selectedLeadIdSet = new Set(screen.selectedLeadIds);
@@ -1286,7 +2189,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   function startLeadRowDrag(event: React.DragEvent<HTMLElement>, lead: Lead) { const ids = leadIdsForResolutionDrop(lead.id, selectedIds); setDraggedLeadIds(ids); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-lead-ids", JSON.stringify(ids)); const image = document.createElement("div"); image.className = "lead-row-drag-image"; image.textContent = ids.length === 1 ? String(fieldValue(lead, "name") || "Lead") : `${ids.length} leads`; document.body.appendChild(image); event.dataTransfer.setDragImage(image, 8, 8); window.setTimeout(() => image.remove(), 0); }
   async function dropOnCallingResolution(event: React.DragEvent<HTMLButtonElement>, value: string, label: string, productCode?: string) {
     event.preventDefault();
-    if (!canDropOnResolution(value, productCode)) return;
+    if (!canDropOnResolution(value)) return;
     if (draggedLeadIds.length > LEAD_ROW_DROP_LIMIT) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value, productCode); return; }
     const { moveIds, already } = planResolutionDrop(draggedLeads, value);
     if (!moveIds.length && !productCode) { await screen.moveLeadsToCallingResolution(draggedLeadIds, value); return; }
@@ -1348,9 +2251,19 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
   const detailFieldValue = (key: string) => customLeadFields && Object.prototype.hasOwnProperty.call(customLeadFields, key)
     ? readableDetailValue(key, customLeadFields[key]) : readableDetailValue(key);
   const assignmentHistory = (screen.detail?.history || []).filter((item: any) => ["lead.round_robin_assigned", "lead.owner_changed"].includes(String(item.action)));
-  return <div className={`leads-page${showAddActivityDrawer ? " activity-form-active" : ""}${draggedLeadIds.length ? " is-lead-row-dragging" : ""}`}>
+  const isDetailOpen = Boolean(screen.detail || screen.detailLoading);
+  return <div className={`leads-page${isDetailOpen ? " detail-open" : ""}${showAddActivityDrawer ? " activity-form-active" : ""}${draggedLeadIds.length ? " is-lead-row-dragging" : ""}`}>
     {screen.bulkUploadOpen && <div className="bulk-upload-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeBulkUpload(); }}><section className="bulk-upload-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-upload-title"><div className="drawer-head"><div><p className="eyebrow">Leads</p><h2 id="bulk-upload-title">Bulk upload leads</h2></div><button className="icon-button" type="button" onClick={screen.closeBulkUpload} aria-label="Close bulk upload">×</button></div><p>Upload a CSV or .xlsx file. Preview validates the file before anything is written.</p><ol className="bulk-upload-steps"><li>Download sample file</li><li>Fill in your leads (replace the example rows or keep them to test)</li><li>Choose your file and upload</li></ol><div className="bulk-upload-downloads"><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("xlsx")}>Download sample file</button><button className="leads-button secondary" type="button" onClick={() => void screen.downloadBulkTemplate("csv")}>Download CSV sample</button></div><label className="bulk-upload-file">Choose file<input type="file" accept=".csv,.xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void screen.previewBulkUpload(file); }} /></label><label className="bulk-upload-checkbox"><input type="checkbox" checked={screen.bulkAllowDuplicates} onChange={(event) => screen.setBulkAllowDuplicates(event.target.checked)} /> Import possible duplicates anyway</label>{screen.bulkLoading && <div className="lead-state">Reading file…</div>}{screen.bulkError && <div className="lead-state error" role="alert">{screen.bulkError}</div>}{screen.bulkPreview && <div className="bulk-upload-preview"><p><strong>{screen.bulkPreview.total_rows}</strong> rows · <strong>{screen.bulkPreview.valid}</strong> valid · <strong>{screen.bulkPreview.errors}</strong> errors · <strong>{screen.bulkPreview.possible_duplicates}</strong> possible duplicates</p>{screen.bulkPreview.sheet_note && <p>{screen.bulkPreview.sheet_note}</p>}{screen.bulkPreview.ignored_columns.length > 0 && <p>Ignored columns: {screen.bulkPreview.ignored_columns.join(", ")}</p>}{screen.bulkPreview.duplicate_rows.length > 0 && <div className="bulk-upload-errors"><strong>Possible duplicates</strong>{screen.bulkPreview.duplicate_rows.map((item) => <div key={item.row}>Row {item.row}: {item.reason || "possible duplicate"}</div>)}</div>}{screen.bulkPreview.error_rows.length > 0 && <div className="bulk-upload-errors"><strong>Errors</strong>{screen.bulkPreview.error_rows.map((item) => <div key={item.row}>Row {item.row}: {item.errors.join("; ")}</div>)}</div>}{screen.bulkPreview.preview_rows.length > 0 && <div className="bulk-upload-sample"><strong>First valid rows</strong>{screen.bulkPreview.preview_rows.slice(0, 20).map((row) => <div key={String(row.row)}>{String(row.row)} · {String(row.name || "")}{row.email ? ` · ${String(row.email)}` : ""}</div>)}</div>}<button className="leads-button" type="button" disabled={!screen.bulkPreview.can_apply || screen.bulkLoading} onClick={() => void screen.applyBulkUpload()}>Apply import</button></div>}{screen.bulkResult && <div className="bulk-upload-result" role="status">Created: {screen.bulkResult.created}; skipped duplicates: {screen.bulkResult.skipped_duplicates}; skipped errors: {screen.bulkResult.skipped_errors}; import run: {screen.bulkResult.import_run_id}</div>}</section></div>}
-    <header className="leads-header manage-header"><div className="lead-managed-filter-row" aria-label="Lead filters">{screen.managedFilterDropdowns.map((dropdown) => <ManagedFilterMultiSelect key={dropdown.id} dropdown={dropdown} values={screen.managedFilters[dropdown.key] || []} onChange={(values) => screen.updateManagedFilter(dropdown.key, values)} />)}</div></header>
+    <header className="leads-header manage-header">
+      <div className="lead-managed-filter-row" aria-label="Lead filters">
+        <DateRangeFilterPill />
+        <AssigneeFilterPill screen={screen} currentUserId={user?.id} />
+        {screen.managedFilterDropdowns.map((dropdown) => <ManagedFilterMultiSelect key={dropdown.id} dropdown={dropdown} values={screen.managedFilters[dropdown.key] || []} onChange={(values) => screen.updateManagedFilter(dropdown.key, values)} />)}
+        <button className="lead-filter-pill lead-filter-search-btn" type="button" aria-label="Search filters" title="Search">
+          <Search size={14} aria-hidden="true" />
+        </button>
+      </div>
+    </header>
     {/* {screen.newLeadOpen && <div className="lead-edit-form-host"><LeadForm form={screen.newLeadForm} onCancel={screen.closeNewLead} /></div>} */}
     {screen.newLeadOpen && <div className="new-lead-modal-backdrop" role="presentation"><section className="new-lead-modal" ref={newLeadDialogRef} role="dialog" aria-modal="true" aria-labelledby="new-lead-modal-title" tabIndex={-1} onInputCapture={() => { newLeadUserTouchedRef.current = true; }} onChangeCapture={() => { newLeadUserTouchedRef.current = true; }}><div className="new-lead-modal-header"><h2 id="new-lead-modal-title">New lead</h2><button className="icon-button" type="button" onClick={requestNewLeadClose} aria-label="Close new lead form"><CloseIcon /></button></div><LeadForm form={screen.newLeadForm} setForm={screen.setNewLeadForm} errors={screen.formErrors} onSubmit={(event) => void screen.createNewLead(event)} onCancel={requestNewLeadClose} submitLabel="Save Lead" leadFields={screen.leadFields} leadTypeOptions={screen.dropdownOptions.leadType} permissionOptions={screen.dropdownOptions.permission} /></section></div>}
     {quickAddOpen && <div className="quick-add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) screen.closeNewLead(); }}><div className="quick-add-modal" aria-labelledby="quick-add-title">
@@ -1488,7 +2401,10 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
           <button
             type="button"
             className={!selectedCallResolutions.length ? "call-resolution-chip call-resolution-chip-total selected" : "call-resolution-chip call-resolution-chip-total"}
-            onClick={() => screen.updateManagedFilter("calling_resolution", [])}
+            onClick={(event) => {
+              event.currentTarget.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+              screen.updateManagedFilter("calling_resolution", []);
+            }}
           >
             <span className="call-resolution-dot" />
             <strong>{screen.data.total}</strong>
@@ -1502,11 +2418,11 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
               key={option.id || option.value}
               type="button"
               className={`${selectedCallResolutions.includes(option.value) ? "call-resolution-chip selected" : "call-resolution-chip"} tone-${index % 9}${isDropTarget ? " is-drop-target" : ""}${activeResolutionDrop === option.value ? " is-drop-active" : ""}${isNoDrop ? " is-drop-unavailable" : ""}`}
-              onClick={() => applyCallResolutionFilter(option.value)}
+              onClick={(event) => applyCallResolutionFilter(option.value, event)}
               onDragOver={(event) => { if (!isDropTarget) { event.dataTransfer.dropEffect = "none"; return; } event.preventDefault(); event.dataTransfer.dropEffect = "move"; setActiveResolutionDrop(option.value); }}
               onDragEnter={() => { if (isDropTarget) setActiveResolutionDrop(option.value); }}
               onDragLeave={() => setActiveResolutionDrop((current) => current === option.value ? null : current)}
-              onDrop={(event) => { void dropOnCallingResolution(event, option.value, option.label, productCode); }}
+              onDrop={(event) => { void dropOnCallingResolution(event, option.value, option.label); }}
             >
               <span className="call-resolution-dot" />
               <strong>{callResolutionCounts.get(option.value) || 0}</strong>
@@ -1524,7 +2440,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         </button>
       </div>
       <div className="product-stage-summary system-work-queue-summary" aria-label="My lead queues"><span>My lead queues</span><div className="system-work-queue-toggle"><button type="button" className={screen.filters.work_queue === "lead_master" ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.chooseWorkQueue("lead_master")}>Lead Master</button><button type="button" className={screen.filters.work_queue === "focused_calling" ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => screen.chooseWorkQueue("focused_calling")}>Focussed Calling</button></div>{selectedProductCodes.length > 0 && <>{productStageOptions.map((stage) => <button key={stage.id} type="button" className={selectedProductStages.includes(stage.label) ? "product-stage-chip selected" : "product-stage-chip"} onClick={() => applyProductStageFilter(stage.label)}>{stage.label}</button>)}{!productStageOptions.length && <span className="product-stage-empty">No active stages for this product.</span>}</>}</div>
-      <div className="lead-table-toolbar"><div className="lead-group-by-wrap"><button className="leads-button secondary lead-group-by-button" type="button" aria-expanded={groupByOpen} onClick={() => setGroupByOpen((open) => !open)}>⌘ <span>Group By</span>⌄</button>{groupByOpen && <div className="lead-group-by-menu" role="menu"><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>No grouping</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Owner</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Lead source</button><button type="button" role="menuitem" onClick={() => setGroupByOpen(false)}>Stage</button></div>}</div><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><DropdownSelect dropdownKey="page_size" options={screen.dropdownOptions.pageSize} className="lead-control" aria-label="Rows per page" value={String(screen.pageSize)} onValueChange={screen.changePageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button ref={columnChooserButtonRef} className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="dialog" aria-controls="lead-column-chooser-dialog" onClick={() => columnChooserOpen ? closeColumnChooser() : setColumnChooserOpen(true)}>☷ <span>Columns</span></button>{hasUnsavedLayoutChanges && !columnChooserOpen && <span className="lead-column-layout-unsaved" role="status">Unsaved changes</span>}</div>{columnChooserOpen && createPortal(<div id="lead-column-chooser-dialog" ref={columnChooserMenuRef} className="lead-column-menu" role="dialog" aria-label="Choose columns" aria-modal="true" style={columnChooserPosition} onKeyDown={handleColumnChooserKeyDown}>
+      <div className="lead-table-toolbar" style={isDetailOpen ? { visibility: "hidden", pointerEvents: "none" } : undefined} inert={isDetailOpen ? true : undefined}><LeadGroupByDropdown groupByOpen={groupByOpen} setGroupByOpen={setGroupByOpen} /><div className="lead-table-toolbar-right"><span className="lead-table-count-pill">All ({screen.data.total})</span><span>Showing {screen.data.total === 0 ? 0 : (screen.page - 1) * (screen.data.page_size || 50) + 1}–{Math.min(screen.page * (screen.data.page_size || 50), screen.data.total)} of {screen.data.total}</span><label className="lead-toolbar-rows"><span>Rows</span><LeadToolbarRowsDropdown value={String(screen.pageSize)} onChange={screen.changePageSize} options={screen.dropdownOptions.pageSize} /></label><span>Page</span><button className="lead-toolbar-page" type="button" disabled={screen.page <= 1} onClick={screen.previousPage}>‹</button><span className="lead-toolbar-page-number">{screen.page}</span><span>of {screen.totalPages}</span><button className="lead-toolbar-page" type="button" disabled={screen.page >= screen.totalPages} onClick={screen.nextPage}>›</button><div className="lead-column-chooser"><button ref={columnChooserButtonRef} className="leads-button secondary lead-toolbar-columns" type="button" aria-expanded={columnChooserOpen} aria-haspopup="dialog" aria-controls="lead-column-chooser-dialog" onClick={() => columnChooserOpen ? closeColumnChooser() : setColumnChooserOpen(true)}><Columns size={14} aria-hidden="true" /> <span>Columns</span></button>{hasUnsavedLayoutChanges && !columnChooserOpen && <span className="lead-column-layout-unsaved" role="status">Unsaved changes</span>}</div>{columnChooserOpen && createPortal(<div id="lead-column-chooser-dialog" ref={columnChooserMenuRef} className="lead-column-menu" role="dialog" aria-label="Choose columns" aria-modal="true" style={columnChooserPosition} onKeyDown={handleColumnChooserKeyDown}>
               <div className="col-menu-search-wrap">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 <input ref={columnChooserSearchRef} className="col-menu-search" type="text" placeholder="Search columns..." value={columnSearch} onChange={(e) => setColumnSearch(e.target.value)} />
@@ -1554,7 +2470,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                  <div className="col-menu-footer-secondary"><button type="button" className="col-menu-reset" onClick={resetColumnSelection}>Reset to default</button><button type="button" className="col-menu-reset" onClick={resizableColumns.resetAll}>Reset column widths</button></div>
                </div>
             </div>, document.body)}</div></div>{(screen.selectAllView || screen.selectedLeadIds.length > 0) && (
-      <div className="lead-selection-bar" role="status" aria-live="polite">
+      <div className="lead-selection-bar" role="status" aria-live="polite" style={isDetailOpen ? { visibility: "hidden", pointerEvents: "none" } : undefined} inert={isDetailOpen ? true : undefined}>
         <span className="lead-selection-count">
           {screen.selectAllView ? (
             <>All <strong>{visibleLeadIds.length}</strong> visible leads selected</>
@@ -1564,7 +2480,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
         </span>
         <div className="lead-selection-actions">{screen.canDelete && <><button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={archiveSelectedLeads}>Archive selected</button><button type="button" className="leads-button lead-selection-delete-btn" onClick={deleteSelectedLeads}>Delete permanently</button></>}<button type="button" className="leads-button secondary lead-selection-clear-btn" onClick={screen.clearSelection}>Deselect all</button></div>
       </div>
-    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" style={{ width: `${LEAD_TABLE_SELECTION_COLUMN_WIDTH}px` }} />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectionSticky={hasPinnedColumns} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} pinControl={pinControl(field)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{pinControl(field)}{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} canContact={canQuickContact} selectionSticky={hasPinnedColumns} pinnedCellStyle={pinnedCellStyle} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div></>}
+    )}<div className="lead-column-order-announcement" role="status" aria-live="polite">{columnOrderAnnouncement}</div><div className="lead-table-wrap" ref={tableWrapRef} style={isDetailOpen ? { visibility: "hidden", pointerEvents: "none" } : undefined} inert={isDetailOpen ? true : undefined}><div className="lead-column-resize-guide" aria-hidden="true" /><table className="lead-table" style={{ width: `${Math.max(940, leadTableWidth)}px` }}><colgroup><col className="lead-table-checkbox-col" style={{ width: `${LEAD_TABLE_SELECTION_COLUMN_WIDTH}px` }} />{fields.map((field) => <col key={field.key} style={{ width: `${resizableColumns.widthFor(field.key)}px` }} />)}<col style={{ width: `${resizableColumns.widthFor("lead_status")}px` }} /></colgroup><LeadTableHeader fields={fields} selectionSticky={hasPinnedColumns} selectAll={<TableSelectAllCheckbox checked={isAllSelected} indeterminate={isSomeSelected} onChange={() => screen.toggleSelectAll(visibleLeadIds)} ariaLabel="Select all leads" />} renderFieldHeader={(field) => { const sortKey = configuredFieldsByKey.has(field.key) ? LEAD_SORT_KEYS[field.displayKey || field.key] || `configured:${field.key}` : LEAD_SORT_KEYS[field.displayKey || field.key] || LEAD_SORT_KEYS[field.key]; const onSort = (key: string) => { if (suppressHeaderSortClickRef.current) { suppressHeaderSortClickRef.current = false; return; } screen.changeSort(key); }; return sortKey ? <SortableLeadHeader key={field.key} label={field.label} sortKey={sortKey} sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={onSort} headerProps={headerProps(field.key)} pinControl={pinControl(field)} resizeHandle={resizeHandle(field.key, field.label)} /> : <th key={field.key} scope="col" {...headerProps(field.key)}><span className="lead-header-label">{field.label}</span>{pinControl(field)}{resizeHandle(field.key, field.label)}</th>; }} statusHeader={<SortableLeadHeader label="Status" sortKey="lead_status" sortBy={screen.sortBy} sortDir={screen.sortDir} onSort={screen.changeSort} headerProps={{ className: "lead-column-header" }} resizeHandle={resizeHandle("lead_status", "Status")} />} /><tbody>{screen.data.items.map((lead) => { const isSelected = screen.selectAllView || selectedLeadIdSet.has(lead.id); const statusOptions = screen.statusOptions.includes(lead.lead_status as (typeof screen.statusOptions)[number]) ? screen.statusOptions : [lead.lead_status || "", ...screen.statusOptions.filter(Boolean)]; const moving = screen.movingCallResolutionLeadIds.includes(lead.id); return <LeadTableRow key={lead.id} lead={lead} fields={fields} isSelected={isSelected} moving={moving} onOpen={() => void screen.openDetail(lead.id)} onSelect={() => screen.toggleSelectLead(lead.id, visibleLeadIds)} renderField={renderLeadTableField} statusOptions={statusOptions} statusUpdating={screen.statusUpdatingId === lead.id} onStatusChange={(value) => void screen.updateLeadStatus(lead.id, value)} canDrag={screen.canEdit} canContact={canQuickContact} selectionSticky={hasPinnedColumns} pinnedCellStyle={pinnedCellStyle} onDragStart={startLeadRowDrag} onDragEnd={() => { setDraggedLeadIds([]); setActiveResolutionDrop(null); }} />; })}</tbody></table></div><div className="lead-table-bottom-bar" style={isDetailOpen ? { visibility: "hidden", pointerEvents: "none" } : undefined} inert={isDetailOpen ? true : undefined}><span>Showing all {screen.data.total} leads</span></div></>}
     {screen.detailLoading && <div className="drawer-backdrop"><aside className="lead-drawer"><div className="drawer-head"><h2>Lead details</h2><button className="icon-button" type="button" onClick={screen.closeDetail} aria-label="Close lead details"><CloseIcon /></button></div><div className="lead-state">Loading…</div></aside></div>}
     {screen.detail && !screen.detailLoading && (
       <div
@@ -1590,7 +2506,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                   <div className="lead-quick-actions-bar lead-detail-quick-actions" aria-label="Quick actions">
                     <button
                       type="button"
-                      className="lead-quick-action-btn"
+                      className="lead-quick-action-btn lead-quick-action-call"
                       disabled={!screen.canLogCall}
                       title={screen.canLogCall ? "Log a call" : screen.callDisabledReason}
                       aria-label={screen.canLogCall ? "Call" : `Call disabled: ${screen.callDisabledReason}`}
@@ -1603,7 +2519,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     </button>
                     <button
                       type="button"
-                      className="lead-quick-action-btn"
+                      className="lead-quick-action-btn lead-quick-action-email"
                       title="Email lead"
                       aria-label="Email"
                       onClick={() => {
@@ -1618,7 +2534,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     </button>
                     <button
                       type="button"
-                      className="lead-quick-action-btn"
+                      className="lead-quick-action-btn lead-quick-action-whatsapp"
                       title="Send WhatsApp message"
                       aria-label="WhatsApp"
                       onClick={() => {
@@ -1635,7 +2551,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     </button>
                     <button
                       type="button"
-                      className="lead-quick-action-btn"
+                      className="lead-quick-action-btn lead-quick-action-doc"
                       title="Add note"
                       aria-label="Note"
                       onClick={() => {
@@ -1646,7 +2562,7 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     </button>
                     <button
                       type="button"
-                      className="lead-quick-action-btn"
+                      className="lead-quick-action-btn lead-quick-action-calendar"
                       title="Follow up"
                       aria-label="Follow-up"
                       onClick={() => {
@@ -1970,13 +2886,22 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                   )}
                   {activityComposer === "call" && (
                     <>
-                      <input
-                        type="datetime-local"
-                        value={screen.activityForm.happened_at}
-                        onChange={(event) =>
-                          screen.setActivityForm((form) => ({ ...form, happened_at: event.target.value }))
-                        }
-                      />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                        <DatePicker
+                          value={screen.activityForm.happened_at.split("T")[0] || ""}
+                          onChange={(newDate) => {
+                            const timePart = screen.activityForm.happened_at.split("T")[1] || "09:00";
+                            screen.setActivityForm((form) => ({ ...form, happened_at: newDate ? `${newDate}T${timePart}` : "" }));
+                          }}
+                        />
+                        <TimePicker
+                          value={screen.activityForm.happened_at.split("T")[1] || ""}
+                          onChange={(newTime) => {
+                            const datePart = screen.activityForm.happened_at.split("T")[0] || getTodayString();
+                            screen.setActivityForm((form) => ({ ...form, happened_at: newTime ? `${datePart}T${newTime}` : "" }));
+                          }}
+                        />
+                      </div>
                       <input
                         type="number"
                         min="0"
@@ -2007,14 +2932,25 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                   )}
                   {activityComposer === "followup" && (
                     <>
-                      <input
-                        required
-                        type="datetime-local"
-                        value={screen.activityForm.due_at}
-                        onChange={(event) =>
-                          screen.setActivityForm((form) => ({ ...form, due_at: event.target.value }))
-                        }
-                      />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                        <DatePicker
+                          required
+                          min={getTodayString()}
+                          value={screen.activityForm.due_at.split("T")[0] || ""}
+                          onChange={(newDate) => {
+                            const timePart = screen.activityForm.due_at.split("T")[1] || "09:00";
+                            screen.setActivityForm((form) => ({ ...form, due_at: newDate ? `${newDate}T${timePart}` : "" }));
+                          }}
+                        />
+                        <TimePicker
+                          required
+                          value={screen.activityForm.due_at.split("T")[1] || ""}
+                          onChange={(newTime) => {
+                            const datePart = screen.activityForm.due_at.split("T")[0] || getTodayString();
+                            screen.setActivityForm((form) => ({ ...form, due_at: newTime ? `${datePart}T${newTime}` : "" }));
+                          }}
+                        />
+                      </div>
                       <textarea
                         maxLength={4000}
                         placeholder="Follow-up note"
@@ -2265,7 +3201,88 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
           )}
 
           {/* Details tab */}
-          {detailTab === "details" && <section className="lead-detail-tab-panel lead-details-tab-panel" id="lead-detail-panel-details" role="tabpanel" aria-label="Lead details"><div className="lead-details-header-row"><h3 className="lead-details-title">Lead details</h3><button className="lead-details-edit-btn" type="button" onClick={screen.beginEdit} disabled={!screen.canEdit}>Edit details</button></div><div className="lead-details-section"><div className="lead-details-grid"><div className="lead-details-item"><span className="lead-details-label">Name</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "name"))}</span></div><div className="lead-details-item"><span className="lead-details-label">Cell No</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "phone"))}</span></div><div className="lead-details-item"><span className="lead-details-label">Lead type</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "lead_type"))}</span></div><div className="lead-details-item"><span className="lead-details-label">Permission To Call</span><span className="lead-details-value">{displayField(fieldValue(selectedLead!, "permission"))}</span></div>{screen.leadFields.filter((field) => field.active && field.detail_visible && !FIXED_LEAD_FORM_KEYS.has(field.key)).map((field) => <div className="lead-details-item" key={field.key}><span className="lead-details-label">{field.label}</span><span className="lead-details-value">{displayConfiguredLeadValue(fieldValue(selectedLead!, field.key), field.type)}</span></div>)}</div></div></section>}
+          {detailTab === "details" && (() => {
+            const rawFields: Array<{ key: string; label: string; type: string; value: unknown; group?: string; category?: string }> = [
+              { key: "name", label: "Name", type: "text", value: fieldValue(selectedLead!, "name") },
+              { key: "phone", label: "Cell No", type: "phone", value: fieldValue(selectedLead!, "phone") },
+              { key: "lead_type", label: "Lead type", type: "text", value: fieldValue(selectedLead!, "lead_type") },
+              { key: "permission", label: "Permission To Call", type: "text", value: fieldValue(selectedLead!, "permission") },
+              ...screen.leadFields
+                .filter((field) => field.active && field.detail_visible && !FIXED_LEAD_FORM_KEYS.has(field.key))
+                .map((field) => ({
+                  key: field.key,
+                  label: field.label,
+                  type: field.type,
+                  value: fieldValue(selectedLead!, field.key),
+                  group: (field as any).group,
+                  category: (field as any).category,
+                })),
+            ];
+
+            const sectionMap = new Map<string, typeof rawFields>();
+            for (const item of rawFields) {
+              const sec = getLeadDetailSection(item.label, item.key, item.group, item.category);
+              if (!sectionMap.has(sec)) sectionMap.set(sec, []);
+              sectionMap.get(sec)!.push(item);
+            }
+
+            const sectionsToRender: Array<{ title: string; fields: typeof rawFields }> = [];
+            for (const title of LEAD_DETAIL_SECTION_ORDER) {
+              const items = sectionMap.get(title);
+              if (items && items.length > 0) {
+                sectionsToRender.push({ title, fields: items });
+              }
+            }
+            for (const [title, items] of sectionMap.entries()) {
+              if (!LEAD_DETAIL_SECTION_ORDER.includes(title as any) && items.length > 0) {
+                sectionsToRender.push({ title, fields: items });
+              }
+            }
+
+            return (
+              <section
+                className="lead-detail-tab-panel lead-details-tab-panel"
+                id="lead-detail-panel-details"
+                role="tabpanel"
+                aria-label="Lead details"
+              >
+                <div className="lead-details-header-row">
+                  <h3 className="lead-details-title">Lead details</h3>
+                  <button
+                    className="lead-details-edit-btn"
+                    type="button"
+                    onClick={screen.beginEdit}
+                    disabled={!screen.canEdit}
+                  >
+                    <Pencil size={15} strokeWidth={1.75} aria-hidden="true" />
+                    <span>Edit details</span>
+                  </button>
+                </div>
+
+                {sectionsToRender.map((section) => (
+                  <div className="lead-details-section-card" key={section.title}>
+                    <h4 className="lead-details-card-title">{section.title}</h4>
+                    <div className="lead-details-grid">
+                      {section.fields.map((field, idx) => {
+                        const isLong = isLongTextLeadField(field.key, field.label, field.type);
+                        return (
+                          <div
+                            className={`lead-details-item${isLong ? " lead-details-item-full" : ""}`}
+                            key={`${field.key}-${idx}`}
+                          >
+                            <span className="lead-details-label">{field.label}</span>
+                            <div className="lead-details-value">
+                              {renderLeadDetailValue(field.value, field.type, field.label)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </section>
+            );
+          })()}
           {false && detailTab === "details" && (
             <section
               className="lead-detail-tab-panel lead-details-tab-panel"
@@ -2868,28 +3885,21 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                         <div className="lead-note-reminder-subrow">
                           <div className="lead-note-reminder-field">
                             <span className="lead-note-sublabel">Reminder date</span>
-                            <div className="lead-note-input-with-icon">
-                              <CalendarIcon color="var(--ink-2)" />
-                              <input
-                                type="date"
-                                className="lead-note-clean-input"
-                                value={reminderDate}
-                                onChange={(e) => setReminderDate(e.target.value)}
-                              />
-                            </div>
+                            <DatePicker
+                              value={reminderDate}
+                              onChange={setReminderDate}
+                              min={getTodayString()}
+                              aria-label="Reminder date"
+                            />
                           </div>
 
                           <div className="lead-note-reminder-field">
                             <span className="lead-note-sublabel">Time</span>
-                            <div className="lead-note-input-with-icon">
-                              <ClockIcon />
-                              <input
-                                type="time"
-                                className="lead-note-clean-input"
-                                value={reminderTime}
-                                onChange={(e) => setReminderTime(e.target.value)}
-                              />
-                            </div>
+                            <TimePicker
+                              value={reminderTime}
+                              onChange={setReminderTime}
+                              aria-label="Reminder time"
+                            />
                           </div>
 
                           <div className="lead-note-reminder-field">
@@ -3113,32 +4123,27 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                         <label className="lead-followup-label" htmlFor="lead-followup-date-input">
                           Date <span className="req">*</span>
                         </label>
-                        <div className="lead-followup-input-icon">
-                          <CalendarIcon color="var(--ink-2)" />
-                          <input
-                            id="lead-followup-date-input"
-                            type="date"
-                            className="lead-followup-clean-input"
-                            value={followUpDate}
-                            onChange={(e) => setFollowUpDate(e.target.value)}
-                          />
-                        </div>
+                        <DatePicker
+                          id="lead-followup-date-input"
+                          value={followUpDate}
+                          onChange={setFollowUpDate}
+                          min={getTodayString()}
+                          required
+                          aria-label="Date"
+                        />
                       </div>
 
                       <div className="lead-followup-field">
                         <label className="lead-followup-label" htmlFor="lead-followup-time-input">
                           Follow-up time <span className="req">*</span>
                         </label>
-                        <div className="lead-followup-input-icon">
-                          <ClockIcon />
-                          <input
-                            id="lead-followup-time-input"
-                            type="time"
-                            className="lead-followup-clean-input"
-                            value={followUpTime}
-                            onChange={(e) => setFollowUpTime(e.target.value)}
-                          />
-                        </div>
+                        <TimePicker
+                          id="lead-followup-time-input"
+                          value={followUpTime}
+                          onChange={setFollowUpTime}
+                          required
+                          aria-label="Follow-up time"
+                        />
                       </div>
                     </div>
 
@@ -3210,27 +4215,17 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                       type="button"
                       className="lead-followup-save-btn"
                       onClick={() => {
-                        if (!followUpNote.trim()) return;
-                        const newFollowUp = {
-                          id: `fu-${Date.now()}`,
-                          dueDate: followUpDate,
-                          dueTime: followUpTime,
-                          status: "Upcoming",
-                          note: followUpNote,
-                          notifyApp: followUpNotifyApp,
-                          notifyEmail: followUpNotifyEmail,
-                          createdAt: "Just now",
-                        };
-                        setSavedFollowUpsList((prev) => [newFollowUp, ...prev]);
-                        screen.setActivityForm((form) => ({
-                          ...form,
-                          happened_at: `${followUpDate}T${followUpTime}`,
-                          body: followUpNote,
-                        }));
-                        void screen.addActivity("followup");
-                        setFollowUpSavedFeedback(true);
-                        setShowFollowUpForm(false);
-                        setTimeout(() => setFollowUpSavedFeedback(false), 3000);
+                        if (!followUpDate || !followUpTime || !followUpNote.trim()) return;
+                        void (async () => {
+                          const saved = await screen.addActivity("followup", { due_at: `${followUpDate}T${followUpTime}`, note: followUpNote.trim() });
+                          if (!saved) return;
+                          setFollowUpSavedFeedback(true);
+                          setFollowUpDate("");
+                          setFollowUpTime("");
+                          setFollowUpNote("");
+                          setShowFollowUpForm(false);
+                          setTimeout(() => setFollowUpSavedFeedback(false), 3000);
+                        })();
                       }}
                     >
                       Save follow-up
@@ -3513,27 +4508,22 @@ export function LeadsPage({ forcedWorkQueue = "" }: { forcedWorkQueue?: "lead_ma
                     </div>
                     <div className="lead-add-activity-task-col">
                       <span className="lead-add-activity-sublabel">Due date <span className="req">*</span></span>
-                      <div className="lead-add-activity-input-icon">
-                        <CalendarIcon color="var(--ink-2)" />
-                        <input
-                          type="date"
-                          className="lead-add-activity-clean-input"
-                          value={followUpDueDate}
-                          onChange={(e) => setFollowUpDueDate(e.target.value)}
-                        />
-                      </div>
+                      <DatePicker
+                        value={followUpDueDate}
+                        onChange={setFollowUpDueDate}
+                        min={getTodayString()}
+                        required
+                        aria-label="Due date"
+                      />
                     </div>
                     <div className="lead-add-activity-task-col">
                       <span className="lead-add-activity-sublabel">Due time <span className="req">*</span></span>
-                      <div className="lead-add-activity-input-icon">
-                        <ClockIcon />
-                        <input
-                          type="time"
-                          className="lead-add-activity-clean-input"
-                          value={followUpDueTime}
-                          onChange={(e) => setFollowUpDueTime(e.target.value)}
-                        />
-                      </div>
+                      <TimePicker
+                        value={followUpDueTime}
+                        onChange={setFollowUpDueTime}
+                        required
+                        aria-label="Due time"
+                      />
                     </div>
                     <div className="lead-add-activity-task-col">
                       <span className="lead-add-activity-sublabel">Assign to <span className="req">*</span></span>

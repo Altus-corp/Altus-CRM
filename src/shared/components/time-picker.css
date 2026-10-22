@@ -1,0 +1,404 @@
+/* Altus CRM Watch-Style Analog TimePicker */
+
+.altus-time-picker {
+  display: inline-flex;
+  flex-direction: column;
+  width: 100%;
+  position: relative;
+  font-family: var(--sans, inherit);
+  box-sizing: border-box;
+}
+
+.altus-time-picker-trigger {
+  height: 44px;
+  min-height: 44px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line, #E5E7EB);
+  border-radius: 10px;
+  background: var(--panel, #ffffff);
+  color: var(--ink, #0f172a);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  cursor: text;
+}
+
+.altus-time-picker-trigger:focus-within,
+.altus-time-picker-trigger.is-open {
+  border-color: var(--red, #D40000);
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.12);
+}
+
+.altus-time-picker-trigger.has-error {
+  border-color: var(--red, #D40000);
+}
+
+.altus-time-picker-trigger.has-error:focus-within {
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.12);
+}
+
+.altus-time-picker-trigger.is-disabled {
+  background: var(--bg-2, #f1f5f9);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.altus-time-picker-icon {
+  color: var(--ink-2, #64748b);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.altus-time-picker-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink, #0f172a);
+  outline: none;
+}
+
+.altus-time-picker-input::placeholder {
+  color: var(--ink-3, #94a3b8);
+}
+
+.altus-time-picker-input::-webkit-calendar-picker-indicator {
+  display: none !important;
+  -webkit-appearance: none;
+}
+
+.altus-time-picker-error {
+  min-height: 18px;
+  line-height: 18px;
+  font-size: 11.5px;
+  color: var(--red, #D40000);
+  margin-top: 4px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Watch-Style Popup Dialog */
+.altus-time-picker-popup {
+  position: fixed;
+  z-index: max(var(--z-dropdown, 1000), 1200);
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #E5E7EB);
+  border-radius: 14px;
+  box-shadow: var(--shadow-pop, 0 12px 32px rgba(0, 0, 0, 0.1));
+  padding: 14px;
+  box-sizing: border-box;
+  user-select: none;
+  font-family: var(--sans, inherit);
+  animation: altus-timepicker-fadein 0.12s ease-out;
+}
+
+@keyframes altus-timepicker-fadein {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Top Readout and AM/PM */
+.altus-time-readout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 10px;
+  border-bottom: 1px solid var(--line, #E5E7EB);
+}
+
+.altus-time-readout {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.altus-time-segment {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--ink-2, #64748b);
+  cursor: pointer;
+  line-height: 1.1;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.altus-time-segment:hover {
+  background: var(--bg-1, #f8fafc);
+  color: var(--ink, #0f172a);
+}
+
+.altus-time-segment.is-active {
+  background: #FDE8E8;
+  color: var(--red, #D40000);
+  border-color: #FCA5A5;
+  font-weight: 700;
+}
+
+.altus-time-colon {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink-3, #94a3b8);
+  line-height: 1;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.altus-ampm-group {
+  display: flex;
+  gap: 4px;
+}
+
+.altus-ampm-pill {
+  border: 1px solid var(--line, #E5E7EB);
+  background: var(--bg-1, #f8fafc);
+  color: var(--ink-2, #64748b);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  outline: none;
+}
+
+.altus-ampm-pill:hover {
+  background: var(--bg-2, #f1f5f9);
+  color: var(--ink, #0f172a);
+}
+
+.altus-ampm-pill.is-active {
+  background: #FDE8E8;
+  color: var(--red, #D40000);
+  border-color: #FCA5A5;
+  font-weight: 700;
+}
+
+/* Analog Clock Face */
+.altus-clock-face-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 14px 0 6px;
+}
+
+.altus-clock-face {
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #E5E7EB);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  position: relative;
+  touch-action: none;
+  cursor: pointer;
+}
+
+/* Center pin */
+.altus-clock-center-pin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red, #D40000);
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  pointer-events: none;
+}
+
+/* Clock Hand */
+.altus-clock-hand {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 80px;
+  background: var(--red, #D40000);
+  transform-origin: 50% 100%;
+  z-index: 3;
+  pointer-events: none;
+  margin-left: -1px;
+  margin-top: -80px;
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.altus-clock-hand.is-dragging {
+  transition: none !important;
+}
+
+/* Selected Circle End Cap */
+.altus-clock-hand-end {
+  position: absolute;
+  top: -16px;
+  left: -15px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--red, #D40000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(212, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* Numbers on the face */
+.altus-clock-number {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  margin-top: -15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--ink, #0f172a);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 4;
+  line-height: 1;
+}
+
+.altus-clock-number.is-selected {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Perimeter Minute Ticks */
+.altus-clock-tick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 4px;
+  background: var(--line, #E5E7EB);
+  transform-origin: 50% 102px;
+  pointer-events: none;
+  margin-left: -0.5px;
+  margin-top: -102px;
+}
+
+.altus-clock-tick.major {
+  width: 2px;
+  height: 6px;
+  background: var(--ink-3, #94a3b8);
+  margin-left: -1px;
+}
+
+/* Footer row */
+.altus-clock-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line, #E5E7EB);
+}
+
+.altus-clock-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.altus-clock-btn-now {
+  background: transparent;
+  border: 0;
+  color: var(--ink-2, #64748b);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: all 0.12s ease;
+}
+
+.altus-clock-btn-now:hover {
+  color: var(--red, #D40000);
+  background: var(--bg-1, #f8fafc);
+}
+
+.altus-clock-btn-cancel {
+  background: transparent;
+  border: 1px solid var(--line, #E5E7EB);
+  color: var(--ink-1, #334155);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  outline: none;
+}
+
+.altus-clock-btn-cancel:hover {
+  background: var(--bg-1, #f8fafc);
+}
+
+.altus-clock-btn-ok {
+  background: var(--red, #D40000);
+  border: 0;
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  outline: none;
+}
+
+.altus-clock-btn-ok:hover {
+  opacity: 0.9;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .altus-clock-hand {
+    transition: none !important;
+  }
+}
+
+/* Dark mode */
+[data-theme="dark"] .altus-time-segment.is-active,
+[data-theme="dark"] .altus-ampm-pill.is-active {
+  background: var(--red-050, rgba(255, 77, 109, 0.14));
+  color: var(--red, #ff4d6d);
+  border-color: rgba(255, 77, 109, 0.3);
+}
+
+[data-theme="dark"] .altus-clock-face {
+  background: var(--panel, #131317);
+  border-color: var(--line, #26262c);
+}
+
+[data-theme="dark"] .altus-clock-number {
+  color: var(--ink, #fafafa);
+}

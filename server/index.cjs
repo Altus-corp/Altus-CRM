@@ -49,7 +49,7 @@ function sortTimestamp(expression) { return `CASE WHEN ${expression} ~ '^[0-9]{4
 function jsonValue(key) { const escaped = String(key).replace(/'/g, "''"); return `NULLIF(NULLIF(COALESCE(l.custom_values->'lead_fields'->>'${escaped}', l.custom_values->>'${escaped}', l.legacy_finance->>'${escaped}'), ''), 'Not provided')`; }
 const LEAD_SORTS = {
   lead_no: sortText(sqlExpression("leadNo")), lead_type: sortText(sqlExpression("leadTypeCode")), name: sortText(sqlExpression("name")), first_name: sortText(sqlExpression("first_name")), last_name: sortText(sqlExpression("last_name")), cell_no: sortText(sqlExpression("cellNo")), email: sortText(sqlExpression("email")), company: sortText(sqlExpression("company")), designation: sortText(sqlExpression("designation")), city: sortText(sqlExpression("city")), source_system: sortText(sqlExpression("sourceSystem")), lead_source: sortText(sqlExpression("leadSource")), permission: sortText(sqlExpression("permission")), stage: sortText(sqlExpression("stage")), lead_status: sortText(sqlExpression("lead_status")), priority: sortText("l.priority"), owner: sortText("sort_owner.name"),
-  pso_date: "l.pso_date", next_follow_up_at: "l.next_follow_up_at", last_call_at: sortTimestamp(`COALESCE(to_char(l.last_call_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS'), ${jsonValue("last_called_on")})`), created_at: "l.created_at", updated_at: "l.updated_at",
+  pso_date: "l.pso_date", next_follow_up_at: "l.next_follow_up_at", follow_up: "l.next_follow_up_at", last_call_at: sortTimestamp(`COALESCE(to_char(l.last_call_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS'), ${jsonValue("last_called_on")})`), created_at: "l.created_at", updated_at: "l.updated_at",
   lead_acquisition_date: sortDate(sqlExpression("lead_acquisition_date")), business_category: sortText(sqlExpression("business_category")), rating: sortText(sqlExpression("rating")), nature_of_business: sortText(sqlExpression("nature_of_business")), proposed_solution: sortText(sqlExpression("proposed_solution")), invite_sent_by_introducer: sortBoolean(sqlExpression("invite_sent_by_introducer")), invite_date_sent: sortDate(sqlExpression("invite_date_sent")), introducer_call_done: sortBoolean(sqlExpression("introducer_call_done")), introducer_call_date: sortDate(sqlExpression("introducer_call_date")), introducer_feedback: sortText(sqlExpression("introducer_feedback")), introducer_name: sortText(sqlExpression("introducer_name")), employee_name: sortText(sqlExpression("employee_name")), association_network_name: sortText(sqlExpression("association_network_name")), chapter_name: sortText(sqlExpression("chapter_name")), calling_resolution: sortText(sqlExpression("calling_resolution")), next_call_on: sortTimestamp(sqlExpression("next_call_on")), calling_remarks: sortText(sqlExpression("calling_remarks")), intro_video_sent: sortBoolean(sqlExpression("intro_video_sent")), email_sent: sortBoolean(sqlExpression("email_sent")), whatsapp_message_sent: sortBoolean(sqlExpression("whatsapp_message_sent")), extra_notes: sortText(sqlExpression("extra_notes")),
   service: sortText(jsonValue("service")), registration_time: sortTimestamp(jsonValue("registrationTime")), approval_status: sortText(jsonValue("approvalStatus")), zoom_or_physical: sortText(jsonValue("zoomOrPhysical")), confirmation_call_status: sortText(jsonValue("confirmationCallStatus")), zoom_link_sent: sortBoolean(jsonValue("zoomLinkSent")), attendance_status: sortText(jsonValue("attendanceStatus")), sales_follow_up_by: sortText(jsonValue("salesFollowUpBy")), sales_resolution: sortText(jsonValue("salesResolution")), camera_on: sortBoolean(jsonValue("cameraOn")), photo_taken: sortBoolean(jsonValue("photoTaken")), sales_notes: sortText(jsonValue("salesNotes")), left_halfway: sortBoolean(jsonValue("leftHalfway")), total_payable: sortNumber(jsonValue("totalPayable")), amount_paid: sortNumber(jsonValue("amountPaid")), balance_receivable: sortNumber(jsonValue("balanceReceivable")), target_date: sortDate(jsonValue("targetDate")),
 };
@@ -416,7 +416,7 @@ async function leadsList(req, res, db, url, actor) {
   listParams.push(pageSize, offset);
   // Keep the list endpoint usable while an older preview database is waiting for
   // migration 018. The field is optional in the client until that migration runs.
-  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance,COALESCE((SELECT array_agg(DISTINCT lp.product_code) FROM lead_products lp WHERE lp.lead_id=l.id),ARRAY[]::text[]) AS product_codes FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
+  const rows = await db.query(`SELECT l.id,l.source_id,l.name,l.first_name,l.last_name,l.email,l.company,l.phone,l.stage,l.permission,l.lead_status,l.owner_user_id,l.pso_date,l.next_follow_up_at,l.last_call_at,l.updated_at,l.created_at,NULL::timestamptz AS last_opened_at,l.is_pre_ps_done,l.lead_no,l.lead_type,l.lead_source,l.source_system,l.designation,l.city,l.custom_values,l.legacy_finance,COALESCE((SELECT array_agg(DISTINCT lp.product_code) FROM lead_products lp WHERE lp.lead_id=l.id),ARRAY[]::text[]) AS product_codes,nfu.next_followup,COALESCE(nfu.open_followup_count, 0) AS open_followup_count FROM leads l LEFT JOIN users sort_owner ON sort_owner.id=l.owner_user_id LEFT JOIN LATERAL (SELECT COALESCE((SELECT json_build_object('id', f1.id, 'due_at', f1.due_at, 'note', f1.note, 'status', f1.status) FROM lead_followups f1 WHERE f1.lead_id = l.id AND f1.status IN ('open', 'rescheduled') AND f1.completed_at IS NULL AND f1.due_at >= now() ORDER BY f1.due_at ASC, f1.id ASC LIMIT 1), (SELECT json_build_object('id', f2.id, 'due_at', f2.due_at, 'note', f2.note, 'status', f2.status) FROM lead_followups f2 WHERE f2.lead_id = l.id AND f2.status IN ('open', 'rescheduled') AND f2.completed_at IS NULL ORDER BY f2.due_at ASC, f2.id ASC LIMIT 1)) AS next_followup, (SELECT count(*)::int FROM lead_followups fc WHERE fc.lead_id = l.id AND fc.status IN ('open', 'rescheduled') AND fc.completed_at IS NULL) AS open_followup_count) nfu ON true ${filterSql} ORDER BY ${sortExpression} ${direction} NULLS LAST, l.id ASC LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`, listParams);
   const items = rows.rows.map((row) => materializeLead(row));
   const call_resolution_counts = Object.fromEntries(resolutionCountRows.rows.map((row) => [String(row.resolution), Number(row.total) || 0]));
   return json(res, 200, { items, page, page_size: pageSize, total, sort, direction: direction.toLowerCase(), view: view || null, call_resolution_counts });
@@ -588,12 +588,25 @@ async function addLeadCall(req, res, db, actor, id) {
   return json(res, 201, { id: callId });
 }
 
+async function syncLeadNextFollowUp(db, leadId) {
+  const next = (await db.query(`SELECT due_at FROM lead_followups WHERE lead_id=$1 AND status IN ('open','rescheduled') AND completed_at IS NULL AND due_at IS NOT NULL ORDER BY CASE WHEN due_at >= now() THEN 0 ELSE 1 END, due_at ASC, id ASC LIMIT 1`, [leadId])).rows[0];
+  await db.query("UPDATE leads SET next_follow_up_at=$2,updated_at=now() WHERE id=$1", [leadId, next?.due_at || null]);
+}
+
 async function addLeadFollowup(req, res, db, actor, id) {
   const body = await readJson(req); const dueAt = activityDate(body.due_at || body.dueAt); const note = body.note == null ? null : activityText(body.note);
   if (!dueAt || (body.note != null && note == null)) return json(res, 400, { error: "Invalid follow-up data." });
   if (!(await activityLeadExists(db, actor, id))) return json(res, 404, { error: "Lead not found." });
+  const existing = (await db.query(
+    "SELECT id FROM lead_followups WHERE lead_id=$1 AND due_at=$2 AND note IS NOT DISTINCT FROM $3 AND created_at > now() - INTERVAL '10 seconds' ORDER BY created_at DESC LIMIT 1",
+    [id, dueAt, note]
+  )).rows[0];
+  if (existing) {
+    return json(res, 200, { id: existing.id, duplicate: true });
+  }
   const followupId = `lead-followup-${crypto.randomUUID()}`;
   await db.query("INSERT INTO lead_followups(id,lead_id,assigned_to,due_at,status,note,created_at,created_by) VALUES($1,$2,$3,$4,'open',$5,now(),$3)", [followupId, id, actor.id, dueAt, note]);
+  await syncLeadNextFollowUp(db, id);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_created", entityType: "lead", entityId: id, newValue: "followup", ip: req.socket.remoteAddress });
   return json(res, 201, { id: followupId });
 }
@@ -603,14 +616,23 @@ async function rescheduleLeadFollowup(req, res, db, actor, id, followupId) {
   if (!dueAt) return json(res, 400, { error: "A valid due date is required." });
   const current = (await db.query("SELECT id,due_at FROM lead_followups WHERE id=$1 AND lead_id=$2", [followupId, id])).rows[0];
   if (!current) return json(res, 404, { error: "Follow-up not found." });
-  await transaction(db, async (tx) => { await tx.query("UPDATE lead_followups SET due_at=$1,status='rescheduled' WHERE id=$2", [dueAt, followupId]); await tx.query("INSERT INTO lead_followup_events(id,followup_id,old_due_at,new_due_at,changed_by) VALUES($1,$2,$3,$4,$5)", [`followup-event-${crypto.randomUUID()}`, followupId, current.due_at, dueAt, actor.id]); await writeAudit(tx, { actorUserId: actor.id, action: "lead.followup_rescheduled", entityType: "lead", entityId: id, newValue: "followup_rescheduled", ip: req.socket.remoteAddress }); });
+  await transaction(db, async (tx) => { await tx.query("UPDATE lead_followups SET due_at=$1,status='rescheduled' WHERE id=$2", [dueAt, followupId]); await tx.query("INSERT INTO lead_followup_events(id,followup_id,old_due_at,new_due_at,changed_by) VALUES($1,$2,$3,$4,$5)", [`followup-event-${crypto.randomUUID()}`, followupId, current.due_at, dueAt, actor.id]); await syncLeadNextFollowUp(tx, id); await writeAudit(tx, { actorUserId: actor.id, action: "lead.followup_rescheduled", entityType: "lead", entityId: id, newValue: "followup_rescheduled", ip: req.socket.remoteAddress }); });
   return json(res, 200, { id: followupId });
 }
 
 async function completeLeadFollowup(req, res, db, actor, id, followupId) {
   const result = await db.query("UPDATE lead_followups SET status='done',completed_at=now() WHERE id=$1 AND lead_id=$2 RETURNING id", [followupId, id]);
   if (!result.rows[0]) return json(res, 404, { error: "Follow-up not found." });
+  await syncLeadNextFollowUp(db, id);
   await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_completed", entityType: "lead", entityId: id, newValue: "followup_completed", ip: req.socket.remoteAddress });
+  return json(res, 200, { id: followupId });
+}
+
+async function deleteLeadFollowup(req, res, db, actor, id, followupId) {
+  const result = await db.query("DELETE FROM lead_followups WHERE id=$1 AND lead_id=$2 RETURNING id", [followupId, id]);
+  if (!result.rows[0]) return json(res, 404, { error: "Follow-up not found." });
+  await syncLeadNextFollowUp(db, id);
+  await writeAudit(db, { actorUserId: actor.id, action: "lead.followup_deleted", entityType: "lead", entityId: id, newValue: "followup_deleted", ip: req.socket.remoteAddress });
   return json(res, 200, { id: followupId });
 }
 
@@ -1449,6 +1471,8 @@ async function route(req, res, db) {
   if (followupCreateMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); return addLeadFollowup(req, res, db, user, decodeURIComponent(followupCreateMatch[1])); }
   const followupActionMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups\/([^/]+)\/(reschedule|complete)$/);
   if (followupActionMatch && req.method === "POST") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const leadId = decodeURIComponent(followupActionMatch[1]); const followupId = decodeURIComponent(followupActionMatch[2]); return followupActionMatch[3] === "reschedule" ? rescheduleLeadFollowup(req, res, db, user, leadId, followupId) : completeLeadFollowup(req, res, db, user, leadId, followupId); }
+  const followupDeleteMatch = url.pathname.match(/^\/api\/leads\/([^/]+)\/followups\/([^/]+)$/);
+  if (followupDeleteMatch && req.method === "DELETE") { if (!requireCapability("leads.edit", user)) return json(res, 403, { error: "You do not have permission to edit leads." }); const leadId = decodeURIComponent(followupDeleteMatch[1]); const followupId = decodeURIComponent(followupDeleteMatch[2]); return deleteLeadFollowup(req, res, db, user, leadId, followupId); }
   if (url.pathname === "/api/product-master" && req.method === "GET") {
     if (!requireCapability("leads.view", user)) return json(res, 403, { error: "You do not have permission to access this resource." });
     return productMasterList(res, db, url, user);
@@ -1504,6 +1528,14 @@ async function route(req, res, db) {
   return json(res, 404, { error: "Not found." });
 }
 
+async function syncAllLeadsNextFollowUp(db) {
+  try {
+    await db.query(`UPDATE leads l SET next_follow_up_at = (SELECT f.due_at FROM lead_followups f WHERE f.lead_id = l.id AND f.status IN ('open','rescheduled') AND f.completed_at IS NULL AND f.due_at IS NOT NULL ORDER BY CASE WHEN f.due_at >= now() THEN 0 ELSE 1 END, f.due_at ASC, f.id ASC LIMIT 1)`);
+  } catch {
+    // Non-fatal if database is during migration
+  }
+}
+
 async function start() {
   const guarded = guardedDatabaseUrl(PG_URL);
   if (!guarded.ok) { reportFailure("server", { code: guarded.code }, guarded.reason, guarded.target); process.exitCode = 3; return; }
@@ -1511,6 +1543,7 @@ async function start() {
   const db = await openDb(guarded.value);
   await db.pruneSessions();
   await db.throttlePrune();
+  await syncAllLeadsNextFollowUp(db);
   setInterval(() => { db.pruneSessions().catch(() => {}); db.throttlePrune().catch(() => {}); }, 5 * 60000).unref();
   const server = http.createServer((req, res) => route(req, res, db).catch((error) => { console.error(`request failed method=${req.method} path=${new URL(req.url || "/", "http://localhost").pathname} code=${error?.code || error?.name || "unknown"}`); return json(res, 500, { error: "Request failed." }); }));
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(PORT, HOST, () => { console.log(`Altus CRM server listening on http://${HOST}:${PORT}`); resolve(); }); });
@@ -1547,4 +1580,4 @@ async function handler(req, res) {
 }
 
 if (require.main === module) start().catch((error) => { reportFailure("server", error, error?.code === "EADDRINUSE" ? "Stop the process already using the API port." : "Check PostgreSQL availability and credentials."); process.exitCode = 1; });
-module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, leadTableLayoutGet, leadTableLayoutWrite, validateLeadTableLayout, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, assignLeadRoundRobin, resolutionAllowedForProducts };
+module.exports = { handler, login, route, publicUser, leadsList, leadsCounts, leadDetail, activityList, addLeadNote, addLeadCall, addLeadFollowup, rescheduleLeadFollowup, completeLeadFollowup, deleteLeadFollowup, syncLeadNextFollowUp, leadView, LEAD_SORTS, LEAD_VIEWS, quickFiltersList, quickFilterCreate, quickFilterUpdate, quickFilterDelete, userPreferenceGet, userPreferenceWrite, userPreferenceDelete, validateUserPreferenceValue, tablePreferenceGet, tablePreferenceWrite, tablePreferenceDelete, validateTableColumnWidths, leadTableLayoutGet, leadTableLayoutWrite, validateLeadTableLayout, productCatalogList, QUICK_FILTER_FIELDS, QUICK_FILTER_OPERATORS, reassignLeadRoundRobin, assignLeadRoundRobin, resolutionAllowedForProducts };

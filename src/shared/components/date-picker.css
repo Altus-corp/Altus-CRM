@@ -1,0 +1,446 @@
+/* Altus CRM DatePicker Styles */
+
+.altus-date-picker {
+  display: inline-flex;
+  flex-direction: column;
+  width: 100%;
+  position: relative;
+  font-family: var(--sans, inherit);
+  box-sizing: border-box;
+}
+
+.altus-date-picker-trigger {
+  height: 44px;
+  min-height: 44px;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--line, #E5E7EB);
+  border-radius: 10px;
+  background: var(--panel, #ffffff);
+  color: var(--ink, #0f172a);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  cursor: text;
+  position: relative;
+}
+
+.altus-date-picker-trigger:focus-within,
+.altus-date-picker-trigger.is-open {
+  border-color: var(--red, #D40000);
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.12);
+}
+
+.altus-date-picker-trigger.has-error {
+  border-color: var(--red, #D40000);
+}
+
+.altus-date-picker-trigger.has-error:focus-within {
+  box-shadow: 0 0 0 3px rgba(212, 0, 0, 0.12);
+}
+
+.altus-date-picker-trigger.is-disabled {
+  background: var(--bg-2, #f1f5f9);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.altus-date-picker-icon {
+  color: var(--ink-2, #64748b);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.altus-date-picker-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink, #0f172a);
+  outline: none;
+}
+
+.altus-date-picker-input::placeholder {
+  color: var(--ink-3, #94a3b8);
+  font-weight: 400;
+}
+
+.altus-date-picker-input::-webkit-calendar-picker-indicator {
+  display: none !important;
+  -webkit-appearance: none;
+}
+
+.altus-date-picker-input::-webkit-inner-spin-button,
+.altus-date-picker-input::-webkit-clear-button {
+  display: none !important;
+  -webkit-appearance: none;
+}
+
+.altus-date-picker-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3, #94a3b8);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.altus-date-picker-clear-btn:hover {
+  color: var(--ink, #0f172a);
+  background: var(--bg-2, #f1f5f9);
+}
+
+.altus-date-picker-error {
+  min-height: 18px;
+  line-height: 18px;
+  font-size: 11.5px;
+  color: var(--red, #D40000);
+  margin-top: 4px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Calendar Popup Modal/Card */
+.altus-date-picker-popup {
+  position: fixed;
+  z-index: max(var(--z-dropdown, 1000), 1200);
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--line, #E5E7EB);
+  border-radius: 14px;
+  box-shadow: var(--shadow-pop, 0 12px 32px rgba(0, 0, 0, 0.1));
+  padding: 12px 14px 10px;
+  box-sizing: border-box;
+  font-family: var(--sans, inherit);
+  color: var(--ink, #0f172a);
+  animation: altusDatePickerIn 0.15s ease-out;
+  user-select: none;
+}
+
+@keyframes altusDatePickerIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Presets Row */
+.altus-date-picker-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.altus-date-picker-presets::-webkit-scrollbar {
+  height: 0;
+  display: none;
+}
+
+.altus-date-picker-preset-btn {
+  border: 1px solid var(--line, #E5E7EB);
+  background: var(--bg-1, #f8fafc);
+  color: var(--ink-2, #475569);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.altus-date-picker-preset-btn:hover {
+  background: var(--bg-2, #f1f5f9);
+  color: var(--ink, #0f172a);
+  border-color: var(--ink-3, #cbd5e1);
+}
+
+.altus-date-picker-preset-btn:focus-visible {
+  outline: 2px solid var(--red, #D40000);
+  outline-offset: 1px;
+}
+
+/* Header */
+.altus-date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.altus-date-picker-title-btn {
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink, #0f172a);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s ease;
+}
+
+.altus-date-picker-title-btn:hover {
+  background: var(--bg-2, #f1f5f9);
+}
+
+.altus-date-picker-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.altus-date-picker-nav-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink-2, #475569);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.altus-date-picker-nav-btn:hover:not(:disabled) {
+  background: var(--bg-2, #f1f5f9);
+  color: var(--ink, #0f172a);
+}
+
+.altus-date-picker-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Weekday header row */
+.altus-date-picker-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.altus-date-picker-weekday {
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-3, #94a3b8);
+  padding: 4px 0;
+  text-transform: uppercase;
+}
+
+/* Calendar Day Grid: Fixed 6 rows x 7 cols = 42 cells */
+.altus-date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 38px);
+  grid-template-rows: repeat(6, 38px);
+  gap: 2px;
+  justify-content: center;
+}
+
+.altus-date-picker-day {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink, #0f172a);
+  font-size: 13.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.altus-date-picker-day:hover:not(:disabled):not(.is-selected) {
+  background: var(--bg-2, #f1f5f9);
+}
+
+.altus-date-picker-day.is-other-month {
+  color: var(--ink-3, #cbd5e1);
+}
+
+.altus-date-picker-day.is-today:not(.is-selected) {
+  border-color: var(--red, #D40000);
+  font-weight: 600;
+}
+
+.altus-date-picker-day.is-selected {
+  background: var(--red, #D40000) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border-color: var(--red, #D40000);
+}
+
+.altus-date-picker-day:disabled,
+.altus-date-picker-day.is-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Month & Year Chooser View */
+.altus-date-picker-chooser-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.altus-date-picker-year-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink, #0f172a);
+}
+
+.altus-date-picker-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  height: 238px; /* Matches 6 rows of 38px + gaps */
+  align-content: center;
+}
+
+.altus-date-picker-month-cell {
+  height: 48px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #E5E7EB);
+  background: var(--panel, #ffffff);
+  color: var(--ink, #0f172a);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.altus-date-picker-month-cell:hover:not(.is-selected) {
+  background: var(--bg-2, #f1f5f9);
+  border-color: var(--ink-3, #cbd5e1);
+}
+
+.altus-date-picker-month-cell.is-selected {
+  background: var(--red, #D40000);
+  color: #ffffff;
+  border-color: var(--red, #D40000);
+}
+
+/* Footer Row */
+.altus-date-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line, #E5E7EB);
+}
+
+.altus-date-picker-footer-btn {
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red, #D40000);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.altus-date-picker-footer-btn:hover {
+  background: rgba(212, 0, 0, 0.08);
+}
+
+.altus-date-picker-footer-btn.is-clear {
+  color: var(--ink-2, #64748b);
+}
+
+.altus-date-picker-footer-btn.is-clear:hover {
+  background: var(--bg-2, #f1f5f9);
+  color: var(--ink, #0f172a);
+}
+
+/* Dark Mode Support via theme tokens */
+[data-theme="dark"] .altus-date-picker-trigger {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+[data-theme="dark"] .altus-date-picker-popup {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  color: var(--ink);
+}
+
+[data-theme="dark"] .altus-date-picker-day:hover:not(:disabled):not(.is-selected) {
+  background: var(--bg-2);
+}
+
+[data-theme="dark"] .altus-date-picker-preset-btn {
+  background: var(--bg-2);
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+[data-theme="dark"] .altus-date-picker-preset-btn:hover {
+  background: var(--bg-3);
+  color: var(--ink);
+}
+
+[data-theme="dark"] .altus-date-picker-month-cell {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+[data-theme="dark"] .altus-date-picker-month-cell:hover:not(.is-selected) {
+  background: var(--bg-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .altus-date-picker-popup,
+  .altus-date-picker-day,
+  .altus-date-picker-preset-btn,
+  .altus-date-picker-trigger {
+    animation: none !important;
+    transition: none !important;
+  }
+}
