@@ -1,0 +1,190 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useState, type ReactNode } from "react";
+import type { AppRole } from "@/app/lib/roles";
+import type { DashboardNavItem } from "@/app/lib/navigation";
+import { signOut } from "./actions";
+
+type DashboardShellProps = {
+  children: ReactNode;
+  navigation: DashboardNavItem[];
+  roles: AppRole[];
+  todayAssignedLeads: number;
+};
+
+function NavigationIcon({ label }: { label: string }) {
+  const iconClass = "h-5 w-5 stroke-[2]";
+
+  if (label.includes("Lead") || label.includes("Client") || label === "Users") {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
+  }
+  if (label.includes("Task") || label.includes("Roles")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="m9 11 3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>;
+  }
+  if (label.includes("Report")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 3v18h18" /><path d="m7 16 4-5 3 3 5-7" /></svg>;
+  }
+  if (label.includes("Campaign") || label.includes("Marketing")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="m3 11 18-5v12L3 13v-2Z" /><path d="M11.6 15.4 10 21H6l1.4-7.1M21 10a3 3 0 0 1 0 4" /></svg>;
+  }
+  if (label.includes("Deal") || label.includes("Sales")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 3v18h18" /><path d="M7 16V9m5 7V5m5 11v-4" /></svg>;
+  }
+  if (label.includes("Appointment")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M8 2v4m8-4v4M3 10h18" /></svg>;
+  }
+  if (label.includes("Setting")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.55V20.3h-3v-.09A1.7 1.7 0 0 0 10.68 18.66a1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7.02 15 1.7 1.7 0 0 0 5.47 14H5.4v-3h.07A1.7 1.7 0 0 0 7.02 9.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.55V4.7h3v.06a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.55 1.03H21v3h-.06A1.7 1.7 0 0 0 19.4 15Z" /></svg>;
+  }
+
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 13a9 9 0 1 1 18 0" /><path d="M12 13 16 9M12 13l-3 5" /><circle cx="12" cy="13" r="1" /></svg>;
+}
+
+export function DashboardShell({
+  children,
+  navigation,
+  roles,
+  todayAssignedLeads,
+}: DashboardShellProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [isConfigurationOpen, setIsConfigurationOpen] = useState(false);
+  const isConfigurationPage = pathname === "/dashboard/lead-settings";
+  const isAdmin = roles.includes("admin");
+  const configurationLinks = [
+    { label: "Lead configuration", href: "/dashboard/lead-settings" },
+    { label: "Columns management", href: "/dashboard/lead-settings?tab=columns" },
+    { label: "Product management", href: "/dashboard/lead-settings?tab=products" },
+    { label: "Stages management", href: "/dashboard/lead-settings?tab=stages" },
+    { label: "Call resolutions", href: "/dashboard/lead-settings?tab=resolutions" },
+    { label: "Workflow actions", href: "/dashboard/lead-settings?tab=workflows" },
+    { label: "Custom fields", href: "/dashboard/lead-settings?tab=custom-fields" },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#f5f7fb] text-[#131c33]">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[196px] flex-col border-r border-slate-100 bg-white px-2.5 pb-2 pt-2 md:flex xl:w-[212px]">
+        <div className="flex items-center gap-2">
+          <button aria-label="Go back" className="grid h-9 w-9 place-items-center rounded-[13px] border border-slate-200 bg-[#fafafa] text-lg text-slate-500">‹</button>
+          <button aria-label="Go forward" className="grid h-9 w-9 place-items-center rounded-[13px] border border-slate-200 bg-[#fafafa] text-lg text-slate-500">›</button>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
+          <button aria-label="Toggle sidebar" className="ml-auto grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-sm text-slate-600">▣</button>
+        </div>
+
+        <Link href="/dashboard" className="mt-3 flex items-center gap-2.5 border-b border-slate-200 pb-3.5 px-1">
+          <span className="grid h-10 w-10 place-items-center rounded-[15px] bg-[#d90000] text-xl font-bold text-white shadow-[0_8px_18px_rgba(217,0,0,0.16)]">A</span>
+          <div>
+            <p className="text-[18px] font-extrabold tracking-[-0.04em] text-[#c90000]">ALTUS</p>
+            <p className="-mt-1 text-[10px] font-bold tracking-[0.17em] text-slate-500">CRM</p>
+          </div>
+        </Link>
+
+        <nav className="mt-2.5 space-y-0" aria-label="Dashboard navigation">
+          {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
+            const isActive = pathname === item.href;
+
+            return (
+              <div key={item.href}>
+                <Link
+                  href={item.href}
+                  className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${
+                    isActive
+                      ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]"
+                      : "text-[#182035] hover:bg-slate-50"
+                  }`}
+                >
+                  <span className={isActive ? "text-[#d00000]" : "text-[#182035]"}>
+                    <NavigationIcon label={item.label} />
+                  </span>
+                  {item.label}
+                </Link>
+
+                {isAdmin && item.label === "Users" && (
+                  <div className="mt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfigurationOpen((isOpen) => !isOpen)}
+                      aria-expanded={isConfigurationOpen}
+                      aria-controls="configuration-navigation"
+                      className={`flex min-h-9 w-full items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-left text-[13px] font-bold leading-tight transition [&>span:first-child]:h-5 [&>span:first-child]:w-5 [&>span:first-child]:rounded-none [&>span:first-child]:bg-transparent [&>span.ml-auto]:hidden ${
+                        isConfigurationPage
+                          ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036] [&>span:first-child]:text-[#d00000]"
+                          : "text-[#182035] hover:bg-slate-50 [&>span:first-child]:text-[#182035]"
+                      }`}
+                    >
+                      <span className="grid h-6 w-6 place-items-center rounded-md bg-red-100 text-red-600">⚙</span>
+                      Configuration
+                      <span className="ml-auto text-xs">⌃</span>
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        aria-hidden="true"
+                        className={`ml-auto h-4 w-4 transition-transform ${isConfigurationOpen ? "rotate-180" : ""}`}
+                      >
+                        <path d="m5 7.5 5 5 5-5" />
+                      </svg>
+                    </button>
+                    {isConfigurationOpen && (
+                    <div id="configuration-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">
+                      {configurationLinks.map((link) => {
+                          const active = pathname === "/dashboard/lead-settings" && (link.label === "Lead configuration" ? !searchParams.get("tab") : link.href.includes(`tab=${searchParams.get("tab")}`));
+                        return <Link key={link.label} href={link.href} className={`block py-0.5 text-[10px] font-semibold ${active ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>{link.label}</Link>;
+                      })}
+                    </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+
+        <div className="mt-auto">
+          {!isAdmin && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && (
+            <section className="mb-2 rounded-[10px] border border-[#d93b43] bg-gradient-to-br from-[#c90000] to-[#a90000] p-2 shadow-[0_7px_16px_rgba(181,0,0,0.2)]" aria-label="Today's assigned leads">
+              <p className="text-[9px] font-extrabold tracking-[-0.01em] text-white">Today&apos;s target</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="grid h-[48px] w-[48px] shrink-0 place-items-center rounded-full bg-[conic-gradient(#ff5160_0deg_0deg,#f4b0b4_0deg_360deg)] p-[5px]">
+                  <div className="grid h-full w-full place-items-center rounded-full bg-[#b60000] text-center"><span className="text-[10px] font-extrabold text-white">0%</span></div>
+                </div>
+                <div><p className="text-[17px] font-extrabold leading-none text-white">{todayAssignedLeads}</p><p className="mt-1 text-[9px] font-semibold leading-tight text-red-100">Leads assigned<br />today</p></div>
+              </div>
+              <p className="mt-1.5 text-[8px] font-medium text-red-100">Call progress connects with the API later.</p>
+              <Link href="/dashboard/leads" className="mt-1.5 flex h-6 items-center justify-center rounded-[5px] border border-white/30 bg-white/10 text-[9px] font-extrabold text-white transition hover:bg-white/20">View Calling List <span className="ml-1">&rarr;</span></Link>
+            </section>
+          )}
+          <form action={signOut}>
+          <button className="flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700">
+            <span className="text-lg">↪</span>
+            Sign out
+          </button>
+          </form>
+        </div>
+      </aside>
+
+      <div className="md:pl-[196px] xl:pl-[212px]">
+        <header className="sticky top-0 z-10 flex h-[52px] items-center justify-between border-b border-slate-200 bg-white px-3 shadow-[0_3px_12px_rgba(28,39,64,0.08)] md:px-5">
+          <Link href="/dashboard" className="font-extrabold text-[#cf0000] md:hidden">
+            ALTUS CRM
+          </Link>
+          <p className="hidden text-[17px] font-extrabold tracking-[-0.035em] text-[#cf0000] md:block">
+            CRM <span className="mx-1 text-slate-400">›</span> {navigation.find((item) => item.href === pathname)?.label ?? "Workspace"}
+          </p>
+          <div className="flex items-center gap-2">
+            <button aria-label="Search" className="grid h-9 w-9 place-items-center rounded-full text-xl text-[#182035] hover:bg-slate-100">⌕</button>
+            <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
+            <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>
+            <button aria-label="Notifications" className="relative grid h-9 w-10 place-items-center rounded-lg border border-slate-200 bg-white text-lg text-[#182035]">♧<span className="absolute -right-1 -top-2 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#d90000] px-1 text-[9px] font-bold text-white">3</span></button>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#d90000] text-[10px] font-extrabold text-white">{roles.includes("admin") ? "AD" : "TM"}</div>
+          </div>
+        </header>
+
+        <main className="min-h-[calc(100vh-52px)] p-3 md:p-5">{children}</main>
+      </div>
+    </div>
+  );
+}

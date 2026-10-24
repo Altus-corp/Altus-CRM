@@ -1,0 +1,59 @@
+import { requireUser } from "@/app/lib/auth";
+import { connection } from "next/server";
+import { LeadsTable } from "@/components/leads/leads-table";
+import { AdminLeadsMaster } from "@/components/leads/admin-leads-master";
+import { SalesLeadsWorkspace } from "@/components/leads/sales-leads-workspace";
+import { createClient } from "@/app/lib/supabase/server";
+
+export const instant = false;
+
+export default async function LeadsPage() {
+  await connection();
+  const user = await requireUser();
+  const supabase = await createClient();
+  const [{ data: columns, error: columnsError }, { data: leads, error: leadsError }, { count: databaseLeadsCount }, { count: referenceLeadsCount }, { count: qualifiedLeadsCount }, { count: leadsCount }, { data: products }, { data: stages }, { data: resolutions }, { data: resolutionMappings }, { data: assignmentProfiles }, { data: assignmentRoles }, { data: tablePreferences }] = await Promise.all([
+    supabase.from("lead_table_columns").select("id, field_key, label, field_type, options, is_visible, computed_from").order("position"),
+    supabase.from("leads").select("id, first_name, last_name, email, phone, assigned_to, assigned_at, next_follow_up_at, created_at, custom_data, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name)").order("created_at", { ascending: false }).limit(100),
+    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "database_leads"),
+    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "reference_leads"),
+    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "qualified_leads"),
+    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "leads"),
+    supabase.from("lead_products").select("id, code, name").eq("is_active", true).order("code"),
+    supabase.from("lead_stages").select("id, product_id, name, position").eq("is_active", true).order("position"),
+    supabase.from("lead_resolutions").select("id, name").order("name"),
+    supabase.from("lead_product_resolutions").select("product_id, resolution_id"),
+    supabase.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name"),
+    supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
+    supabase.from("lead_table_preferences").select("column_order, column_widths, frozen_column_keys").eq("user_id", user.userId).maybeSingle(),
+  ]);
+
+  if (columnsError) return <section className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Leads table configuration is unavailable. Ask an admin to run the lead-table-columns database migration.</section>;
+  if (leadsError) throw new Error("Leads could not be loaded.");
+  const visibleColumns = (columns ?? []).filter((column) => column.is_visible);
+  const normalizedLeads = (leads ?? []).map((lead) => ({
+    ...lead,
+    product: Array.isArray(lead.product) ? lead.product : lead.product ? [lead.product] : [],
+    stage: Array.isArray(lead.stage) ? lead.stage : lead.stage ? [lead.stage] : [],
+    resolution: Array.isArray(lead.resolution) ? lead.resolution : lead.resolution ? [lead.resolution] : [],
+  }));
+
+  const assignedIds = [...new Set(normalizedLeads.map((lead) => lead.assigned_to).filter((id): id is string => Boolean(id)))];
+  const { data: assignees } = assignedIds.length ? await supabase.from("profiles").select("id, first_name, last_name").in("id", assignedIds) : { data: [] };
+  const assignedNames = Object.fromEntries((assignees ?? []).map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unassigned user"]));
+  const eligibleAssigneeIds = new Set((assignmentRoles ?? []).map((role) => role.user_id));
+  const assignmentUsers = (assignmentProfiles ?? []).filter((profile) => eligibleAssigneeIds.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
+  const resolutionNames = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
+  const productResolutions = (resolutionMappings ?? []).map((mapping) => ({ product_id: mapping.product_id, resolution_id: mapping.resolution_id, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
+
+  const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [] };
+  if (user.roles.includes("admin")) return <AdminLeadsMaster columns={visibleColumns} sampleColumns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} assignmentUsers={assignmentUsers} preferences={preferences} databaseCounts={{ databaseLeads: databaseLeadsCount ?? 0, referenceLeads: referenceLeadsCount ?? 0, qualifiedLeads: qualifiedLeadsCount ?? 0, leads: leadsCount ?? 0 }} products={products ?? []} stages={stages ?? []} />;
+  const indiaDateParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date());
+  const indiaDateKey = (value: string) => {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date(value));
+    return [parts.find((part) => part.type === "year")?.value, parts.find((part) => part.type === "month")?.value, parts.find((part) => part.type === "day")?.value].join("-");
+  };
+  const todayKey = [indiaDateParts.find((part) => part.type === "year")?.value, indiaDateParts.find((part) => part.type === "month")?.value, indiaDateParts.find((part) => part.type === "day")?.value].join("-");
+  const focusedLeadIds = normalizedLeads.filter((lead) => lead.assigned_at && indiaDateKey(lead.assigned_at) === todayKey).map((lead) => lead.id);
+  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <SalesLeadsWorkspace columns={visibleColumns} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} />;
+  return <section className="mx-auto max-w-7xl" aria-label="Leads"><LeadsTable columns={visibleColumns} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} /></section>;
+}
