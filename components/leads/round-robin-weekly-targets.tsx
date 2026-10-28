@@ -1,27 +1,333 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { runRoundRobinForToday, updateRoundRobinWeeklyTargets } from "@/app/dashboard/lead-settings/actions";
+import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  runRoundRobinForToday,
+  updateRoundRobinSchedule,
+  updateRoundRobinWeeklyTargets,
+} from "@/app/dashboard/lead-settings/actions";
 
 type Product = { id: string; code: string; name: string };
-type TeamMember = { id: string; name: string; roles: string[] };
-type Target = { user_id: string; product_id: string; day_of_week: number; target_count: number };
+type TeamMember = { id: string; name: string; roles: string[]; attendance: { status: "present" | "absent" | "unavailable"; punchInTime: string | null } };
+type Target = {
+  user_id: string;
+  product_id: string;
+  day_of_week: number;
+  target_count: number;
+};
+type Schedule = { start_time: string; end_time: string; retry_interval_minutes: number };
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 function roleLabel(role: string) {
-  return role.split("_").map((word) => word[0]?.toUpperCase() + word.slice(1)).join(" ");
+  return role
+    .split("_")
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
-export function RoundRobinWeeklyTargets({ members, products, targets }: { members: TeamMember[]; products: Product[]; targets: Target[] }) {
-  const [values, setValues] = useState(() => new Map(targets.map((target) => [`${target.user_id}:${target.product_id}:${target.day_of_week}`, target.target_count])));
-  const [result, setResult] = useState("");
-  const [skippedUsers, setSkippedUsers] = useState<{ name: string; reason: string }[]>([]);
-  const [failed, setFailed] = useState(false);
-  const [isRunning, startRun] = useTransition();
-  const targetFor = (userId: string, productId: string, day: number) => values.get(`${userId}:${productId}:${day}`) ?? 0;
-  const updateValue = (userId: string, productId: string, day: number, target: number) => setValues((current) => { const next = new Map(current); next.set(`${userId}:${productId}:${day}`, target); return next; });
-  const memberTotal = (userId: string) => products.reduce((sum, product) => sum + days.reduce((daily, _, index) => daily + targetFor(userId, product.id, index + 1), 0), 0);
+function punchInLabel(value: string | null) {
+  if (!value) return "No punch-in";
+  if (!value.includes("T")) return value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }).format(date);
+}
 
-  return <section className="mt-4 rounded-[16px] border border-slate-100 bg-white p-4 shadow-[0_8px_24px_rgba(42,55,80,0.06)]"><div className="flex flex-col justify-between gap-2 border-b border-slate-100 pb-3 sm:flex-row sm:items-center"><div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">ROUND ROBIN</p><h2 className="mt-0.5 text-[18px] font-extrabold tracking-[-0.035em] text-slate-900">Weekly user lead targets</h2><p className="mt-1 text-[10px] text-slate-500">Uses each user&apos;s Lead Master first, then fills any shortfall from Admin&apos;s unassigned priority pool.</p></div><div className="flex items-center gap-2"><span className="rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-extrabold text-red-700">Weekly capacity</span><button type="button" disabled={isRunning} onClick={() => startRun(async () => { const response = await runRoundRobinForToday(); setFailed(!response.ok); setSkippedUsers(response.skippedUsers); setResult(response.ok ? `${response.message} ${response.focused} focused; ${response.newlyAssigned} newly assigned.` : response.message); })} className="h-8 rounded bg-[#d90000] px-3 text-[10px] font-extrabold text-white hover:bg-red-700 disabled:bg-slate-300">{isRunning ? "Running..." : "Run today now"}</button></div></div>{result && <p role="status" className={`mt-3 rounded-md border px-3 py-2 text-[11px] font-bold ${failed ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{result}</p>}{skippedUsers.length > 0 && <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900"><p className="font-extrabold">Not assigned due to attendance</p><ul className="mt-1 list-disc pl-4">{skippedUsers.map((user) => <li key={`${user.name}:${user.reason}`}><span className="font-bold">{user.name}</span> — {user.reason}</li>)}</ul></div>}{members.length && products.length ? <div className="mt-3 space-y-3">{members.map((member, memberIndex) => <article key={member.id} className="overflow-x-auto rounded-xl border border-slate-100"><div className={`flex items-center justify-between px-3 py-2 ${memberIndex % 2 ? "bg-violet-50" : "bg-red-50"}`}><div><p className="text-xs font-extrabold text-slate-800">Sales Person - {member.name}</p><p className="mt-0.5 text-[10px] text-slate-500">{member.roles.map(roleLabel).join(", ")}</p></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${memberIndex % 2 ? "bg-violet-100 text-violet-700" : "bg-red-100 text-red-700"}`}>Total Target: {memberTotal(member.id)}</span></div><table className="min-w-[840px] w-full text-center text-[11px]"><thead className="bg-slate-50 font-extrabold text-slate-600"><tr><th className="px-3 py-1.5 text-left">Product</th>{days.map((day) => <th key={day} className="px-2 py-1.5">{day}</th>)}<th className="px-3 py-1.5">Total</th><th className="px-3 py-1.5">Action</th></tr></thead><tbody>{products.map((product) => { const total = days.reduce((sum, _, index) => sum + targetFor(member.id, product.id, index + 1), 0); return <tr key={product.id} className="border-t border-slate-100"><td className="px-3 py-1.5 text-left"><span className="font-extrabold text-slate-700">{product.code}</span><span className="ml-1.5 text-[10px] text-slate-400">{product.name}</span></td><td colSpan={9} className="p-0"><form action={async (formData) => { await updateRoundRobinWeeklyTargets(formData); }} className="grid grid-cols-[repeat(7,minmax(60px,1fr))_72px_68px] items-center gap-1 px-2 py-1"><input type="hidden" name="userId" value={member.id} /><input type="hidden" name="productId" value={product.id} />{days.map((day, index) => <input key={day} aria-label={`${member.name} ${product.code} ${day} target`} name={`day${index + 1}`} type="number" min="0" max="100000" value={targetFor(member.id, product.id, index + 1)} onChange={(event) => updateValue(member.id, product.id, index + 1, Math.max(0, Number(event.target.value)))} className="h-7 w-full rounded border border-slate-200 bg-white px-1 text-center text-[11px] font-semibold text-slate-700 outline-none focus:border-red-400" />)}<output className="font-extrabold text-slate-800">{total}</output><button className="h-7 rounded bg-[#d90000] px-2 text-[10px] font-extrabold text-white hover:bg-red-700">Save</button></form></td></tr>; })}</tbody><tfoot className="border-t border-red-100 bg-red-50 font-extrabold text-red-600"><tr><td className="px-3 py-1.5 text-left">Total</td>{days.map((_, index) => <td key={index}>{products.reduce((sum, product) => sum + targetFor(member.id, product.id, index + 1), 0)}</td>)}<td>{memberTotal(member.id)}</td><td /></tr></tfoot></table></article>)}</div> : <p className="mt-3 rounded-lg bg-slate-50 p-4 text-xs font-semibold text-slate-500">No active Sales Executive, Sales Manager, or Consultant users and products are available for round-robin targets.</p>}</section>;
+export function RoundRobinWeeklyTargets({
+  members,
+  products,
+  targets,
+  schedule,
+  scheduleAvailable,
+}: {
+  members: TeamMember[];
+  products: Product[];
+  targets: Target[];
+  schedule: Schedule;
+  scheduleAvailable: boolean;
+}) {
+  const [values, setValues] = useState(
+    () =>
+      new Map(
+        targets.map((target) => [
+          `${target.user_id}:${target.product_id}:${target.day_of_week}`,
+          target.target_count,
+        ]),
+      ),
+  );
+  const [result, setResult] = useState("");
+  const [skippedUsers, setSkippedUsers] = useState<
+    { name: string; reason: string }[]
+  >([]);
+  const [failed, setFailed] = useState(false);
+  const [scheduleConfig, setScheduleConfig] = useState<Schedule>(schedule);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+  const [isRunning, startRun] = useTransition();
+  const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const scheduleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      saveTimers.current.forEach((timer) => clearTimeout(timer));
+      if (scheduleTimer.current) clearTimeout(scheduleTimer.current);
+    },
+    [],
+  );
+  const targetFor = (userId: string, productId: string, day: number) =>
+    values.get(`${userId}:${productId}:${day}`) ?? 0;
+  const updateValue = (
+    userId: string,
+    productId: string,
+    day: number,
+    target: number,
+  ) =>
+    setValues((current) => {
+      const next = new Map(current);
+      next.set(`${userId}:${productId}:${day}`, target);
+      const rowKey = `${userId}:${productId}`;
+      const existingTimer = saveTimers.current.get(rowKey);
+      if (existingTimer) clearTimeout(existingTimer);
+      saveTimers.current.set(
+        rowKey,
+        setTimeout(
+          () =>
+            startRun(async () => {
+              const formData = new FormData();
+              formData.set("userId", userId);
+              formData.set("productId", productId);
+              days.forEach((_, index) =>
+                formData.set(
+                  `day${index + 1}`,
+                  String(next.get(`${userId}:${productId}:${index + 1}`) ?? 0),
+                ),
+              );
+              try {
+                await updateRoundRobinWeeklyTargets(formData);
+              } catch (error) {
+                setFailed(true);
+                setResult(
+                  error instanceof Error
+                    ? error.message
+                    : "Unable to auto-save this lead target.",
+                );
+              } finally {
+                saveTimers.current.delete(rowKey);
+              }
+            }),
+          550,
+        ),
+      );
+      return next;
+    });
+  const memberTotal = (userId: string) =>
+    products.reduce(
+      (sum, product) =>
+        sum +
+        days.reduce(
+          (daily, _, index) => daily + targetFor(userId, product.id, index + 1),
+          0,
+        ),
+      0,
+    );
+
+  function updateSchedule(next: Schedule) {
+    setScheduleConfig(next);
+    if (scheduleTimer.current) clearTimeout(scheduleTimer.current);
+    setIsSavingSchedule(true);
+    scheduleTimer.current = setTimeout(() => startRun(async () => {
+      const formData = new FormData();
+      formData.set("startTime", next.start_time.slice(0, 5));
+      formData.set("endTime", next.end_time.slice(0, 5));
+      formData.set("retryInterval", String(next.retry_interval_minutes));
+      try {
+        await updateRoundRobinSchedule(formData);
+        setFailed(false);
+      } catch (error) {
+        setFailed(true);
+        setResult(error instanceof Error ? error.message : "Unable to save the round-robin schedule.");
+      } finally {
+        setIsSavingSchedule(false);
+        scheduleTimer.current = null;
+      }
+    }), 450);
+  }
+
+  return (
+    <section className="mt-4 rounded-[16px] border border-slate-100 bg-white p-4 shadow-[0_8px_24px_rgba(42,55,80,0.06)]">
+      <div className="flex flex-col justify-between gap-2 border-b border-slate-100 pb-3 sm:flex-row sm:items-center">
+        <div>
+          <p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">
+            ROUND ROBIN
+          </p>
+          <h2 className="mt-0.5 text-[18px] font-extrabold tracking-[-0.035em] text-slate-900">
+            Weekly user lead targets
+          </h2>
+          <p className="mt-1 text-[10px] text-slate-500">
+            Uses each user&apos;s Lead Master first, then fills any shortfall
+            from Admin&apos;s unassigned priority pool. Changes save automatically.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {scheduleAvailable ? <div className="flex flex-wrap items-end gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[10px] font-semibold text-slate-600"><label>Start<input aria-label="Round-robin start time" type="time" value={scheduleConfig.start_time.slice(0, 5)} onChange={(event) => updateSchedule({ ...scheduleConfig, start_time: event.target.value })} className="ml-1 block h-6 rounded border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-700" /></label><label>End<input aria-label="Round-robin end time" type="time" value={scheduleConfig.end_time.slice(0, 5)} onChange={(event) => updateSchedule({ ...scheduleConfig, end_time: event.target.value })} className="ml-1 block h-6 rounded border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-700" /></label><label>Retry<select aria-label="Attendance retry interval" value={scheduleConfig.retry_interval_minutes} onChange={(event) => updateSchedule({ ...scheduleConfig, retry_interval_minutes: Number(event.target.value) })} className="ml-1 h-6 rounded border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-700">{[5, 10, 15, 20, 30, 45, 60].map((minutes) => <option key={minutes} value={minutes}>{minutes}m</option>)}</select></label>{isSavingSchedule && <span className="text-slate-400">Saving…</span>}</div> : <span className="rounded bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">Run schedule migration</span>}
+          <span className="rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-extrabold text-red-700">
+            Weekly capacity
+          </span>
+          <button
+            type="button"
+            disabled={isRunning}
+            onClick={() =>
+              startRun(async () => {
+                const response = await runRoundRobinForToday();
+                setFailed(!response.ok);
+                setSkippedUsers(response.skippedUsers);
+                setResult(
+                  response.ok
+                    ? `${response.message} ${response.focused} focused; ${response.newlyAssigned} newly assigned.`
+                    : response.message,
+                );
+              })
+            }
+            className="h-8 rounded bg-[#d90000] px-3 text-[10px] font-extrabold text-white hover:bg-red-700 disabled:bg-slate-300"
+          >
+            {isRunning ? "Running..." : "Run today now"}
+          </button>
+        </div>
+      </div>
+      {result && (
+        <p
+          role="status"
+          className={`mt-3 rounded-md border px-3 py-2 text-[11px] font-bold ${failed ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}
+        >
+          {result}
+        </p>
+      )}
+      {skippedUsers.length > 0 && (
+        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          <p className="font-extrabold">Not assigned due to attendance</p>
+          <ul className="mt-1 list-disc pl-4">
+            {skippedUsers.map((user) => (
+              <li key={`${user.name}:${user.reason}`}>
+                <span className="font-bold">{user.name}</span> — {user.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {members.length && products.length ? (
+        <div className="mt-3 space-y-3">
+          {members.map((member, memberIndex) => (
+            <article
+              key={member.id}
+              className="overflow-x-auto rounded-xl border border-slate-100"
+            >
+              <div
+                className={`flex items-center justify-between px-3 py-2 ${memberIndex % 2 ? "bg-violet-50" : "bg-red-50"}`}
+              >
+                <div>
+                  <p className="text-xs font-extrabold text-slate-800">
+                    Sales Person - {member.name}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-slate-500">
+                    {member.roles.map(roleLabel).join(", ")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${member.attendance.status === "present" ? "bg-emerald-100 text-emerald-700" : member.attendance.status === "absent" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500"}`}>{member.attendance.status === "present" ? `Present · ${punchInLabel(member.attendance.punchInTime)}` : member.attendance.status === "absent" ? "Absent · No punch-in" : "Attendance unavailable"}</span><span
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${memberIndex % 2 ? "bg-violet-100 text-violet-700" : "bg-red-100 text-red-700"}`}
+                >
+                  Total Target: {memberTotal(member.id)}
+                </span></div>
+              </div>
+              <table className="min-w-[760px] w-full text-center text-[11px]">
+                <thead className="bg-slate-50 font-extrabold text-slate-600">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left">Product</th>
+                    {days.map((day) => (
+                      <th key={day} className="px-2 py-1.5">
+                        {day}
+                      </th>
+                    ))}
+                    <th className="px-3 py-1.5">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((product) => {
+                    const total = days.reduce(
+                      (sum, _, index) =>
+                        sum + targetFor(member.id, product.id, index + 1),
+                      0,
+                    );
+                    return (
+                      <tr
+                        key={product.id}
+                        className="border-t border-slate-100"
+                      >
+                        <td className="px-3 py-1.5 text-left">
+                          <span className="font-extrabold text-slate-700">
+                            {product.code}
+                          </span>
+                          <span className="ml-1.5 text-[10px] text-slate-400">
+                            {product.name}
+                          </span>
+                        </td>
+                        <td colSpan={8} className="p-0">
+                          <div className="grid grid-cols-[repeat(7,minmax(60px,1fr))_72px] items-center gap-1 px-2 py-1">
+                            {days.map((day, index) => (
+                              <input
+                                key={day}
+                                aria-label={`${member.name} ${product.code} ${day} target`}
+                                name={`day${index + 1}`}
+                                type="number"
+                                min="0"
+                                max="100000"
+                                value={targetFor(
+                                  member.id,
+                                  product.id,
+                                  index + 1,
+                                )}
+                                onChange={(event) =>
+                                  updateValue(
+                                    member.id,
+                                    product.id,
+                                    index + 1,
+                                    Math.max(0, Number(event.target.value)),
+                                  )
+                                }
+                                className="h-7 w-full rounded border border-slate-200 bg-white px-1 text-center text-[11px] font-semibold text-slate-700 outline-none focus:border-red-400"
+                              />
+                            ))}
+                            <output className="font-extrabold text-slate-800">
+                              {total}
+                            </output>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="border-t border-red-100 bg-red-50 font-extrabold text-red-600">
+                  <tr>
+                    <td className="px-3 py-1.5 text-left">Total</td>
+                    {days.map((_, index) => (
+                      <td key={index}>
+                        {products.reduce(
+                          (sum, product) =>
+                            sum + targetFor(member.id, product.id, index + 1),
+                          0,
+                        )}
+                      </td>
+                    ))}
+                    <td>{memberTotal(member.id)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg bg-slate-50 p-4 text-xs font-semibold text-slate-500">
+          No active Sales Executive, Sales Manager, or Consultant users and
+          products are available for round-robin targets.
+        </p>
+      )}
+    </section>
+  );
 }

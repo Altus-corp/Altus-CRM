@@ -6,6 +6,8 @@ import { ColumnsManagement } from "@/components/leads/columns-management";
 import { LeadDatabasePriority } from "@/components/leads/lead-database-priority";
 import { RoundRobinWeeklyTargets } from "@/components/leads/round-robin-weekly-targets";
 import { createClient } from "@/app/lib/supabase/server";
+import { createAdminClient } from "@/app/lib/supabase/admin";
+import { attendanceAvailability, attendanceForEmail, getWmsAttendance } from "@/app/lib/wms-attendance";
 
 export const instant = false;
 
@@ -14,7 +16,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
   await requireAdmin();
   const { tab } = await searchParams;
   const supabase = await createClient();
-  const [{ data: products, error: productsError }, { data: stages }, { data: resolutions }, { data: mappings }, { data: columns, error: columnsError }, { data: priorities, error: prioritiesError }, { data: profiles }, { data: userRoles }, { data: weeklyTargets, error: weeklyTargetsError }] = await Promise.all([
+  const [{ data: products, error: productsError }, { data: stages }, { data: resolutions }, { data: mappings }, { data: columns, error: columnsError }, { data: priorities, error: prioritiesError }, { data: profiles }, { data: userRoles }, { data: weeklyTargets, error: weeklyTargetsError }, { data: schedule, error: scheduleError }] = await Promise.all([
     supabase.from("lead_products").select("id, code, name").order("code"),
     supabase.from("lead_stages").select("id, product_id, name, position").order("position"),
     supabase.from("lead_resolutions").select("id, name"),
@@ -24,6 +26,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
     supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended").eq("is_suspended", false).order("first_name"),
     supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
     supabase.from("lead_round_robin_weekly_targets").select("user_id, product_id, day_of_week, target_count"),
+    supabase.from("lead_round_robin_schedule").select("start_time, end_time, retry_interval_minutes").eq("id", 1).maybeSingle(),
   ]);
 
   // Dropdown management is only needed on its own tab, and its tables may not exist until the migration is run.
@@ -43,7 +46,22 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
   const productResolutions = (mappings ?? []).map((mapping) => ({ ...mapping, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
   const rolesByUser = new Map<string, string[]>();
   for (const role of userRoles ?? []) rolesByUser.set(role.user_id, [...(rolesByUser.get(role.user_id) ?? []), role.role]);
-  const roundRobinMembers = (profiles ?? []).filter((profile) => rolesByUser.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user", roles: rolesByUser.get(profile.id) ?? [] }));
+  const attendanceByUser = new Map<string, { status: "present" | "absent" | "unavailable"; punchInTime: string | null }>();
+  if (!tab && profiles?.length) {
+    const indiaParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const today = `${indiaParts.find((part) => part.type === "year")?.value}-${indiaParts.find((part) => part.type === "month")?.value}-${indiaParts.find((part) => part.type === "day")?.value}`;
+    const [authResult, attendanceResult] = await Promise.all([
+      createAdminClient().auth.admin.listUsers({ page: 1, perPage: 1000 }),
+      getWmsAttendance().catch(() => null),
+    ]);
+    const emailByUser = new Map((authResult.data.users ?? []).map((user) => [user.id, user.email ?? ""]));
+    for (const profile of profiles) {
+      const record = attendanceResult ? attendanceForEmail(attendanceResult, emailByUser.get(profile.id) ?? "") : null;
+      const availability = attendanceResult ? attendanceAvailability(record, today) : null;
+      attendanceByUser.set(profile.id, availability ? { status: availability.available ? "present" : "absent", punchInTime: record?.punchInTime ?? null } : { status: "unavailable", punchInTime: null });
+    }
+  }
+  const roundRobinMembers = (profiles ?? []).filter((profile) => rolesByUser.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user", roles: rolesByUser.get(profile.id) ?? [], attendance: attendanceByUser.get(profile.id) ?? { status: "unavailable" as const, punchInTime: null } }));
 
   return (
     <section className="mx-auto max-w-7xl">
@@ -56,7 +74,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
         <LeadConfiguration products={products ?? []} stages={stages ?? []} resolutions={productResolutions} />
       </> : !tab ? <>
         {prioritiesError ? <p className="mb-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">Round-robin priorities are unavailable. Run the lead database priorities migration first.</p> : <LeadDatabasePriority priorities={priorities ?? []} />}
-        {weeklyTargetsError ? <p className="rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">Round-robin weekly targets are unavailable. Run the round-robin weekly targets database migration first.</p> : <RoundRobinWeeklyTargets members={roundRobinMembers} products={products ?? []} targets={weeklyTargets ?? []} />}
+        {weeklyTargetsError ? <p className="rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">Round-robin weekly targets are unavailable. Run the round-robin weekly targets database migration first.</p> : <RoundRobinWeeklyTargets members={roundRobinMembers} products={products ?? []} targets={weeklyTargets ?? []} schedule={schedule ?? { start_time: "10:30", end_time: "15:00", retry_interval_minutes: 15 }} scheduleAvailable={!scheduleError} />}
       </> : null}
     </section>
   );

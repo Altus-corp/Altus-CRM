@@ -60,6 +60,20 @@ export async function updateRoundRobinWeeklyTargets(formData: FormData) {
   refresh();
 }
 
+export async function updateRoundRobinSchedule(formData: FormData) {
+  const { userId } = await requireAdmin();
+  const startTime = String(formData.get("startTime") ?? "");
+  const endTime = String(formData.get("endTime") ?? "");
+  const retryInterval = Number(formData.get("retryInterval"));
+  if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime) || startTime >= endTime || !Number.isInteger(retryInterval) || retryInterval < 5 || retryInterval > 120) {
+    throw new Error("Choose a valid start time, end time, and retry interval from 5 to 120 minutes.");
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("lead_round_robin_schedule").upsert({ id: 1, start_time: startTime, end_time: endTime, retry_interval_minutes: retryInterval, updated_at: new Date().toISOString(), updated_by: userId });
+  if (error) throw new Error(error.message);
+  refresh();
+}
+
 function indiaToday() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(new Date());
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
@@ -75,9 +89,8 @@ function relatedName(value: unknown) {
   return related && typeof related === "object" && "name" in related && typeof related.name === "string" ? related.name : "";
 }
 
-export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: string; focused: number; newlyAssigned: number; skippedUsers: { name: string; reason: string }[] }> {
+async function executeRoundRobin(userId: string): Promise<{ ok: boolean; message: string; focused: number; newlyAssigned: number; skippedUsers: { name: string; reason: string }[] }> {
   try {
-    const { userId } = await requireAdmin();
     const { date: today, dayOfWeek } = indiaToday();
     const supabase = createAdminClient();
     const [{ data: targets, error: targetsError }, { data: priorities, error: prioritiesError }] = await Promise.all([
@@ -180,6 +193,18 @@ export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: s
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to run round robin.", focused: 0, newlyAssigned: 0, skippedUsers: [] };
   }
+}
+
+export async function runRoundRobinForToday() {
+  const { userId } = await requireAdmin();
+  return executeRoundRobin(userId);
+}
+
+export async function runRoundRobinFromSchedule() {
+  const supabase = createAdminClient();
+  const { data: actor, error } = await supabase.from("user_roles").select("user_id").eq("role", "admin").limit(1).maybeSingle();
+  if (error || !actor?.user_id) return { ok: false, message: "No CRM admin account is available to record scheduled round-robin activity.", focused: 0, newlyAssigned: 0, skippedUsers: [] as { name: string; reason: string }[] };
+  return executeRoundRobin(actor.user_id);
 }
 
 export async function createLeadProduct(formData: FormData) {
