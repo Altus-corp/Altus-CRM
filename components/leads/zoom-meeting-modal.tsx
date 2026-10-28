@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { CalendarDays, Video, X } from "lucide-react";
 import { scheduleLeadZoomMeeting } from "@/app/dashboard/leads/actions";
 
-export function ZoomMeetingModal({ leadId, leadName, onClose, onScheduled }: { leadId: string; leadName: string; onClose: () => void; onScheduled: () => void }) {
+export function ZoomMeetingModal({ leadId, assignmentId, leadName, onClose, onScheduled }: { leadId: string; assignmentId: string; leadName: string; onClose: () => void; onScheduled: () => void }) {
   const [topic, setTopic] = useState(`Meeting with ${leadName}`);
   const [agenda, setAgenda] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -16,7 +16,7 @@ export function ZoomMeetingModal({ leadId, leadName, onClose, onScheduled }: { l
     event.preventDefault();
     startTransition(async () => {
       const formData = new FormData();
-      formData.set("leadId", leadId); formData.set("topic", topic); formData.set("agenda", agenda); formData.set("startTime", startTime); formData.set("duration", duration);
+      formData.set("leadId", leadId); formData.set("assignmentId", assignmentId); formData.set("topic", topic); formData.set("agenda", agenda); formData.set("startTime", startTime); formData.set("duration", duration);
       const result = await scheduleLeadZoomMeeting(formData);
       setMessage(result.message);
       if (result.ok) { onScheduled(); window.setTimeout(onClose, 900); }

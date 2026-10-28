@@ -6,12 +6,14 @@ import { useState, type ReactNode } from "react";
 import type { AppRole } from "@/app/lib/roles";
 import type { DashboardNavItem } from "@/app/lib/navigation";
 import { signOut } from "./actions";
+import { TodaysCallTarget } from "@/components/dashboard/todays-call-target";
 
 type DashboardShellProps = {
   children: ReactNode;
   navigation: DashboardNavItem[];
   roles: AppRole[];
   todayAssignedLeads: number;
+  products: { id: string; code: string; name: string }[];
 };
 
 function NavigationIcon({ label }: { label: string }) {
@@ -29,7 +31,7 @@ function NavigationIcon({ label }: { label: string }) {
   if (label.includes("Campaign") || label.includes("Marketing")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="m3 11 18-5v12L3 13v-2Z" /><path d="M11.6 15.4 10 21H6l1.4-7.1M21 10a3 3 0 0 1 0 4" /></svg>;
   }
-  if (label.includes("Deal") || label.includes("Sales")) {
+  if (label.includes("Deal") || label.includes("Sales") || label.includes("Product")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 3v18h18" /><path d="M7 16V9m5 7V5m5 11v-4" /></svg>;
   }
   if (label.includes("Appointment")) {
@@ -42,11 +44,42 @@ function NavigationIcon({ label }: { label: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 13a9 9 0 1 1 18 0" /><path d="M12 13 16 9M12 13l-3 5" /><circle cx="12" cy="13" r="1" /></svg>;
 }
 
+function ProductsNavigation({ products, pathname }: { products: DashboardShellProps["products"]; pathname: string }) {
+  const onProductPage = pathname.startsWith("/dashboard/products");
+  const [isOpen, setIsOpen] = useState(false);
+  const open = isOpen || onProductPage;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setIsOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls="products-navigation"
+        className={`flex min-h-9 w-full items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-left text-[13px] font-bold leading-tight transition ${onProductPage ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}
+      >
+        <span className={onProductPage ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Products" /></span>
+        Products
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className={`ml-auto h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}><path d="m5 7.5 5 5 5-5" /></svg>
+      </button>
+      {open && (
+        <div id="products-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">
+          {products.length ? products.map((product) => {
+            const href = `/dashboard/products/${product.code.toLowerCase()}`;
+            return <Link key={product.id} href={href} title={product.name} className={`block py-0.5 text-[11px] font-semibold ${pathname === href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>{product.code}</Link>;
+          }) : <p className="py-0.5 text-[10px] font-semibold text-slate-400">No products yet</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DashboardShell({
   children,
   navigation,
   roles,
   todayAssignedLeads,
+  products,
 }: DashboardShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -57,7 +90,7 @@ export function DashboardShell({
     { label: "Lead configuration", href: "/dashboard/lead-settings" },
     { label: "Columns management", href: "/dashboard/lead-settings?tab=columns" },
     { label: "Product management", href: "/dashboard/lead-settings?tab=products" },
-    { label: "Stages management", href: "/dashboard/lead-settings?tab=stages" },
+    { label: "Dropdown management", href: "/dashboard/lead-settings?tab=stages" },
     { label: "Call resolutions", href: "/dashboard/lead-settings?tab=resolutions" },
     { label: "Workflow actions", href: "/dashboard/lead-settings?tab=workflows" },
     { label: "Custom fields", href: "/dashboard/lead-settings?tab=custom-fields" },
@@ -83,6 +116,8 @@ export function DashboardShell({
 
         <nav className="mt-2.5 space-y-0" aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
+            if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
+
             const isActive = pathname === item.href;
 
             return (
@@ -144,19 +179,7 @@ export function DashboardShell({
         </nav>
 
         <div className="mt-auto">
-          {!isAdmin && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && (
-            <section className="mb-2 rounded-[10px] border border-[#d93b43] bg-gradient-to-br from-[#c90000] to-[#a90000] p-2 shadow-[0_7px_16px_rgba(181,0,0,0.2)]" aria-label="Today's assigned leads">
-              <p className="text-[9px] font-extrabold tracking-[-0.01em] text-white">Today&apos;s target</p>
-              <div className="mt-1.5 flex items-center gap-2">
-                <div className="grid h-[48px] w-[48px] shrink-0 place-items-center rounded-full bg-[conic-gradient(#ff5160_0deg_0deg,#f4b0b4_0deg_360deg)] p-[5px]">
-                  <div className="grid h-full w-full place-items-center rounded-full bg-[#b60000] text-center"><span className="text-[10px] font-extrabold text-white">0%</span></div>
-                </div>
-                <div><p className="text-[17px] font-extrabold leading-none text-white">{todayAssignedLeads}</p><p className="mt-1 text-[9px] font-semibold leading-tight text-red-100">Leads assigned<br />today</p></div>
-              </div>
-              <p className="mt-1.5 text-[8px] font-medium text-red-100">Call progress connects with the API later.</p>
-              <Link href="/dashboard/leads" className="mt-1.5 flex h-6 items-center justify-center rounded-[5px] border border-white/30 bg-white/10 text-[9px] font-extrabold text-white transition hover:bg-white/20">View Calling List <span className="ml-1">&rarr;</span></Link>
-            </section>
-          )}
+          {!isAdmin && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && <TodaysCallTarget assignedLeads={todayAssignedLeads} />}
           <form action={signOut}>
           <button className="flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700">
             <span className="text-lg">↪</span>

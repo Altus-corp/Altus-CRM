@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
+import { createAdminClient } from "@/app/lib/supabase/admin";
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
@@ -11,6 +12,7 @@ function slugify(value: string) {
 function refresh() {
   revalidatePath("/dashboard/lead-settings");
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/products", "layout");
 }
 
 export async function updateLeadDatabasePriority(formData: FormData) {
@@ -56,15 +58,123 @@ export async function updateRoundRobinWeeklyTargets(formData: FormData) {
   refresh();
 }
 
+function indiaToday() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(new Date());
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  const weekDay = get("weekday").toLowerCase();
+  const dayOfWeek = ({ mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 } as Record<string, number>)[weekDay];
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, dayOfWeek };
+}
+
+const releasedResolutionNames = new Set(["dnd", "not interested"]);
+
+function relatedName(value: unknown) {
+  const related = Array.isArray(value) ? value[0] : value;
+  return related && typeof related === "object" && "name" in related && typeof related.name === "string" ? related.name : "";
+}
+
+export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: string; focused: number; newlyAssigned: number }> {
+  try {
+    const { userId } = await requireAdmin();
+    const { date: today, dayOfWeek } = indiaToday();
+    const supabase = createAdminClient();
+    const [{ data: targets, error: targetsError }, { data: priorities, error: prioritiesError }] = await Promise.all([
+      supabase.from("lead_round_robin_weekly_targets").select("user_id, product_id, target_count").eq("day_of_week", dayOfWeek).gt("target_count", 0),
+      supabase.from("lead_database_priorities").select("database_key, priority").order("priority"),
+    ]);
+    if (targetsError) throw new Error(targetsError.message);
+    if (prioritiesError) throw new Error(prioritiesError.message);
+    if (!targets?.length) return { ok: true, message: "No round-robin targets are configured for today.", focused: 0, newlyAssigned: 0 };
+
+    const targetUserIds = [...new Set(targets.map((target) => target.user_id))];
+    const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }] = await Promise.all([
+      supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", targetUserIds),
+      supabase.from("user_roles").select("user_id, role").in("user_id", targetUserIds).in("role", ["sales_executive", "sales_manager", "consultant"]),
+    ]);
+    if (profilesError || rolesError) throw new Error(profilesError?.message ?? rolesError?.message ?? "Unable to validate the round-robin team.");
+    const eligibleUsers = new Set((profiles ?? []).filter((profile) => !profile.is_suspended && (roles ?? []).some((role) => role.user_id === profile.id)).map((profile) => profile.id));
+    const userNames = new Map((profiles ?? []).map((profile) => [profile.id, profile.full_name || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "a sales user"]));
+    const priorityByDatabase = new Map((priorities ?? []).map((priority) => [priority.database_key, priority.priority]));
+    let focused = 0;
+    let newlyAssigned = 0;
+    let skippedTargets = 0;
+
+    for (const target of targets) {
+      if (!eligibleUsers.has(target.user_id)) { skippedTargets += 1; continue; }
+      const { data: owned, error: ownedError } = await supabase
+        .from("lead_product_assignments")
+        .select("id, lead_id, focused_on, assigned_to, created_at, resolution:lead_resolutions(name)")
+        .eq("product_id", target.product_id)
+        .eq("assigned_to", target.user_id)
+        .eq("is_active", true)
+        .eq("is_closed", false)
+        .order("assigned_at", { ascending: true })
+        .limit(100000);
+      if (ownedError) throw new Error(ownedError.message);
+      const selectableOwned = (owned ?? []).filter((assignment) => !releasedResolutionNames.has(relatedName(assignment.resolution).toLowerCase()));
+      const focusedAlready = selectableOwned.filter((assignment) => assignment.focused_on === today);
+      const needed = Math.max(0, target.target_count - focusedAlready.length);
+      const fromMaster = selectableOwned.filter((assignment) => assignment.focused_on !== today).slice(0, needed);
+      if (fromMaster.length) {
+        const { error } = await supabase.from("lead_product_assignments").update({ focused_on: today }).in("id", fromMaster.map((assignment) => assignment.id));
+        if (error) throw new Error(error.message);
+        const { error: activityError } = await supabase.from("lead_activities").insert(fromMaster.map((assignment) => ({ lead_id: assignment.lead_id, lead_product_assignment_id: assignment.id, activity_type: "round_robin_focused", note: `Added to today's focused calling list for ${userNames.get(target.user_id)}.`, metadata: { focused_on: today, source: "owned_lead_master" }, created_by: userId })));
+        if (activityError) throw new Error(activityError.message);
+      }
+      focused += fromMaster.length;
+      const remaining = needed - fromMaster.length;
+      if (!remaining) continue;
+
+      const { data: unassigned, error: poolError } = await supabase
+        .from("lead_product_assignments")
+        .select("id, lead_id, created_at, resolution:lead_resolutions(name), lead:leads(lead_database)")
+        .eq("product_id", target.product_id)
+        .is("assigned_to", null)
+        .eq("is_active", true)
+        .eq("is_closed", false)
+        .order("created_at", { ascending: true })
+        .limit(100000);
+      if (poolError) throw new Error(poolError.message);
+      const fromPool = (unassigned ?? []).filter((assignment) => {
+        if (releasedResolutionNames.has(relatedName(assignment.resolution).toLowerCase())) return false;
+        const lead = (Array.isArray(assignment.lead) ? assignment.lead[0] : assignment.lead) as { lead_database?: string } | null;
+        return Boolean(lead?.lead_database);
+      }).sort((left, right) => {
+        const leftLead = (Array.isArray(left.lead) ? left.lead[0] : left.lead) as { lead_database?: string } | null;
+        const rightLead = (Array.isArray(right.lead) ? right.lead[0] : right.lead) as { lead_database?: string } | null;
+        return (priorityByDatabase.get(leftLead?.lead_database ?? "") ?? Number.MAX_SAFE_INTEGER) - (priorityByDatabase.get(rightLead?.lead_database ?? "") ?? Number.MAX_SAFE_INTEGER)
+          || new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+      }).slice(0, remaining);
+      if (!fromPool.length) continue;
+      const now = new Date().toISOString();
+      for (const assignment of fromPool) {
+        const { data: claimed, error: claimError } = await supabase.from("lead_product_assignments").update({ assigned_to: target.user_id, assigned_at: now, focused_on: today, assignment_origin: "round_robin" }).eq("id", assignment.id).is("assigned_to", null).select("id").maybeSingle();
+        if (claimError) throw new Error(claimError.message);
+        if (!claimed) continue;
+        newlyAssigned += 1;
+        focused += 1;
+        const { error: activityError } = await supabase.from("lead_activities").insert({ lead_id: assignment.lead_id, lead_product_assignment_id: assignment.id, activity_type: "round_robin_assigned", note: `Round-robin assigned to ${userNames.get(target.user_id)} and added to today's focused list.`, metadata: { assigned_to: target.user_id, focused_on: today, source: "admin_unassigned_pool" }, created_by: userId });
+        if (activityError) throw new Error(activityError.message);
+      }
+    }
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/lead-settings");
+    return { ok: true, message: `Round robin completed for ${today}.${skippedTargets ? ` ${skippedTargets} target${skippedTargets === 1 ? " was" : "s were"} skipped because the user is inactive or ineligible.` : ""}`, focused, newlyAssigned };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to run round robin.", focused: 0, newlyAssigned: 0 };
+  }
+}
+
 export async function createLeadProduct(formData: FormData) {
   await requireAdmin();
   const code = slugify(String(formData.get("code") ?? "")).toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
   if (!code || !name) throw new Error("Product code and name are required.");
   const supabase = await createClient();
-  const { error } = await supabase.from("lead_products").insert({ code, name });
-  if (error) throw new Error(error.message);
+  const { data: product, error } = await supabase.from("lead_products").insert({ code, name }).select("id, code, name").single();
+  if (error || !product) throw new Error(error?.message ?? "Unable to create product.");
   refresh();
+  return product;
 }
 
 export async function createLeadStage(formData: FormData) {
@@ -309,6 +419,65 @@ export async function createLeadCustomField(formData: FormData) {
   const { count } = await supabase.from("lead_custom_fields").select("id", { count: "exact", head: true }).eq("product_id", productId ?? "00000000-0000-0000-0000-000000000000");
   const fieldKey = `${slugify(label)}_${crypto.randomUUID().slice(0, 6)}`;
   const { error } = await supabase.from("lead_custom_fields").insert({ product_id: productId, field_key: fieldKey, label, field_type: fieldType, options, show_when_field_id: showWhenFieldId, show_when_value: showWhenValue, position: (count ?? 0) + 1 });
+  if (error) throw new Error(error.message);
+  refresh();
+}
+
+export async function createStageDropdown(formData: FormData) {
+  await requireAdmin();
+  const stageId = String(formData.get("stageId") ?? "");
+  const label = String(formData.get("label") ?? "").trim();
+  if (!stageId || !label) throw new Error("Choose a stage and enter a dropdown name.");
+  if (label.length > 80) throw new Error("Dropdown names can be up to 80 characters.");
+  const supabase = await createClient();
+  const { data: stage, error: stageError } = await supabase.from("lead_stages").select("id, product_id").eq("id", stageId).single();
+  if (stageError || !stage) throw new Error("This stage is no longer available.");
+  const { count } = await supabase.from("lead_stage_dropdowns").select("id", { count: "exact", head: true }).eq("stage_id", stageId);
+  const { error } = await supabase.from("lead_stage_dropdowns").insert({ product_id: stage.product_id, stage_id: stageId, label, position: (count ?? 0) + 1 });
+  if (error) throw new Error(error.code === "23505" ? "This stage already has a dropdown with that name." : error.message);
+  refresh();
+}
+
+export async function renameStageDropdown(formData: FormData) {
+  await requireAdmin();
+  const dropdownId = String(formData.get("dropdownId") ?? "");
+  const label = String(formData.get("label") ?? "").trim();
+  if (!dropdownId || !label || label.length > 80) throw new Error("Enter a dropdown name of up to 80 characters.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("lead_stage_dropdowns").update({ label }).eq("id", dropdownId);
+  if (error) throw new Error(error.code === "23505" ? "This stage already has a dropdown with that name." : error.message);
+  refresh();
+}
+
+export async function deleteStageDropdown(formData: FormData) {
+  await requireAdmin();
+  const dropdownId = String(formData.get("dropdownId") ?? "");
+  if (!dropdownId) throw new Error("Choose a dropdown to delete.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("lead_stage_dropdowns").delete().eq("id", dropdownId);
+  if (error) throw new Error(error.message);
+  refresh();
+}
+
+export async function createStageDropdownOption(formData: FormData) {
+  await requireAdmin();
+  const dropdownId = String(formData.get("dropdownId") ?? "");
+  const label = String(formData.get("label") ?? "").trim();
+  if (!dropdownId || !label) throw new Error("Enter an option name.");
+  if (label.length > 100) throw new Error("Options can be up to 100 characters.");
+  const supabase = await createClient();
+  const { count } = await supabase.from("lead_stage_dropdown_options").select("id", { count: "exact", head: true }).eq("dropdown_id", dropdownId);
+  const { error } = await supabase.from("lead_stage_dropdown_options").insert({ dropdown_id: dropdownId, label, position: (count ?? 0) + 1 });
+  if (error) throw new Error(error.code === "23505" ? "This dropdown already has that option." : error.message);
+  refresh();
+}
+
+export async function deleteStageDropdownOption(formData: FormData) {
+  await requireAdmin();
+  const optionId = String(formData.get("optionId") ?? "");
+  if (!optionId) throw new Error("Choose an option to remove.");
+  const supabase = await createClient();
+  const { error } = await supabase.from("lead_stage_dropdown_options").delete().eq("id", optionId);
   if (error) throw new Error(error.message);
   refresh();
 }

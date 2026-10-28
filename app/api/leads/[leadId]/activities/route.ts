@@ -1,15 +1,18 @@
 import { requireUser } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
 
-export async function GET(_request: Request, context: { params: Promise<{ leadId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ leadId: string }> }) {
   try {
     await requireUser();
     const { leadId } = await context.params;
+    const assignmentId = new URL(request.url).searchParams.get("assignmentId");
+    if (!assignmentId) return Response.json({ ok: false, error: "Product assignment is required." }, { status: 400 });
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("lead_activities")
       .select("id, activity_type, note, follow_up_at, created_at, metadata, created_by")
       .eq("lead_id", leadId)
+      .eq("lead_product_assignment_id", assignmentId)
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) return Response.json({ ok: false, error: error.message }, { status: 400 });

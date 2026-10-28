@@ -14,7 +14,7 @@ export const LEAD_ACTIVITY_OPTIONS = [
   { value: "online_meeting", label: "Online meeting" },
 ] as const;
 
-export function ActivityColumn({ leadId }: { leadId: string }) {
+export function ActivityColumn({ leadId, assignmentId }: { leadId: string; assignmentId: string }) {
   const [selected, setSelected] = useState("");
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -26,6 +26,7 @@ export function ActivityColumn({ leadId }: { leadId: string }) {
     startTransition(async () => {
       const formData = new FormData();
       formData.set("leadId", leadId);
+      formData.set("assignmentId", assignmentId);
       formData.set("activityType", activityType);
       try {
         await createLeadActivity(formData);

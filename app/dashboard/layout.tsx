@@ -20,12 +20,15 @@ export default async function DashboardLayout({
   const indiaDayStart = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate(), -5, -30));
   const indiaDayEnd = new Date(indiaDayStart.getTime() + 24 * 60 * 60 * 1000);
   const supabase = await createClient();
+  const { data: products } = roles.includes("sales_executive")
+    ? await supabase.from("lead_products").select("id, code, name").eq("is_active", true).order("code")
+    : { data: [] };
   const { count: todayAssignedLeads } = hasSalesWorkspace
     ? await supabase.from("leads").select("id", { count: "exact", head: true }).eq("assigned_to", userId).gte("assigned_at", indiaDayStart.toISOString()).lt("assigned_at", indiaDayEnd.toISOString())
     : { count: 0 };
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} todayAssignedLeads={todayAssignedLeads ?? 0}>
+    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} todayAssignedLeads={todayAssignedLeads ?? 0} products={products ?? []}>
       {children}
     </DashboardShell>
   );

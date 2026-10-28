@@ -6,7 +6,7 @@ import { importLeadsCsv } from "@/app/dashboard/leads/actions";
 type SampleColumn = { label: string; field_key: string; computed_from?: string[] };
 
 function downloadSample(columns: SampleColumn[]) {
-  const importColumns = columns.filter((column) => !column.computed_from?.length);
+  const importColumns = columns.filter((column) => !column.computed_from?.length && !["lead_number", "lead_acquisition_date", "created_at"].includes(column.field_key) && !["lead no", "lead number", "lead acquisition date"].includes(column.label.trim().toLowerCase()));
   const headers = importColumns.map((column) => column.label);
   const sample = importColumns.map((column) => {
     if (column.field_key === "lead_name") return "Ananya Sharma";

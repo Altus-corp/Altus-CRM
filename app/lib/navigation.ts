@@ -19,10 +19,12 @@ const roleNavigation: DashboardNavItem[] = [
   { label: "Settings", href: "/dashboard/settings", roles: ["admin"] },
 
   { label: "Sales overview", href: "/dashboard/sales-manager", roles: ["sales_manager"] },
-  { label: "Deals", href: "/dashboard/deals", roles: ["sales_manager", "sales_executive"] },
+  { label: "Deals", href: "/dashboard/deals", roles: ["sales_manager"] },
+  { label: "Products", href: "/dashboard/products", roles: ["sales_executive"] },
   { label: "Sales team", href: "/dashboard/sales-team", roles: ["sales_manager"] },
   { label: "Sales reports", href: "/dashboard/sales-reports", roles: ["sales_manager"] },
   { label: "My sales workspace", href: "/dashboard/sales-executive", roles: ["sales_executive"] },
+  { label: "Upcoming follow-ups", href: "/dashboard/upcoming-follow-ups", roles: ["sales_executive"] },
 
   { label: "My clients", href: "/dashboard/consultant", roles: ["consultant"] },
   { label: "Appointments", href: "/dashboard/appointments", roles: ["consultant"] },

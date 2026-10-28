@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/app/lib/auth";
 import { connection } from "next/server";
+import { DropdownManagement, type StageDropdown } from "@/components/leads/dropdown-management";
 import { LeadConfiguration } from "@/components/leads/lead-configuration";
 import { ColumnsManagement } from "@/components/leads/columns-management";
 import { LeadDatabasePriority } from "@/components/leads/lead-database-priority";
@@ -25,6 +26,18 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
     supabase.from("lead_round_robin_weekly_targets").select("user_id, product_id, day_of_week, target_count"),
   ]);
 
+  // Dropdown management is only needed on its own tab, and its tables may not exist until the migration is run.
+  let dropdowns: StageDropdown[] = [];
+  let dropdownsError = false;
+  if (tab === "stages") {
+    const [{ data: dropdownRows, error: dropdownRowsError }, { data: optionRows, error: optionRowsError }] = await Promise.all([
+      supabase.from("lead_stage_dropdowns").select("id, product_id, stage_id, label, position").order("position"),
+      supabase.from("lead_stage_dropdown_options").select("id, dropdown_id, label, position").order("position"),
+    ]);
+    dropdownsError = Boolean(dropdownRowsError || optionRowsError);
+    dropdowns = (dropdownRows ?? []).map((dropdown) => ({ ...dropdown, options: (optionRows ?? []).filter((option) => option.dropdown_id === dropdown.id) }));
+  }
+
   if (productsError) throw new Error("Lead configuration is not available. Run the lead-engine database migration first.");
   const resolutionNames = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
   const productResolutions = (mappings ?? []).map((mapping) => ({ ...mapping, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
@@ -37,6 +50,8 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
 
       {tab === "columns" ? (
         columnsError ? <p className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Columns management is not available. Run the lead-table-columns database migration first.</p> : <ColumnsManagement columns={columns ?? []} />
+      ) : tab === "stages" ? (
+        dropdownsError ? <p className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Dropdown management is not set up yet. Run 20261026_create_stage_dropdowns.sql in the Supabase SQL Editor.</p> : <DropdownManagement products={products ?? []} stages={stages ?? []} dropdowns={dropdowns} />
       ) : tab === "products" ? <>
         <LeadConfiguration products={products ?? []} stages={stages ?? []} resolutions={productResolutions} />
       </> : !tab ? <>
