@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
@@ -10,6 +10,7 @@ function slugify(value: string) {
 }
 
 function refresh() {
+  updateTag("lead-shared-config");
   revalidatePath("/dashboard/lead-settings");
   revalidatePath("/dashboard/leads");
   revalidatePath("/dashboard/products", "layout");

@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { requireUser } from "@/app/lib/auth";
 import { getDashboardNavigation } from "@/app/lib/navigation";
 import { createClient } from "@/app/lib/supabase/server";
+import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import { DashboardShell } from "./dashboard-shell";
 
 export const instant = false;
@@ -15,20 +16,16 @@ export default async function DashboardLayout({
   await connection();
   const { roles, userId } = await requireUser();
   const hasSalesWorkspace = roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant");
-  const now = new Date();
-  const indiaNow = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  const indiaDayStart = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate(), -5, -30));
-  const indiaDayEnd = new Date(indiaDayStart.getTime() + 24 * 60 * 60 * 1000);
   const supabase = await createClient();
-  const { data: products } = roles.includes("sales_executive")
-    ? await supabase.from("lead_products").select("id, code, name").eq("is_active", true).order("code")
-    : { data: [] };
+  const indiaDateParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const indiaDate = [indiaDateParts.find((part) => part.type === "year")?.value, indiaDateParts.find((part) => part.type === "month")?.value, indiaDateParts.find((part) => part.type === "day")?.value].join("-");
+  const sharedConfig = roles.includes("sales_executive") ? await getLeadSharedConfig() : null;
   const { count: todayAssignedLeads } = hasSalesWorkspace
-    ? await supabase.from("leads").select("id", { count: "exact", head: true }).eq("assigned_to", userId).gte("assigned_at", indiaDayStart.toISOString()).lt("assigned_at", indiaDayEnd.toISOString())
+    ? await supabase.from("lead_product_assignments").select("id", { count: "exact", head: true }).eq("assigned_to", userId).eq("focused_on", indiaDate).eq("is_active", true)
     : { count: 0 };
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} todayAssignedLeads={todayAssignedLeads ?? 0} products={products ?? []}>
+    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
       {children}
     </DashboardShell>
   );

@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import type { AppRole } from "@/app/lib/roles";
 import { createClient } from "@/app/lib/supabase/server";
 
-export async function requireUser() {
+export const requireUser = cache(async () => {
     const supabase = await createClient();
 
     const { data } = await supabase.auth.getClaims();
@@ -49,7 +50,7 @@ export async function requireUser() {
         userId,
         roles: roles.map((item) => item.role as AppRole),
     };
-}
+});
 
 export async function requireAdmin() {
     const user = await requireUser();

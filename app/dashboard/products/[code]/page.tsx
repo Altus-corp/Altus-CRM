@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { requireUser } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
+import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
 import { ProductStageBoard, type BoardDropdown, type BoardLead, type PreDetails } from "./product-stage-board";
 
@@ -33,27 +34,20 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   const { code } = await params;
   const supabase = await createClient();
-  const { data: product } = await supabase
-    .from("lead_products")
-    .select("id, code, name")
-    .ilike("code", code)
-    .eq("is_active", true)
-    .maybeSingle();
+  const sharedConfig = await getLeadSharedConfig();
+  const product = sharedConfig.products.find((item) => item.code.toLowerCase() === code.toLowerCase()) ?? null;
 
   if (!product) {
     notFound();
   }
 
-  const [{ data: allStages }, { data: assignments, error }, { data: productResolutions }, dropdownResult, { data: columns }]  = await Promise.all([
-    supabase.from("lead_stages").select("id, name, position").eq("product_id", product.id).eq("is_active", true).order("position"),
+  const [{ data: assignments, error }, dropdownResult]  = await Promise.all([
     supabase
       .from("lead_product_assignments")
       .select("id, lead_id, stage_id, latest_resolution_id, assigned_at, next_follow_up_at, resolution:lead_resolutions(name), lead:leads(lead_number, first_name, last_name, phone, email, created_at, custom_data, assignments:lead_product_assignments(id, assigned_to, assigned_at, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name)))")
       .eq("assigned_to", userId).eq("product_id", product.id).eq("is_active", true).eq("is_closed", false)
-      .order("assigned_at", { ascending: false, nullsFirst: false }).limit(2000),
-    supabase.from("lead_product_resolutions").select("resolution:lead_resolutions(id, name)").eq("product_id", product.id).eq("is_active", true),
+      .order("assigned_at", { ascending: false, nullsFirst: false }).limit(200),
     supabase.from("lead_stage_dropdowns").select("id, stage_id, label, position, options:lead_stage_dropdown_options(id, label, position)").eq("product_id", product.id).eq("is_active", true).order("position"),
-    supabase.from("lead_table_columns").select("id, field_key, label, field_type, options, is_visible, computed_from").order("position"),
   ]);
 
   if (error) {
@@ -61,41 +55,40 @@ export default async function ProductPage({ params }: ProductPageProps) {
   }
 
   const phases = PRODUCT_PHASES[product.code.toUpperCase()];
-  const stages = (allStages ?? [])
+  const stages = sharedConfig.stages.filter((stage) => stage.product_id === product.id)
     .filter((stage) => !phases || phases.some((phase) => phase.toLowerCase() === stage.name.toLowerCase()))
     .sort((a, b) => phases ? phases.findIndex((phase) => phase.toLowerCase() === a.name.toLowerCase()) - phases.findIndex((phase) => phase.toLowerCase() === b.name.toLowerCase()) : a.position - b.position)
     .map((stage) => ({ id: stage.id, name: stage.name }));
 
   const rows = (assignments ?? []) as unknown as Row[];
   const assignmentIds = rows.map((row) => row.id);
-  const { data: notes } = assignmentIds.length
-    ? await supabase.from("lead_activities").select("lead_product_assignment_id, note, created_at").eq("activity_type", "note").in("lead_product_assignment_id", assignmentIds).order("created_at", { ascending: false }).limit(5000)
-    : { data: [] as { lead_product_assignment_id: string; note: string | null; created_at: string }[] };
-  const latestNote = new Map<string, string>();
-  for (const item of notes ?? []) if (item.note && !latestNote.has(item.lead_product_assignment_id)) latestNote.set(item.lead_product_assignment_id, item.note);
-
-  const resolutions = (productResolutions ?? []).flatMap((item) => { const resolution = one(item.resolution as { id: string; name: string } | { id: string; name: string }[] | null); return resolution ? [resolution] : []; }).sort((a, b) => a.name.localeCompare(b.name));
+  const resolutionNames = new Map(sharedConfig.resolutions.map((resolution) => [resolution.id, resolution.name]));
+  const resolutions = sharedConfig.resolutionMappings.filter((mapping) => mapping.product_id === product.id).flatMap((mapping) => {
+    const name = resolutionNames.get(mapping.resolution_id);
+    return name ? [{ id: mapping.resolution_id, name }] : [];
+  }).sort((a, b) => a.name.localeCompare(b.name));
   const dropdownsReady = !dropdownResult.error;
   const dropdowns: BoardDropdown[] = (dropdownResult.data ?? []).map((dropdown) => ({ id: dropdown.id, stageId: dropdown.stage_id, label: dropdown.label, options: [...((dropdown.options ?? []) as { id: string; label: string; position: number }[])].sort((a, b) => a.position - b.position).map((option) => ({ id: option.id, label: option.label })) }));
-  const valuesResult = dropdownsReady && assignmentIds.length && dropdowns.length
-    ? await supabase.from("lead_stage_dropdown_values").select("assignment_id, dropdown_id, option_id").in("assignment_id", assignmentIds)
-    : { data: [], error: null };
+  const isPso = product.code.toUpperCase() === "PSO";
+  const assigneeIds = [...new Set(rows.flatMap((row) => (one(row.lead)?.assignments ?? []).map((assignment) => assignment.assigned_to)).filter((id): id is string => Boolean(id)))];
+  const [notesResult, valuesResult, detailsResult, assigneesResult] = await Promise.all([
+    assignmentIds.length ? supabase.from("lead_activities").select("lead_product_assignment_id, note, created_at").eq("activity_type", "note").in("lead_product_assignment_id", assignmentIds).order("created_at", { ascending: false }).limit(600) : Promise.resolve({ data: [] as { lead_product_assignment_id: string; note: string | null; created_at: string }[] }),
+    dropdownsReady && assignmentIds.length && dropdowns.length ? supabase.from("lead_stage_dropdown_values").select("assignment_id, dropdown_id, option_id").in("assignment_id", assignmentIds) : Promise.resolve({ data: [] as { assignment_id: string; dropdown_id: string; option_id: string }[] }),
+    isPso && assignmentIds.length ? supabase.from("lead_pre_pso_details").select("assignment_id, confirmation_notes").in("assignment_id", assignmentIds) : Promise.resolve({ data: [] as { assignment_id: string; confirmation_notes: string | null }[], error: null }),
+    assigneeIds.length ? supabase.from("profiles").select("id, first_name, last_name").in("id", assigneeIds) : Promise.resolve({ data: [] as { id: string; first_name: string | null; last_name: string | null }[] }),
+  ]);
+  const latestNote = new Map<string, string>();
+  for (const item of notesResult.data ?? []) if (item.note && !latestNote.has(item.lead_product_assignment_id)) latestNote.set(item.lead_product_assignment_id, item.note);
   const choices = new Map<string, Record<string, string>>();
   for (const value of valuesResult.data ?? []) choices.set(value.assignment_id, { ...(choices.get(value.assignment_id) ?? {}), [value.dropdown_id]: value.option_id });
 
   // Pre PSO confirmation details live in their own table; keep the page usable if its migration has not been run yet.
-  const isPso = product.code.toUpperCase() === "PSO";
-  const detailsResult = isPso && assignmentIds.length
-    ? await supabase.from("lead_pre_pso_details").select("assignment_id, confirmation_notes").in("assignment_id", assignmentIds)
-    : { data: [], error: null };
   const detailsReady = isPso && !detailsResult.error;
   const details = new Map<string, PreDetails>((detailsResult.data ?? []).map((row) => [row.assignment_id, { notes: row.confirmation_notes ?? "" }]));
 
   // The lead detail panel (double-click a row) needs the same data the Leads table gives it.
-  const assigneeIds = [...new Set(rows.flatMap((row) => (one(row.lead)?.assignments ?? []).map((assignment) => assignment.assigned_to)).filter((id): id is string => Boolean(id)))];
-  const { data: assignees } = assigneeIds.length ? await supabase.from("profiles").select("id, first_name, last_name").in("id", assigneeIds) : { data: [] as { id: string; first_name: string | null; last_name: string | null }[] };
-  const assignedNames = Object.fromEntries((assignees ?? []).map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unassigned user"]));
-  const detailColumns = ((columns ?? []) as (LeadColumn & { is_visible: boolean })[]).filter((column) => column.is_visible);
+  const assignedNames = Object.fromEntries((assigneesResult.data ?? []).map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unassigned user"]));
+  const detailColumns = (sharedConfig.columns as (LeadColumn & { is_visible: boolean })[]).filter((column) => column.is_visible);
 
   const leads: BoardLead[] = rows.flatMap((row) => {
     const lead = one(row.lead);
