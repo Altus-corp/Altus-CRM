@@ -54,7 +54,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
       createAdminClient().auth.admin.listUsers({ page: 1, perPage: 1000 }),
       getWmsAttendance().catch(() => null),
     ]);
-    const emailByUser = new Map((authResult.data.users ?? []).map((user) => [user.id, user.email ?? ""]));
+    const emailByUser = new Map((authResult.data?.users ?? []).map((user) => [user.id, user.email ?? ""]));
     for (const profile of profiles) {
       const record = attendanceResult ? attendanceForEmail(attendanceResult, emailByUser.get(profile.id) ?? "") : null;
       const availability = attendanceResult ? attendanceAvailability(record, today) : null;
