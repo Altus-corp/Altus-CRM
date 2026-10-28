@@ -13,10 +13,11 @@ const commonNavigation: DashboardNavItem[] = [
 
 const roleNavigation: DashboardNavItem[] = [
   { label: "Admin overview", href: "/dashboard/admin", roles: ["admin"] },
+  { label: "DND Master", href: "/dashboard/dnd-master", roles: ["admin"] },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },
   { label: "Lead configuration", href: "/dashboard/lead-settings", roles: ["admin"] },
-  { label: "Settings", href: "/dashboard/settings", roles: ["admin"] },
+  { label: "Settings", href: "/dashboard/settings", roles: ["admin", "sales_executive", "sales_manager"] },
 
   { label: "Sales overview", href: "/dashboard/sales-manager", roles: ["sales_manager"] },
   { label: "Deals", href: "/dashboard/deals", roles: ["sales_manager"] },
@@ -24,6 +25,7 @@ const roleNavigation: DashboardNavItem[] = [
   { label: "Sales team", href: "/dashboard/sales-team", roles: ["sales_manager"] },
   { label: "Sales reports", href: "/dashboard/sales-reports", roles: ["sales_manager"] },
   { label: "My sales workspace", href: "/dashboard/sales-executive", roles: ["sales_executive"] },
+  { label: "Templates", href: "/dashboard/message-templates", roles: ["admin", "sales_executive", "sales_manager"] },
   { label: "Upcoming follow-ups", href: "/dashboard/upcoming-follow-ups", roles: ["sales_executive"] },
 
   { label: "My clients", href: "/dashboard/consultant", roles: ["consultant"] },

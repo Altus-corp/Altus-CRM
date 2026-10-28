@@ -21,6 +21,12 @@ type DashboardShellProps = {
 function NavigationIcon({ label }: { label: string }) {
   const iconClass = "h-5 w-5 stroke-[2]";
 
+  if (label.includes("Template")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" /><path d="M8 8h8M8 12h5" /></svg>;
+  }
+  if (label.includes("DND")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><circle cx="12" cy="12" r="9" /><path d="m5.6 5.6 12.8 12.8" /></svg>;
+  }
   if (label.includes("Lead") || label.includes("Client") || label === "Users") {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
   }

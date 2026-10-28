@@ -5,6 +5,8 @@ import { requireAdmin, requireUser } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { sendLeadMeetingInvitation } from "@/app/lib/email";
+import { sendEmailWithUserSmtp } from "@/app/lib/smtp-settings";
+import type { MessageTemplate } from "@/app/lib/message-templates";
 import { createZoomMeeting } from "@/app/lib/zoom";
 import { createGoogleMeetEvent } from "@/app/lib/google-calendar";
 import { altusContactsRequest } from "@/app/lib/altus-contacts";
@@ -589,6 +591,76 @@ export async function manuallyAssignLeads(formData: FormData) {
   revalidatePath("/dashboard/leads");
 }
 
+export async function deleteLeads(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  await requireAdmin();
+  const assignmentIds = [...new Set(formData.getAll("assignmentId").map(String).filter(Boolean))];
+  if (!assignmentIds.length || assignmentIds.length > 100) return { ok: false, message: "Select between 1 and 100 leads to delete." };
+  const supabase = await createClient();
+  const { data: assignments, error: assignmentsError } = await supabase.from("lead_product_assignments").select("lead_id").in("id", assignmentIds);
+  if (assignmentsError) return { ok: false, message: assignmentsError.message };
+  const leadIds = [...new Set((assignments ?? []).map((assignment) => assignment.lead_id))];
+  if (!leadIds.length) return { ok: false, message: "The selected leads are no longer available." };
+  const { error } = await supabase.from("leads").delete().in("id", leadIds);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/dashboard/leads");
+  return { ok: true, message: `${leadIds.length} lead${leadIds.length === 1 ? "" : "s"} deleted.` };
+}
+
+async function assignmentProductCode(supabase: ReturnType<typeof createAdminClient>, assignmentId: string) {
+  const { data } = await supabase.from("lead_product_assignments").select("product:lead_products(code)").eq("id", assignmentId).maybeSingle();
+  const product = Array.isArray(data?.product) ? data?.product[0] : data?.product;
+  return product?.code ?? null;
+}
+
+export async function sendEmailToLead(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  const leadId = String(formData.get("leadId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const subject = String(formData.get("subject") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+  if (!subject || !body) return { ok: false, message: "Enter a subject and a message." };
+  if (subject.length > 200 || body.length > 10000) return { ok: false, message: "The subject or message is too long." };
+  try {
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const [{ data: lead, error }, productCode] = await Promise.all([supabase.from("leads").select("email").eq("id", leadId).single(), assignmentProductCode(supabase, assignmentId)]);
+    if (error || !lead?.email) return { ok: false, message: "This lead has no email address." };
+    await sendEmailWithUserSmtp(userId, { to: lead.email, subject, text: body });
+    await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "email", note: `Email sent to ${lead.email}: ${subject}`, metadata: { channel: "email", direction: "sent", to: lead.email, subject, body, product_code: productCode }, created_by: userId });
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: `Email sent to ${lead.email}.` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The email could not be sent." };
+  }
+}
+
+export async function listTemplatesForAssignment(assignmentId: string, channel: "email" | "whatsapp"): Promise<(MessageTemplate & { matchesStage: boolean })[]> {
+  await requireUser();
+  const supabase = createAdminClient();
+  const { data: assignment } = await supabase.from("lead_product_assignments").select("product_id, stage_id").eq("id", assignmentId).maybeSingle();
+  if (!assignment) return [];
+  const { data } = await supabase.from("lead_message_templates").select("id, product_id, stage_id, channel, name, subject, body, created_by, stage:lead_stages(name)").eq("product_id", assignment.product_id).eq("channel", channel).order("created_at");
+  return (data ?? []).map((template) => {
+    const stage = Array.isArray(template.stage) ? template.stage[0] : template.stage;
+    return { id: template.id, product_id: template.product_id, stage_id: template.stage_id, stage_name: stage?.name ?? null, channel: template.channel as "email" | "whatsapp", name: template.name, subject: template.subject, body: template.body, created_by: template.created_by, matchesStage: !template.stage_id || template.stage_id === assignment.stage_id };
+  });
+}
+
+export async function logWhatsappMessage(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  const leadId = String(formData.get("leadId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const body = String(formData.get("body") ?? "").trim();
+  if (!body) return { ok: false, message: "Write a message first." };
+  try {
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const [{ data: lead }, productCode] = await Promise.all([supabase.from("leads").select("phone").eq("id", leadId).single(), assignmentProductCode(supabase, assignmentId)]);
+    const { error } = await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "whatsapp_message", note: `WhatsApp message to ${lead?.phone ?? "lead"}`, metadata: { channel: "whatsapp", direction: "sent", to: lead?.phone ?? null, body, product_code: productCode }, created_by: userId });
+    if (error) return { ok: false, message: error.message };
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: "WhatsApp opened and recorded in Activity." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The message could not be recorded." };
+  }
+}
+
 export async function addLeadProductAssignment(formData: FormData) {
   const { userId } = await requireAdmin();
   const leadId = String(formData.get("leadId") ?? "");
@@ -785,6 +857,7 @@ export async function attachTranscriptToProduct(formData: FormData) {
   if (transcriptError || !transcript || assignmentError || !assignment) throw new Error("This transcript or product is no longer available.");
   const { error } = await supabase.from("lead_call_transcripts").update({ lead_product_assignment_id: assignmentId, updated_at: new Date().toISOString() }).eq("id", transcriptId);
   if (error) throw new Error(error.message);
+  await supabase.from("lead_activities").update({ lead_product_assignment_id: assignmentId }).eq("lead_id", leadId).eq("activity_type", "call").contains("metadata", { source: "altus_contacts", call_id: transcript.altus_call_id });
   const product = Array.isArray(assignment.product) ? assignment.product[0] : assignment.product;
   const { error: activityError } = await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "transcript_attached", note: `Altus call transcript #${transcript.altus_call_id} attached to ${product?.code ?? "this product"}.`, metadata: { transcript_id: transcriptId, altus_call_id: transcript.altus_call_id }, created_by: userId });
   if (activityError) throw new Error(activityError.message);

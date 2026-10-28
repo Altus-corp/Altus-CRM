@@ -38,7 +38,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const referenceLeadsCount = referenceResult?.count ?? 0;
   const qualifiedLeadsCount = qualifiedResult?.count ?? 0;
   const leadsCount = leadsCountResult?.count ?? 0;
-  const assignmentProfiles = profilesResult?.data ?? [];
+  const assignedUserIds = [...new Set((leads ?? []).flatMap((lead) => (Array.isArray(lead.assignments) ? lead.assignments : []).map((assignment) => assignment.assigned_to)).filter((id): id is string => Boolean(id)))];
+  const assignedProfilesResult = !isAdmin && assignedUserIds.length ? await supabase.from("profiles").select("id, first_name, last_name, full_name").in("id", assignedUserIds) : null;
+  const assignmentProfiles = profilesResult?.data ?? assignedProfilesResult?.data ?? [];
   const assignmentRoles = rolesResult?.data ?? [];
 
   if (columnsError) return <section className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Leads table configuration is unavailable. Ask an admin to run the lead-table-columns database migration.</section>;
