@@ -48,6 +48,7 @@ export const requireUser = cache(async () => {
 
     return {
         userId,
+        email: user.email?.trim().toLowerCase() ?? "",
         roles: roles.map((item) => item.role as AppRole),
     };
 });

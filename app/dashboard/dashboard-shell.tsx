@@ -7,6 +7,7 @@ import type { AppRole } from "@/app/lib/roles";
 import type { DashboardNavItem } from "@/app/lib/navigation";
 import { signOut } from "./actions";
 import { TodaysCallTarget } from "@/components/dashboard/todays-call-target";
+import { WmsProfileAvatar } from "@/components/dashboard/wms-profile-avatar";
 
 type DashboardShellProps = {
   children: ReactNode;
@@ -202,7 +203,7 @@ export function DashboardShell({
             <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
             <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>
             <button aria-label="Notifications" className="relative grid h-9 w-10 place-items-center rounded-lg border border-slate-200 bg-white text-lg text-[#182035]">♧<span className="absolute -right-1 -top-2 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#d90000] px-1 text-[9px] font-bold text-white">3</span></button>
-            <div className="grid h-9 w-9 place-items-center rounded-full bg-[#d90000] text-[10px] font-extrabold text-white">{roles.includes("admin") ? "AD" : "TM"}</div>
+            <WmsProfileAvatar initials={roles.includes("admin") ? "AD" : "TM"} />
           </div>
         </header>
 

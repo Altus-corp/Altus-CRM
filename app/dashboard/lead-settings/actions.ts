@@ -4,6 +4,7 @@ import { revalidatePath, updateTag } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { attendanceAvailability, attendanceForEmail, getWmsAttendance } from "@/app/lib/wms-attendance";
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
@@ -74,7 +75,7 @@ function relatedName(value: unknown) {
   return related && typeof related === "object" && "name" in related && typeof related.name === "string" ? related.name : "";
 }
 
-export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: string; focused: number; newlyAssigned: number }> {
+export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: string; focused: number; newlyAssigned: number; skippedUsers: { name: string; reason: string }[] }> {
   try {
     const { userId } = await requireAdmin();
     const { date: today, dayOfWeek } = indiaToday();
@@ -85,16 +86,30 @@ export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: s
     ]);
     if (targetsError) throw new Error(targetsError.message);
     if (prioritiesError) throw new Error(prioritiesError.message);
-    if (!targets?.length) return { ok: true, message: "No round-robin targets are configured for today.", focused: 0, newlyAssigned: 0 };
+    if (!targets?.length) return { ok: true, message: "No round-robin targets are configured for today.", focused: 0, newlyAssigned: 0, skippedUsers: [] };
 
     const targetUserIds = [...new Set(targets.map((target) => target.user_id))];
-    const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }] = await Promise.all([
+    const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }, { data: authUsers, error: authUsersError }, attendance] = await Promise.all([
       supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", targetUserIds),
       supabase.from("user_roles").select("user_id, role").in("user_id", targetUserIds).in("role", ["sales_executive", "sales_manager", "consultant"]),
+      supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+      getWmsAttendance(),
     ]);
-    if (profilesError || rolesError) throw new Error(profilesError?.message ?? rolesError?.message ?? "Unable to validate the round-robin team.");
-    const eligibleUsers = new Set((profiles ?? []).filter((profile) => !profile.is_suspended && (roles ?? []).some((role) => role.user_id === profile.id)).map((profile) => profile.id));
+    if (profilesError || rolesError || authUsersError) throw new Error(profilesError?.message ?? rolesError?.message ?? authUsersError?.message ?? "Unable to validate the round-robin team.");
     const userNames = new Map((profiles ?? []).map((profile) => [profile.id, profile.full_name || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "a sales user"]));
+    const userEmails = new Map((authUsers?.users ?? []).map((user) => [user.id, user.email?.trim().toLowerCase() ?? ""]));
+    const skippedUsers = new Map<string, { name: string; reason: string }>();
+    const eligibleUsers = new Set<string>();
+    for (const profile of profiles ?? []) {
+      const name = userNames.get(profile.id) ?? "a sales user";
+      if (profile.is_suspended) { skippedUsers.set(profile.id, { name, reason: "CRM account is suspended" }); continue; }
+      if (!(roles ?? []).some((role) => role.user_id === profile.id)) { skippedUsers.set(profile.id, { name, reason: "does not have an eligible CRM role" }); continue; }
+      const email = userEmails.get(profile.id);
+      if (!email) { skippedUsers.set(profile.id, { name, reason: "CRM email is missing" }); continue; }
+      const availability = attendanceAvailability(attendanceForEmail(attendance, email), today);
+      if (!availability.available) { skippedUsers.set(profile.id, { name, reason: availability.reason }); continue; }
+      eligibleUsers.add(profile.id);
+    }
     const priorityByDatabase = new Map((priorities ?? []).map((priority) => [priority.database_key, priority.priority]));
     let focused = 0;
     let newlyAssigned = 0;
@@ -160,9 +175,10 @@ export async function runRoundRobinForToday(): Promise<{ ok: boolean; message: s
     }
     revalidatePath("/dashboard/leads");
     revalidatePath("/dashboard/lead-settings");
-    return { ok: true, message: `Round robin completed for ${today}.${skippedTargets ? ` ${skippedTargets} target${skippedTargets === 1 ? " was" : "s were"} skipped because the user is inactive or ineligible.` : ""}`, focused, newlyAssigned };
+    const skipped = [...skippedUsers.values()];
+    return { ok: true, message: `Round robin completed for ${today}.${skippedTargets ? ` ${skipped.length} user${skipped.length === 1 ? " was" : "s were"} skipped because they are unavailable.` : ""}`, focused, newlyAssigned, skippedUsers: skipped };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "Unable to run round robin.", focused: 0, newlyAssigned: 0 };
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to run round robin.", focused: 0, newlyAssigned: 0, skippedUsers: [] };
   }
 }
 
