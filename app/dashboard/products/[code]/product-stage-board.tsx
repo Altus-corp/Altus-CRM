@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { Pin, PinOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { savePreConfirmation, saveStageDropdownValue, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import { formatCrmDate } from "@/app/lib/date";
 import { FollowUpActions } from "@/components/dashboard/follow-up-actions";
-import { LeadDetailPanel } from "@/components/leads/lead-detail-panel";
 import { FollowUpDateModal, type LeadColumn, type LeadRow } from "@/components/leads/leads-table";
+
+const LeadDetailPanel = dynamic(() => import("@/components/leads/lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
 export type PreDetails = { notes: string };
 export type BoardDropdown = { id: string; stageId: string; label: string; options: { id: string; label: string }[] };

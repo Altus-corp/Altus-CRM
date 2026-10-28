@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { Mail, MessageCircle, PhoneCall, Pin, PinOff } from "lucide-react";
 import { formatCrmDate } from "@/app/lib/date";
 import { ActivityColumn } from "./activity-column";
-import { LeadDetailPanel } from "./lead-detail-panel";
 import { addProductToMyLead, createLeadActivity, saveLeadTablePreferences, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
+
+const LeadDetailPanel = dynamic(() => import("./lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
 export type LeadColumn = { id: string; field_key: string; label: string; field_type: string; options?: string[]; computed_from?: string[] };
 export type LeadRow = { id: string; lead_number: number | null; assignment_id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; created_at: string; custom_data: Record<string, unknown>; product: { id: string; code: string; name: string }[] | null; stage: { name: string }[] | null; resolution: { name: string }[] | null; product_assignments: { id: string; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; product: { id: string; code: string; name: string } | null; stage: { name: string } | null; resolution: { name: string } | null }[] };
