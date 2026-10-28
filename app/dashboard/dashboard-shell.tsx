@@ -13,6 +13,7 @@ type DashboardShellProps = {
   children: ReactNode;
   navigation: DashboardNavItem[];
   roles: AppRole[];
+  displayName: string;
   todayAssignedLeads: number;
   products: { id: string; code: string; name: string }[];
 };
@@ -79,6 +80,7 @@ export function DashboardShell({
   children,
   navigation,
   roles,
+  displayName,
   todayAssignedLeads,
   products,
 }: DashboardShellProps) {
@@ -203,7 +205,7 @@ export function DashboardShell({
             <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
             <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>
             <button aria-label="Notifications" className="relative grid h-9 w-10 place-items-center rounded-lg border border-slate-200 bg-white text-lg text-[#182035]">♧<span className="absolute -right-1 -top-2 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#d90000] px-1 text-[9px] font-bold text-white">3</span></button>
-            <WmsProfileAvatar initials={roles.includes("admin") ? "AD" : "TM"} />
+            <WmsProfileAvatar initials={initialsFor(displayName)} />
           </div>
         </header>
 
@@ -211,4 +213,9 @@ export function DashboardShell({
       </div>
     </div>
   );
+}
+
+function initialsFor(name: string) {
+  const initials = name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+  return initials || "CR";
 }

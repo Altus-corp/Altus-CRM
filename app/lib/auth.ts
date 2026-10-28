@@ -27,7 +27,7 @@ export const requireUser = cache(async () => {
 
     const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("is_suspended")
+        .select("is_suspended, first_name, last_name, full_name")
         .eq("id", userId)
         .single();
 
@@ -49,6 +49,7 @@ export const requireUser = cache(async () => {
     return {
         userId,
         email: user.email?.trim().toLowerCase() ?? "",
+        displayName: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name?.trim() || user.user_metadata.full_name?.trim() || user.email?.split("@")[0] || "CRM User",
         roles: roles.map((item) => item.role as AppRole),
     };
 });

@@ -14,7 +14,7 @@ export default async function DashboardLayout({
   children: ReactNode;
 }) {
   await connection();
-  const { roles, userId } = await requireUser();
+  const { roles, userId, displayName } = await requireUser();
   const hasSalesWorkspace = roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant");
   const supabase = await createClient();
   const indiaDateParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -25,7 +25,7 @@ export default async function DashboardLayout({
     : { count: 0 };
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
+    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
       {children}
     </DashboardShell>
   );
