@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
-import type { AppRole } from "@/app/lib/roles";
+import { isAmbassadorWorkspace, type AppRole } from "@/app/lib/roles";
 import type { DashboardNavItem } from "@/app/lib/navigation";
 import { signOut } from "./actions";
 import { TodaysCallTarget } from "@/components/dashboard/todays-call-target";
@@ -15,6 +15,7 @@ type DashboardShellProps = {
   navigation: DashboardNavItem[];
   roles: AppRole[];
   displayName: string;
+  ambassadorOwnerLabel?: string;
   todayAssignedLeads: number;
   products: { id: string; code: string; name: string }[];
 };
@@ -55,14 +56,14 @@ function NavigationIcon({ label }: { label: string }) {
 
 function ProductsNavigation({ products, pathname }: { products: DashboardShellProps["products"]; pathname: string }) {
   const onProductPage = pathname.startsWith("/dashboard/products");
-  const [isOpen, setIsOpen] = useState(false);
-  const open = isOpen || onProductPage;
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  const open = isOpen ?? onProductPage;
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => setIsOpen((value) => !value)}
+        onClick={() => setIsOpen(!open)}
         aria-expanded={open}
         aria-controls="products-navigation"
         className={`flex min-h-9 w-full items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-left text-[13px] font-bold leading-tight transition ${onProductPage ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}
@@ -88,6 +89,7 @@ export function DashboardShell({
   navigation,
   roles,
   displayName,
+  ambassadorOwnerLabel,
   todayAssignedLeads,
   products,
 }: DashboardShellProps) {
@@ -189,7 +191,7 @@ export function DashboardShell({
         </nav>
 
         <div className="mt-auto">
-          {!isAdmin && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && <TodaysCallTarget assignedLeads={todayAssignedLeads} />}
+          {!isAdmin && !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && <TodaysCallTarget assignedLeads={todayAssignedLeads} />}
           <form action={signOut}>
           <button className="flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700">
             <span className="text-lg">↪</span>
@@ -208,6 +210,9 @@ export function DashboardShell({
             CRM <span className="mx-1 text-slate-400">›</span> {navigation.find((item) => item.href === pathname)?.label ?? "Workspace"}
           </p>
           <div className="flex items-center gap-2">
+            {ambassadorOwnerLabel && <span title={`Assigned Sales Person: ${ambassadorOwnerLabel}`} className="inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 sm:max-w-[260px]">
+              <span className="hidden shrink-0 font-medium sm:inline">Sales Person:</span><span className="truncate">{ambassadorOwnerLabel}</span>
+            </span>}
             <LeadNavTools />
             <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
             <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>

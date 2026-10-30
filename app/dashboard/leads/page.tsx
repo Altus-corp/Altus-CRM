@@ -1,4 +1,6 @@
 import { requireUser } from "@/app/lib/auth";
+import { isAmbassadorWorkspace } from "@/app/lib/roles";
+import { AdminLeadImport } from "@/components/leads/admin-lead-import";
 import { connection } from "next/server";
 import Link from "next/link";
 import { LeadsTable } from "@/components/leads/leads-table";
@@ -24,6 +26,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const user = await requireUser();
   const supabase = await createClient();
   const isAdmin = user.roles.includes("admin");
+  const ambassadorWorkspace = isAmbassadorWorkspace(user.roles);
   const sharedConfigPromise = getLeadSharedConfig();
   const leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
   const preferencesPromise = supabase.from("lead_table_preferences").select("column_order, column_widths, frozen_column_keys, hidden_column_keys, layout_version").eq("user_id", user.userId).maybeSingle();
@@ -35,7 +38,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     supabase.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name"),
     supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
   ]) : Promise.resolve(null);
-  const [sharedConfig, leadsResult, preferencesResult, adminData] = await Promise.all([sharedConfigPromise, leadsPromise, preferencesPromise, adminDataPromise]);
+  const scopedLeadsPromise = ambassadorWorkspace ? leadsPromise.eq("ambassador_imported_by", user.userId) : leadsPromise;
+  const [sharedConfig, leadsResult, preferencesResult, adminData] = await Promise.all([sharedConfigPromise, scopedLeadsPromise, preferencesPromise, adminDataPromise]);
   const { columns, columnsError, products, stages, resolutions, resolutionMappings } = sharedConfig;
   const { data: leads, error: leadsError } = leadsResult;
   const { data: tablePreferences } = preferencesResult;
@@ -66,7 +70,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const normalizedLeads = (leads ?? []).slice(0, pageSize).flatMap((lead) => {
     // Do Not Call work is deliberately kept out of normal Lead Master views.
     // A lead can still be visible here through any other active product assignment.
-    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => !item.is_ambassador && !isDoNotCallResolution(item.resolution));
+    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace || (!item.is_ambassador && !isDoNotCallResolution(item.resolution)));
     const assignment = assignments[0];
     if (!assignment) return [];
     return [{
@@ -110,6 +114,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
   const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [], hidden: tablePreferences?.hidden_column_keys ?? [], layoutVersion: tablePreferences?.layout_version ?? 0 };
   const pager = <LeadsPager page={page} hasNext={hasNextPage} view={params.view} />;
+  if (ambassadorWorkspace) return <section className="mx-auto max-w-[1500px]">
+    <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-extrabold text-slate-900">Leads</h1><p className="mt-1 text-sm text-slate-500">Import and manage your leads. Your imports stay outside round robin.</p></div><AdminLeadImport ownImports sampleColumns={columns} products={products} resolutions={resolutions} salesPeople={[{ id: user.userId, name: user.displayName }]} /></header>
+    <LeadsTable columns={columns} detailColumns={columns} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} editableConfiguration={{ products, stages, productResolutions }} />{pager}
+  </section>;
   if (user.roles.includes("admin")) return <><AdminLeadsMaster columns={columns ?? []} sampleColumns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} assignmentUsers={assignmentUsers} importUsers={importUsers} preferences={preferences} databaseCounts={{ databaseLeads: databaseLeadsCount ?? 0, referenceLeads: referenceLeadsCount ?? 0, qualifiedLeads: qualifiedLeadsCount ?? 0, leads: leadsCount ?? 0 }} products={products ?? []} stages={stages ?? []} resolutions={resolutions ?? []} productResolutions={productResolutions} />{pager}</>;
   const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date());
   const todayKey = [todayParts.find((part) => part.type === "year")?.value, todayParts.find((part) => part.type === "month")?.value, todayParts.find((part) => part.type === "day")?.value].join("-");

@@ -139,12 +139,14 @@ export function SalesLeadsWorkspace({
   );
 }
 
-function ManualLeadModal({
+export function ManualLeadModal({
   products,
   onClose,
+  outsideRoundRobin = false,
 }: {
   products: Product[];
   onClose: () => void;
+  outsideRoundRobin?: boolean;
 }) {
   const router = useRouter();
   const [productId, setProductId] = useState("");
@@ -155,11 +157,15 @@ function ManualLeadModal({
     const formData = new FormData(event.currentTarget);
     formData.set("productId", productId);
     startTransition(async () => {
-      const result = await createManualLead(formData);
-      setMessage(result.message);
-      if (result.ok) {
-        router.refresh();
-        window.setTimeout(onClose, 600);
+      try {
+        const result = await createManualLead(formData);
+        setMessage(result.message);
+        if (result.ok) {
+          router.refresh();
+          window.setTimeout(onClose, 600);
+        }
+      } catch {
+        setMessage("Unable to add the lead. Refresh the leads list before retrying.");
       }
     });
   };
@@ -187,8 +193,7 @@ function ManualLeadModal({
               Add lead
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              The lead will be assigned to you and recorded in its activity
-              trail.
+              {outsideRoundRobin ? "The lead will be assigned to you and kept outside round robin." : "The lead will be assigned to you and recorded in its activity trail."}
             </p>
           </div>
           <button

@@ -32,6 +32,14 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
   if (result.error) return <section className="mx-auto max-w-5xl"><h1 className="text-2xl font-extrabold">My Ambassador</h1><p role="alert" className="mt-4 rounded-xl bg-amber-50 p-5 text-sm text-amber-800">Ambassadors could not be loaded. Ask an admin to check that the Ambassador migration has been applied.</p></section>;
 
   const assignments: Assignment[] = (result.data ?? []).slice(0, pageSize).map((item) => ({ ...item, product: one(item.product), stage: one(item.stage), resolution: one(item.resolution), lead: one(item.lead) }));
+  const leadIds = [...new Set(assignments.flatMap((assignment) => assignment.lead ? [assignment.lead.id] : []))];
+  // Load all product work visible to this user for the detail panel, while the
+  // table and admin reassignment selection remain scoped to Ambassador work.
+  const { data: detailWork, error: detailError } = leadIds.length ? await supabase
+    .from("lead_product_assignments")
+    .select("id, lead_id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name)")
+    .in("lead_id", leadIds).order("created_at") : { data: [], error: null };
+  if (detailError) throw new Error("Unable to load complete Ambassador product details.");
   const ownerIds = [...new Set(assignments.map((item) => item.assigned_to).filter((id): id is string => Boolean(id)))];
   const [profilesResult, eligibleResult] = await Promise.all([
     isAdmin ? supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended") : ownerIds.length ? supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", ownerIds) : Promise.resolve({ data: [], error: null }),
@@ -51,6 +59,10 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
       focused_on: assignment.focused_on, next_follow_up_at: assignment.next_follow_up_at,
       product: assignment.product ? [assignment.product] : [], stage: assignment.stage ? [assignment.stage] : [],
       resolution: assignment.resolution ? [assignment.resolution] : [],
+      detail_product_assignments: (detailWork ?? []).filter((item) => item.lead_id === assignment.lead?.id).map((item) => ({
+        id: item.id, assigned_to: item.assigned_to, assigned_at: item.assigned_at, focused_on: item.focused_on,
+        next_follow_up_at: item.next_follow_up_at, product: one(item.product), stage: one(item.stage), resolution: one(item.resolution),
+      })),
       product_assignments: [{ id: assignment.id, assigned_to: assignment.assigned_to, assigned_at: assignment.assigned_at, focused_on: assignment.focused_on, next_follow_up_at: assignment.next_follow_up_at, product: assignment.product, stage: assignment.stage, resolution: assignment.resolution }],
     };
     return [{ id: assignment.id, lead, status: "Ambassador", markedBy: assignedNames[assignment.assigned_to ?? ""] ?? "Unassigned", markedOn: "" }];

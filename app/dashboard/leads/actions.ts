@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import ExcelJS from "exceljs";
 import { requireAdmin, requireUser } from "@/app/lib/auth";
+import { isAmbassadorWorkspace } from "@/app/lib/roles";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { sendLeadMeetingInvitation } from "@/app/lib/email";
@@ -312,7 +313,7 @@ export async function importLeadsCsv(
   const user = await requireUser();
   const canManageAllLeads = user.roles.includes("admin");
   const canImportOwnLeads = user.roles.some((role) =>
-    ["sales_executive", "sales_manager", "consultant"].includes(role),
+    ["sales_executive", "sales_manager", "consultant", "ambassador"].includes(role),
   );
   if (!canManageAllLeads && !canImportOwnLeads)
     return {
@@ -320,6 +321,7 @@ export async function importLeadsCsv(
       message: "You do not have permission to import leads.",
     };
   const userId = user.userId;
+  const ambassadorImport = isAmbassadorWorkspace(user.roles);
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size)
     return { ok: false, message: "Choose an Excel or CSV file to import." };
@@ -620,11 +622,19 @@ export async function importLeadsCsv(
             skipped,
           };
       }
+      const { data: importedAssignments, error: importedAssignmentsError } = await supabase
+        .from("lead_product_assignments").select("id, lead_id, product_id")
+        .in("lead_id", insertedLeads.map((lead) => lead.id));
+      if (importedAssignmentsError) return { ok: false, message: importedAssignmentsError.message, imported: index + insertedLeads.length, skipped };
+      const primaryAssignmentIds = new Map(insertedLeads.map((lead, batchIndex) => [lead.id,
+        importedAssignments?.find((assignment) => assignment.lead_id === lead.id && assignment.product_id === batch[batchIndex]?.lead.product_id)?.id,
+      ]));
       const { error: activityError } = await supabase
         .from("lead_activities")
         .insert(
           insertedLeads.map((lead, batchIndex) => ({
             lead_id: lead.id,
+            lead_product_assignment_id: primaryAssignmentIds.get(lead.id),
             activity_type: "lead_created",
             note: `Lead imported to CRM${batch[batchIndex]?.productCodes.length > 1 ? ` with ${batch[batchIndex].productCodes.join(", ")} product work.` : "."}`,
             metadata: {
@@ -646,6 +656,7 @@ export async function importLeadsCsv(
     }
   }
   revalidatePath("/dashboard/leads");
+  if (ambassadorImport) revalidatePath("/dashboard");
   return {
     ok: true,
     message: "Leads imported successfully.",
@@ -2023,7 +2034,7 @@ export async function createManualLead(
   const user = await requireUser();
   if (
     !user.roles.some((role) =>
-      ["admin", "sales_executive", "sales_manager", "consultant"].includes(
+      ["admin", "sales_executive", "sales_manager", "consultant", "ambassador"].includes(
         role,
       ),
     )
@@ -2111,7 +2122,7 @@ export async function createManualLead(
     }).format(new Date());
     await supabase
       .from("lead_product_assignments")
-      .update({ focused_on: today, assignment_origin: "manual" })
+      .update({ focused_on: isAmbassadorWorkspace(user.roles) ? null : today, assignment_origin: "manual" })
       .eq("id", assignment.id);
   }
   const { error: activityError } = await supabase
@@ -2130,6 +2141,7 @@ export async function createManualLead(
     });
   if (activityError) return { ok: false, message: activityError.message };
   revalidatePath("/dashboard/leads");
+  if (isAmbassadorWorkspace(user.roles)) revalidatePath("/dashboard");
   return { ok: true, message: "Lead created and assigned to you." };
 }
 
@@ -2561,7 +2573,7 @@ async function getEditableLead(leadId: string, assignmentId: string) {
   if (
     !user.roles.includes("admin") &&
     !user.roles.some(
-      (role) => role === "sales_executive" || role === "sales_manager",
+      (role) => role === "sales_executive" || role === "sales_manager" || role === "ambassador",
     )
   )
     throw new Error("You do not have permission to update leads.");
@@ -2585,6 +2597,28 @@ async function getEditableLead(leadId: string, assignmentId: string) {
   if (!user.roles.includes("admin") && assignment.assigned_to !== user.userId)
     throw new Error("You can update only product work assigned to you.");
   return { supabase, lead: assignment, userId: user.userId };
+}
+
+export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  const user = await requireUser();
+  if (isAmbassadorWorkspace(user.roles)) return { ok: false, message: "Ambassadors cannot change Channel Partner selections." };
+  const leadId = String(formData.get("leadId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const ids = [...new Set(formData.getAll("ambassadorIds").map(String))];
+  if (ids.length > 100 || ids.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) return { ok: false, message: "Choose valid Ambassadors." };
+  const { supabase } = await getEditableLead(leadId, assignmentId);
+  if (ids.length) {
+    const [roles, profiles] = await Promise.all([
+      supabase.from("user_roles").select("user_id").eq("role", "ambassador").in("user_id", ids),
+      supabase.from("profiles").select("id").eq("is_suspended", false).in("id", ids),
+    ]);
+    if (roles.error || profiles.error || ids.some((id) => !roles.data?.some((row) => row.user_id === id) || !profiles.data?.some((row) => row.id === id))) return { ok: false, message: "Choose active Ambassadors." };
+  }
+  const { error } = await supabase.from("leads").update({ channel_partner_ids: ids }).eq("id", leadId);
+  if (error) return { ok: false, message: "Channel Partners could not be saved. Check the selection migration and retry." };
+  revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/products", "layout");
+  return { ok: true, message: "Channel Partners saved." };
 }
 
 export async function createLeadActivity(formData: FormData) {
@@ -3035,6 +3069,7 @@ export async function updateLeadDetails(formData: FormData) {
     const normalizedLabel = column.label
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "");
+    if (normalizedLabel === "channelpartner") continue;
     if (
       key === "lead_name" ||
       key === "first_name" ||

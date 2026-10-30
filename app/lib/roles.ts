@@ -5,6 +5,7 @@ export const APP_ROLES = [
   "consultant",
   "marketing_manager",
   "marketing_executive",
+  "ambassador",
 ] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
@@ -16,4 +17,9 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   consultant: "Consultant",
   marketing_manager: "Marketing Manager",
   marketing_executive: "Marketing Executive",
+  ambassador: "Ambassador",
 };
+
+export function isAmbassadorWorkspace(roles: AppRole[]) {
+  return roles.includes("ambassador") && !roles.includes("admin");
+}

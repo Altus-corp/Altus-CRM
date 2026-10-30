@@ -266,8 +266,7 @@ async function executeRoundRobin(userId: string): Promise<{
       supabase
         .from("user_roles")
         .select("user_id, role")
-        .in("user_id", targetUserIds)
-        .in("role", ["sales_executive", "sales_manager", "consultant"]),
+        .in("user_id", targetUserIds),
       supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
       getWmsAttendance(),
     ]);
@@ -303,7 +302,12 @@ async function executeRoundRobin(userId: string): Promise<{
         });
         continue;
       }
-      if (!(roles ?? []).some((role) => role.user_id === profile.id)) {
+      const profileRoles = (roles ?? []).filter((role) => role.user_id === profile.id).map((role) => role.role);
+      if (profileRoles.includes("ambassador") && !profileRoles.includes("admin")) {
+        skippedUsers.set(profile.id, { name, reason: "Ambassadors import their own leads" });
+        continue;
+      }
+      if (!profileRoles.some((role) => ["sales_executive", "sales_manager", "consultant"].includes(role))) {
         skippedUsers.set(profile.id, {
           name,
           reason: "does not have an eligible CRM role",
@@ -356,6 +360,7 @@ async function executeRoundRobin(userId: string): Promise<{
         )
         .eq("product_id", target.product_id)
         .eq("assigned_to", target.user_id)
+        .eq("exclude_from_round_robin", false)
         .eq("is_active", true)
         .eq("is_closed", false)
         .order("assigned_at", { ascending: true })
@@ -408,6 +413,7 @@ async function executeRoundRobin(userId: string): Promise<{
         )
         .eq("product_id", target.product_id)
         .is("assigned_to", null)
+        .eq("exclude_from_round_robin", false)
         .eq("is_active", true)
         .eq("is_closed", false)
         .order("created_at", { ascending: true })
@@ -458,6 +464,7 @@ async function executeRoundRobin(userId: string): Promise<{
           })
           .eq("id", assignment.id)
           .is("assigned_to", null)
+          .eq("exclude_from_round_robin", false)
           .select("id")
           .maybeSingle();
         if (claimError) throw new Error(claimError.message);

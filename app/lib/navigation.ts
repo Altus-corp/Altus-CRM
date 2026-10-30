@@ -1,4 +1,4 @@
-import type { AppRole } from "@/app/lib/roles";
+import { isAmbassadorWorkspace, type AppRole } from "@/app/lib/roles";
 
 export type DashboardNavItem = {
   label: string;
@@ -48,6 +48,10 @@ const roleNavigation: DashboardNavItem[] = [
 ];
 
 export function getDashboardNavigation(roles: AppRole[]) {
+  if (isAmbassadorWorkspace(roles)) return [
+    { label: "Dashboard", href: "/dashboard" },
+    { label: "Leads", href: "/dashboard/leads" },
+  ];
   return [
     ...commonNavigation,
     ...roleNavigation.filter((item) =>
