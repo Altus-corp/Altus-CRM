@@ -24,12 +24,12 @@ create policy "Admins manage lead table columns"
 
 insert into public.lead_table_columns (field_key, label, source, position) values
   ('lead_name', 'Lead name', 'standard', 1),
-  ('phone', 'Phone number', 'standard', 2),
+  ('phone', 'Cell Number', 'standard', 2),
   ('email', 'Email address', 'standard', 3),
   ('product', 'Product', 'product', 4),
   ('stage', 'Stage', 'stage', 5),
-  ('call_resolution', 'Call resolution', 'resolution', 6),
-  ('assigned_to', 'Assigned to', 'standard', 7),
+  ('call_resolution', 'Activity resolution', 'resolution', 6),
+  ('assigned_to', 'Sales Person', 'standard', 7),
   ('next_follow_up', 'Next follow-up', 'standard', 8),
   ('created_at', 'Created at', 'standard', 9)
 on conflict (field_key) do nothing;

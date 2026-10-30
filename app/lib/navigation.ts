@@ -13,7 +13,8 @@ const commonNavigation: DashboardNavItem[] = [
 
 const roleNavigation: DashboardNavItem[] = [
   { label: "Admin overview", href: "/dashboard/admin", roles: ["admin"] },
-  { label: "DND Master", href: "/dashboard/dnd-master", roles: ["admin"] },
+  { label: "Do Not Call", href: "/dashboard/dnd-master", roles: ["admin", "sales_manager", "sales_executive", "consultant"] },
+  { label: "Old Graduate", href: "/dashboard/old-graduate-master", roles: ["admin", "sales_manager", "sales_executive", "consultant"] },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },
   { label: "Lead configuration", href: "/dashboard/lead-settings", roles: ["admin"] },

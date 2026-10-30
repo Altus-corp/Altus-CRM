@@ -8,6 +8,7 @@ import type { DashboardNavItem } from "@/app/lib/navigation";
 import { signOut } from "./actions";
 import { TodaysCallTarget } from "@/components/dashboard/todays-call-target";
 import { WmsProfileAvatar } from "@/components/dashboard/wms-profile-avatar";
+import { LeadNavTools } from "@/components/dashboard/lead-nav-tools";
 
 type DashboardShellProps = {
   children: ReactNode;
@@ -207,10 +208,9 @@ export function DashboardShell({
             CRM <span className="mx-1 text-slate-400">›</span> {navigation.find((item) => item.href === pathname)?.label ?? "Workspace"}
           </p>
           <div className="flex items-center gap-2">
-            <button aria-label="Search" className="grid h-9 w-9 place-items-center rounded-full text-xl text-[#182035] hover:bg-slate-100">⌕</button>
+            <LeadNavTools />
             <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
             <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>
-            <button aria-label="Notifications" className="relative grid h-9 w-10 place-items-center rounded-lg border border-slate-200 bg-white text-lg text-[#182035]">♧<span className="absolute -right-1 -top-2 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#d90000] px-1 text-[9px] font-bold text-white">3</span></button>
             <WmsProfileAvatar initials={initialsFor(displayName)} />
           </div>
         </header>

@@ -77,7 +77,7 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
       { key: "moveTo", label: "Move To", width: 170 },
     ]
     : [
-      { key: "lead", label: "Lead", width: 170 }, { key: "phone", label: "Phone", width: 140 }, { key: "resolution", label: "Call resolution", width: 180 }, { key: "followUp", label: "Next follow-up", width: 170 },
+      { key: "lead", label: "Lead", width: 170 }, { key: "phone", label: "Phone", width: 140 }, { key: "resolution", label: "Activity Resolution", width: 180 }, { key: "followUp", label: "Next follow-up", width: 170 },
       { key: "assignedOn", label: "Assigned on", width: 140 }, { key: "note", label: "Latest note", width: 240 }, ...dropdownColumns,
       { key: "moveTo", label: "Move to", width: 170 }, { key: "actions", label: "Actions", width: 190 },
     ];
@@ -204,19 +204,20 @@ function ResolutionCell({ lead, resolutions }: { lead: BoardLead; resolutions: R
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  const save = (resolutionId: string, followUpAt?: string) => startTransition(async () => {
+  const save = (resolutionId: string, followUpAt?: string, followUpNote?: string) => startTransition(async () => {
     const formData = new FormData();
     formData.set("leadId", lead.leadId);
     formData.set("assignmentId", lead.assignmentId);
     formData.set("resolutionId", resolutionId);
     if (followUpAt) formData.set("followUpAt", followUpAt);
+    if (followUpNote) formData.set("followUpNote", followUpNote);
     setError("");
     try { await updateLeadResolutionInline(formData); setFollowUpFor(null); router.refresh(); }
     catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save this lead."); setValue(lead.resolutionId); setFollowUpFor(null); }
   });
   const choose = (resolutionId: string) => {
     setValue(resolutionId);
-    if (/follow[\s-]?up/i.test(resolutions.find((item) => item.id === resolutionId)?.name ?? "")) setFollowUpFor(resolutionId);
+    if (/follow[\s-]?up|verbal\s*yes/i.test(resolutions.find((item) => item.id === resolutionId)?.name ?? "")) setFollowUpFor(resolutionId);
     else save(resolutionId);
   };
 
@@ -226,7 +227,7 @@ function ResolutionCell({ lead, resolutions }: { lead: BoardLead; resolutions: R
       {resolutions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
     </select>
     {error && <p className="mt-1 max-w-[180px] whitespace-normal text-[10px] font-bold text-red-600">{error}</p>}
-    {followUpFor && <FollowUpDateModal loading={isPending} onCancel={() => { setFollowUpFor(null); setValue(lead.resolutionId); }} onConfirm={(dateTime) => save(followUpFor, dateTime)} />}
+    {followUpFor && <FollowUpDateModal loading={isPending} onCancel={() => { setFollowUpFor(null); setValue(lead.resolutionId); }} onConfirm={(dateTime, note) => save(followUpFor, dateTime, note)} />}
   </div>;
 }
 

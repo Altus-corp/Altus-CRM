@@ -24,6 +24,11 @@ const PRODUCT_PHASES: Record<string, string[]> = {
 
 const one = <T,>(value: T | T[] | null): T | null => (Array.isArray(value) ? value[0] ?? null : value);
 
+const isDoNotCallResolution = (resolution: Named) => {
+  const name = one(resolution)?.name?.trim().toLowerCase().replace(/[,_-]+/g, " ").replace(/\s+/g, " ") ?? "";
+  return ["dnd", "not interested", "wrong number", "old graduate"].includes(name);
+};
+
 export default async function ProductPage({ params }: ProductPageProps) {
   await connection();
   const { userId, roles } = await requireUser();
@@ -60,7 +65,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
     .sort((a, b) => phases ? phases.findIndex((phase) => phase.toLowerCase() === a.name.toLowerCase()) - phases.findIndex((phase) => phase.toLowerCase() === b.name.toLowerCase()) : a.position - b.position)
     .map((stage) => ({ id: stage.id, name: stage.name }));
 
-  const rows = (assignments ?? []) as unknown as Row[];
+  // These resolutions belong exclusively to the Do Not Call workspace.
+  const rows = ((assignments ?? []) as unknown as Row[]).filter((row) => !isDoNotCallResolution(row.resolution));
   const assignmentIds = rows.map((row) => row.id);
   const resolutionNames = new Map(sharedConfig.resolutions.map((resolution) => [resolution.id, resolution.name]));
   const resolutions = sharedConfig.resolutionMappings.filter((mapping) => mapping.product_id === product.id).flatMap((mapping) => {
