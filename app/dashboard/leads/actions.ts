@@ -2175,13 +2175,15 @@ export async function manuallyAssignLeads(formData: FormData) {
   const { data: assignments, error: assignmentsError } = await supabase
     .from("lead_product_assignments")
     .select(
-      "id, lead_id, product_id, product:lead_products(code), stage:lead_stages(name), lead:leads(first_name, last_name)",
+      "id, lead_id, product_id, is_ambassador, product:lead_products(code), stage:lead_stages(name), lead:leads(first_name, last_name)",
     )
     .in("id", assignmentIds);
   if (assignmentsError || !assignments?.length)
     throw new Error(
       "The selected product assignments are no longer available.",
     );
+  if (!user.roles.includes("admin") && assignments.some((assignment) => assignment.is_ambassador))
+    throw new Error("Only an admin can reassign an Ambassador.");
   const assignedAt = new Date().toISOString();
   const focusedOn = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -2257,6 +2259,7 @@ export async function manuallyAssignLeads(formData: FormData) {
   revalidatePath("/dashboard/leads");
   revalidatePath("/dashboard/dnd-master");
   revalidatePath("/dashboard/old-graduate-master");
+  revalidatePath("/dashboard/my-ambassador");
 }
 
 export async function deleteLeads(
@@ -3304,6 +3307,8 @@ export async function updateLeadResolutionInline(formData: FormData) {
   revalidatePath("/dashboard/leads");
   if (isDoNotCall) revalidatePath("/dashboard/dnd-master");
   if (isOldGraduate) revalidatePath("/dashboard/old-graduate-master");
+  revalidatePath("/dashboard/my-ambassador");
+  revalidatePath("/dashboard/products", "layout");
 }
 
 export async function updateLeadFollowUp(formData: FormData) {

@@ -25,7 +25,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const supabase = await createClient();
   const isAdmin = user.roles.includes("admin");
   const sharedConfigPromise = getLeadSharedConfig();
-  const leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  const leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
   const preferencesPromise = supabase.from("lead_table_preferences").select("column_order, column_widths, frozen_column_keys, hidden_column_keys, layout_version").eq("user_id", user.userId).maybeSingle();
   const adminDataPromise = isAdmin ? Promise.all([
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "database_leads"),
@@ -66,7 +66,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const normalizedLeads = (leads ?? []).slice(0, pageSize).flatMap((lead) => {
     // Do Not Call work is deliberately kept out of normal Lead Master views.
     // A lead can still be visible here through any other active product assignment.
-    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => !isDoNotCallResolution(item.resolution));
+    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => !item.is_ambassador && !isDoNotCallResolution(item.resolution));
     const assignment = assignments[0];
     if (!assignment) return [];
     return [{

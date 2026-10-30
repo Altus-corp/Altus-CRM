@@ -9,6 +9,7 @@ export type DashboardNavItem = {
 const commonNavigation: DashboardNavItem[] = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Leads", href: "/dashboard/leads" },
+  { label: "My Ambassador", href: "/dashboard/my-ambassador" },
 ];
 
 const roleNavigation: DashboardNavItem[] = [
@@ -16,6 +17,7 @@ const roleNavigation: DashboardNavItem[] = [
   { label: "Do Not Call", href: "/dashboard/dnd-master", roles: ["admin", "sales_manager", "sales_executive", "consultant"] },
   { label: "Old Graduate", href: "/dashboard/old-graduate-master", roles: ["admin", "sales_manager", "sales_executive", "consultant"] },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
+  { label: "Team", href: "/dashboard/team", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },
   { label: "Lead configuration", href: "/dashboard/lead-settings", roles: ["admin"] },
   { label: "Settings", href: "/dashboard/settings", roles: ["admin", "sales_executive", "sales_manager"] },
@@ -23,7 +25,7 @@ const roleNavigation: DashboardNavItem[] = [
   { label: "Sales overview", href: "/dashboard/sales-manager", roles: ["sales_manager"] },
   { label: "Deals", href: "/dashboard/deals", roles: ["sales_manager"] },
   { label: "Products", href: "/dashboard/products", roles: ["sales_executive"] },
-  { label: "Sales team", href: "/dashboard/sales-team", roles: ["sales_manager"] },
+  { label: "My Team", href: "/dashboard/sales-team", roles: ["sales_manager"] },
   { label: "Sales reports", href: "/dashboard/sales-reports", roles: ["sales_manager"] },
   { label: "My sales workspace", href: "/dashboard/sales-executive", roles: ["sales_executive"] },
   { label: "Templates", href: "/dashboard/message-templates", roles: ["admin", "sales_executive", "sales_manager"] },

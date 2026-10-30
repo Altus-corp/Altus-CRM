@@ -10,7 +10,7 @@ const LeadDetailPanel = dynamic(() => import("./lead-detail-panel").then((module
 export type DndRow = { id: string; lead: LeadRow; status: string; markedBy: string; markedOn: string };
 type Preferences = { order: string[]; widths: Record<string, number>; frozen: string[]; hidden: string[]; layoutVersion?: number };
 
-export function DndMasterTable({ rows, columns, assignedNames, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, emptyLabel = "No Do Not Call leads yet.", reassignUsers = [] }: { rows: DndRow[]; columns: LeadColumn[]; assignedNames: Record<string, string>; preferences?: Preferences; emptyLabel?: string; reassignUsers?: { id: string; name: string }[] }) {
+export function DndMasterTable({ rows, columns, detailColumns, assignedNames, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, emptyLabel = "No Do Not Call leads yet.", reassignUsers = [], reassignDescription = "The original CRM user remains visible until an Admin or Sales Manager selects a new user." }: { rows: DndRow[]; columns: LeadColumn[]; detailColumns?: LeadColumn[]; assignedNames: Record<string, string>; preferences?: Preferences; emptyLabel?: string; reassignUsers?: { id: string; name: string }[]; reassignDescription?: string }) {
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
@@ -28,8 +28,8 @@ export function DndMasterTable({ rows, columns, assignedNames, preferences = { o
   });
 
   return <>
-    {reassignUsers.length > 0 && <form action={reassign} className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-100 bg-red-50/60 px-3 py-2"><div><p className="text-xs font-extrabold text-slate-800">Reassign selected lead work</p><p className="text-[10px] text-slate-500">The original CRM user remains visible until an Admin or Sales Manager selects a new user.</p></div>{selectedIds.map((assignmentId) => <input key={assignmentId} type="hidden" name="assignmentId" value={assignmentId} />)}<div className="flex items-center gap-2"><select name="assigneeId" required defaultValue="" disabled={isPending} className="h-8 min-w-[180px] rounded border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700"><option value="" disabled>Choose sales user</option>{reassignUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select><button disabled={isPending || !selectedIds.length} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:bg-slate-300">Assign selected</button></div></form>}
-    <div className="mt-3"><LeadsTable columns={columns} leads={rows.map((row) => row.lead)} assignedNames={assignedNames} preferences={preferences} selectedIds={selectedIds} onSelectionChange={reassignUsers.length ? setSelectedIds : undefined} showHeader={false} /></div>
+    {reassignUsers.length > 0 && <form action={reassign} className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-100 bg-red-50/60 px-3 py-2"><div><p className="text-xs font-extrabold text-slate-800">Reassign selected lead work</p><p className="text-[10px] text-slate-500">{reassignDescription}</p></div>{selectedIds.map((assignmentId) => <input key={assignmentId} type="hidden" name="assignmentId" value={assignmentId} />)}<div className="flex items-center gap-2"><select name="assigneeId" required defaultValue="" disabled={isPending} className="h-8 min-w-[180px] rounded border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700"><option value="" disabled>Choose sales user</option>{reassignUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select><button disabled={isPending || !selectedIds.length} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:bg-slate-300">Assign selected</button></div></form>}
+    <div className="mt-3"><LeadsTable columns={columns} detailColumns={detailColumns} leads={rows.map((row) => row.lead)} assignedNames={assignedNames} preferences={preferences} selectedIds={selectedIds} onSelectionChange={reassignUsers.length ? setSelectedIds : undefined} showHeader={false} /></div>
     <div className="hidden mt-3 overflow-x-auto rounded-md bg-white shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
       <table className="w-full min-w-[900px] text-left text-xs">
         <thead className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wider text-slate-500"><tr>{["Lead No", "Name", "Phone", "Email", "Product", "Marked as", "Marked by", "Marked on", ...(reassignUsers.length ? ["Reassign"] : [])].map((heading) => <th key={heading} className="px-3 py-2.5">{heading}</th>)}</tr></thead>
@@ -50,6 +50,6 @@ export function DndMasterTable({ rows, columns, assignedNames, preferences = { o
       </table>
     </div>
     {assignmentMessage && <p className={`mt-2 text-xs font-bold ${assignmentMessage === "Lead reassigned." ? "text-emerald-700" : "text-red-600"}`}>{assignmentMessage}</p>}
-    {detailLead && <LeadDetailPanel lead={detailLead} columns={columns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
+    {detailLead && <LeadDetailPanel lead={detailLead} columns={detailColumns ?? columns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
   </>;
 }

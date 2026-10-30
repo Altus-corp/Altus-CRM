@@ -128,6 +128,52 @@ export async function createUser(
   };
 }
 
+export async function updateUserRoles(
+  _previousState: CreateUserState,
+  formData: FormData,
+): Promise<CreateUserState> {
+  const currentUser = await requireAdmin();
+  const userId = String(formData.get("userId") ?? "");
+  const roles = [...new Set(formData.getAll("roles").map(String))];
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    return { error: "Invalid user." };
+  }
+  if (!roles.length || roles.some((role) => !APP_ROLES.includes(role as AppRole))) {
+    return { error: "Choose at least one valid role." };
+  }
+  if (userId === currentUser.userId && !roles.includes("admin")) {
+    return { error: "You cannot remove your own Admin role." };
+  }
+
+  const admin = createAdminClient();
+  const { data: target, error: userError } = await admin.auth.admin.getUserById(userId);
+  if (userError || !target.user) return { error: "This user could not be found." };
+
+  const { data: existing, error: readError } = await admin
+    .from("user_roles").select("role").eq("user_id", userId);
+  if (readError) return { error: "Unable to load this user's roles. Please try again." };
+
+  // Add new access before removing old access so a failed insert preserves existing roles.
+  const additions = roles.filter((role) => !existing?.some((item) => item.role === role));
+  if (additions.length) {
+    const { error } = await admin.from("user_roles").insert(
+      additions.map((role) => ({ user_id: userId, role: role as AppRole })),
+    );
+    if (error) return { error: "Unable to assign roles. Please try again." };
+  }
+  const removals = (existing ?? []).map((item) => item.role).filter((role) => !roles.includes(role));
+  if (removals.length) {
+    const { error } = await admin.from("user_roles").delete().eq("user_id", userId).in("role", removals);
+    if (error) {
+      revalidatePath("/dashboard", "layout");
+      return { error: "New roles were assigned, but previous roles could not be removed. Please retry saving." };
+    }
+  }
+  revalidatePath("/dashboard", "layout");
+  return { success: "Roles updated successfully." };
+}
+
 export async function toggleUserSuspension(formData: FormData) {
   const currentUser = await requireAdmin();
   const userId = String(formData.get("userId") ?? "");

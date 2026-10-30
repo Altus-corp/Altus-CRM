@@ -1,8 +1,9 @@
 import { requireAdmin } from "@/app/lib/auth";
-import { ROLE_LABELS, type AppRole } from "@/app/lib/roles";
+import { type AppRole } from "@/app/lib/roles";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { toggleUserSuspension } from "./actions";
 import { UserModal } from "./user-modal";
+import { UserRolesEditor } from "./user-roles-editor";
 
 export const instant = false;
 
@@ -77,7 +78,7 @@ export default async function UsersPage() {
                 <tr key={user.id} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5"><div className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-50 text-xs font-extrabold text-red-700">{user.name.slice(0, 2).toUpperCase()}</span><div><p className="font-bold text-slate-800">{user.name}</p><p className="text-xs font-medium text-slate-500">{user.email}</p></div></div></td>
                   <td className="whitespace-nowrap px-5 py-3.5 font-medium text-slate-600">{user.phone}</td>
-                  <td className="px-5 py-3.5"><div className="flex flex-wrap gap-1">{user.roles.length ? user.roles.map((role) => <span key={role} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">{ROLE_LABELS[role]}</span>) : <span className="text-xs text-slate-400">No role</span>}</div></td>
+                  <td className="px-5 py-3.5"><UserRolesEditor userId={user.id} name={user.name} roles={user.roles} /></td>
                   <td className="px-5 py-3.5"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${user.isSuspended ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{user.isSuspended ? "Suspended" : "Active"}</span></td>
                   <td className="px-5 py-3.5 text-right"><form action={toggleUserSuspension}><input type="hidden" name="userId" value={user.id} /><input type="hidden" name="suspend" value={String(!user.isSuspended)} /><button className={`rounded-md border px-3 py-1.5 text-xs font-bold ${user.isSuspended ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-red-200 text-red-700 hover:bg-red-50"}`}>{user.isSuspended ? "Reactivate" : "Suspend"}</button></form></td>
                 </tr>

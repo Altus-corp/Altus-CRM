@@ -47,7 +47,7 @@ function defaultLeadLayout(columns: LeadColumn[]): Preferences {
   return { order, widths: {}, frozen: [fullName, phone, product].filter((key): key is string => Boolean(key)), hidden: columns.filter((column) => !shown.has(column.field_key)).map((column) => column.field_key) };
 }
 
-export function LeadsTable({ columns, leads, assignedNames, showHeader = true, selectedIds = [], onSelectionChange, editableConfiguration, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, onAddLead }: { columns: LeadColumn[]; leads: LeadRow[]; assignedNames: Record<string, string>; showHeader?: boolean; selectedIds?: string[]; onSelectionChange?: (ids: string[]) => void; editableConfiguration?: EditableConfiguration; preferences?: Preferences; onAddLead?: () => void }) {
+export function LeadsTable({ columns, detailColumns, leads, assignedNames, showHeader = true, selectedIds = [], onSelectionChange, editableConfiguration, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, onAddLead }: { columns: LeadColumn[]; detailColumns?: LeadColumn[]; leads: LeadRow[]; assignedNames: Record<string, string>; showHeader?: boolean; selectedIds?: string[]; onSelectionChange?: (ids: string[]) => void; editableConfiguration?: EditableConfiguration; preferences?: Preferences; onAddLead?: () => void }) {
   const router = useRouter();
   const hasSavedLayout = preferences.layoutVersion === 1 && (preferences.order.length > 0 || preferences.frozen.length > 0 || preferences.hidden.length > 0 || Object.keys(preferences.widths).length > 0);
   const initialLayout = hasSavedLayout ? preferences : defaultLeadLayout(columns);
@@ -140,7 +140,7 @@ export function LeadsTable({ columns, leads, assignedNames, showHeader = true, s
       })}</Fragment>;
       })}</tbody>
     </table>{!leads.length && <div className="px-4 py-12 text-center"><p className="text-sm font-bold text-slate-700">No leads yet</p><p className="mt-1 text-xs text-slate-500">New leads will appear here using the columns selected by the admin.</p></div>}</div>}
-    {detailLead && <LeadDetailPanel lead={detailLead} columns={orderedColumns.filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
+    {detailLead && <LeadDetailPanel lead={detailLead} columns={(detailColumns ?? orderedColumns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
   </section>;
 }
 
