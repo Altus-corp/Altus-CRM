@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { connection } from "next/server";
 import { requireUser } from "@/app/lib/auth";
 import { isAmbassadorWorkspace } from "@/app/lib/roles";
-import { getAmbassadorOwnerLabel } from "@/app/lib/ambassador-owner";
+import { getAmbassadorOwner } from "@/app/lib/ambassador-owner";
 import { getDashboardNavigation } from "@/app/lib/navigation";
 import { createClient } from "@/app/lib/supabase/server";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
@@ -17,7 +17,7 @@ export default async function DashboardLayout({
 }) {
   await connection();
   const { roles, userId, displayName } = await requireUser();
-  const ambassadorOwnerLabel = isAmbassadorWorkspace(roles) ? await getAmbassadorOwnerLabel() : undefined;
+  const ambassadorOwner = isAmbassadorWorkspace(roles) ? await getAmbassadorOwner() : undefined;
   const hasSalesWorkspace = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant");
   const supabase = await createClient();
   const indiaDateParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -28,7 +28,7 @@ export default async function DashboardLayout({
     : { count: 0 };
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} ambassadorOwnerLabel={ambassadorOwnerLabel} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
+    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
       {children}
     </DashboardShell>
   );

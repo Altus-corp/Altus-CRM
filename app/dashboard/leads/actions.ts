@@ -2594,7 +2594,20 @@ async function getEditableLead(leadId: string, assignmentId: string) {
     throw new Error(
       "This product work record is no longer available to update.",
     );
-  if (!user.roles.includes("admin") && assignment.assigned_to !== user.userId)
+  const isDirectAssignee = assignment.assigned_to === user.userId;
+  let isSelectedChannelPartner = false;
+  if (!user.roles.includes("admin") && !isDirectAssignee && isAmbassadorWorkspace(user.roles)) {
+    const { data: partner, error: partnerError } = await supabase
+      .from("lead_channel_partners")
+      .select("lead_id")
+      .eq("lead_id", leadId)
+      .eq("ambassador_id", user.userId)
+      .maybeSingle();
+    if (partnerError)
+      throw new Error("Channel Partner access is not available. Run the latest Channel Partner migration first.");
+    isSelectedChannelPartner = Boolean(partner);
+  }
+  if (!user.roles.includes("admin") && !isDirectAssignee && !isSelectedChannelPartner)
     throw new Error("You can update only product work assigned to you.");
   return { supabase, lead: assignment, userId: user.userId };
 }
@@ -2614,9 +2627,35 @@ export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok:
     ]);
     if (roles.error || profiles.error || ids.some((id) => !roles.data?.some((row) => row.user_id === id) || !profiles.data?.some((row) => row.id === id))) return { ok: false, message: "Choose active Ambassadors." };
   }
-  const { error } = await supabase.from("leads").update({ channel_partner_ids: ids }).eq("id", leadId);
-  if (error) return { ok: false, message: "Channel Partners could not be saved. Check the selection migration and retry." };
+  const { data: existingPartners, error: existingError } = await supabase
+    .from("lead_channel_partners")
+    .select("ambassador_id")
+    .eq("lead_id", leadId);
+  if (existingError)
+    return { ok: false, message: "Channel Partners could not be saved. Run the latest Channel Partner migration in Supabase, then retry." };
+  const existingIds = new Set((existingPartners ?? []).map((partner) => partner.ambassador_id));
+  const selectedIds = new Set(ids);
+  const removedIds = [...existingIds].filter((id) => !selectedIds.has(id));
+  const addedIds = ids.filter((id) => !existingIds.has(id));
+  if (removedIds.length) {
+    const { error } = await supabase.from("lead_channel_partners").delete().eq("lead_id", leadId).in("ambassador_id", removedIds);
+    if (error) return { ok: false, message: "Channel Partners could not be updated. Please retry." };
+  }
+  if (addedIds.length) {
+    const { error } = await supabase.from("lead_channel_partners").insert(addedIds.map((ambassadorId) => ({
+      lead_id: leadId,
+      ambassador_id: ambassadorId,
+      assigned_by: user.userId,
+      focused_on: indiaToday(),
+    })));
+    if (error) return { ok: false, message: "Channel Partners could not be updated. Please retry." };
+  }
+  // Keep the original lightweight field in sync for older displays and exports.
+  const { error: legacyError } = await supabase.from("leads").update({ channel_partner_ids: ids }).eq("id", leadId);
+  if (legacyError && !["42703", "PGRST204"].includes(legacyError.code ?? ""))
+    return { ok: false, message: "Channel Partners were saved, but the lead display could not be refreshed. Please reload the page." };
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard");
   revalidatePath("/dashboard/products", "layout");
   return { ok: true, message: "Channel Partners saved." };
 }

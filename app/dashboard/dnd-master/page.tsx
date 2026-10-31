@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { requireUser } from "@/app/lib/auth";
+import { isAmbassadorWorkspace } from "@/app/lib/roles";
 import { createClient } from "@/app/lib/supabase/server";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import { DndMasterTable, type DndRow } from "@/components/leads/dnd-master-table";
@@ -20,17 +21,24 @@ const dateFormat = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", 
 export default async function DndMasterPage({ searchParams }: { searchParams: Promise<{ type?: string }> }) {
   await connection();
   const { roles, userId } = await requireUser();
+  const isAmbassador = isAmbassadorWorkspace(roles);
   const canReviewAll = roles.includes("admin") || roles.includes("sales_manager");
-  const canUseDoNotCall = canReviewAll || roles.some((role) => role === "sales_executive" || role === "consultant");
+  const canUseDoNotCall = isAmbassador || canReviewAll || roles.some((role) => role === "sales_executive" || role === "consultant");
   if (!canUseDoNotCall) return <section className="mx-auto max-w-3xl rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">You do not have access to Do Not Call.</section>;
 
   const { type } = await searchParams;
   const activeFilter = filters.find((filter) => filter.key === type)?.key ?? "all";
   const supabase = await createClient();
+  const { data: channelPartnerLinks, error: channelPartnerError } = isAmbassador
+    ? await supabase.from("lead_channel_partners").select("lead_id").eq("ambassador_id", userId)
+    : { data: [], error: null };
+  if (channelPartnerError) return <section className="mx-auto max-w-3xl rounded-xl bg-amber-50 p-5 text-sm font-bold text-amber-800">Your Ambassador lead shares are unavailable. Ask an admin to run the Channel Partner database migration.</section>;
+  const ambassadorLeadIds = (channelPartnerLinks ?? []).map((link) => link.lead_id);
   let activitiesQuery = supabase.from("lead_activities")
     .select("id, created_by, created_at, metadata, assignment:lead_product_assignments(id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(id, lead_number, first_name, last_name, email, phone, created_at, custom_data))")
     .eq("activity_type", "resolution_updated").order("created_at", { ascending: false }).limit(2000);
-  if (!canReviewAll) activitiesQuery = activitiesQuery.eq("created_by", userId);
+  if (isAmbassador) activitiesQuery = activitiesQuery.in("lead_id", ambassadorLeadIds);
+  else if (!canReviewAll) activitiesQuery = activitiesQuery.eq("created_by", userId);
   const [sharedConfig, { data: resolutions }, { data: activities, error }, { data: allProfiles }, { data: salesRoles }, { data: tablePreferences }] = await Promise.all([
     getLeadSharedConfig(),
     supabase.from("lead_resolutions").select("id, name").in("name", ["DND", "Not Interested", "Wrong Number"]),
@@ -81,7 +89,7 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
 
   return <section className="mx-auto max-w-[1500px]">
     <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-      <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{canReviewAll ? "Team leads marked as DND, Not Interested, or Wrong Number." : "Leads you marked as DND, Not Interested, or Wrong Number."} Double-click a lead to open its details.</p></div>
+      <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as DND, Not Interested, or Wrong Number by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, or Wrong Number." : "Leads you marked as DND, Not Interested, or Wrong Number."} Double-click a lead to open its details.</p></div>
       <div className="flex gap-2">{filters.map((filter) => <Link key={filter.key} href={filter.key === "all" ? "/dashboard/dnd-master" : `/dashboard/dnd-master?type=${encodeURIComponent(filter.key)}`} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label}</Link>)}</div>
     </header>
     <DndMasterTable rows={rows} columns={visibleColumns} assignedNames={assignedNames} preferences={preferences} reassignUsers={reassignUsers} />

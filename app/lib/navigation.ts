@@ -4,6 +4,7 @@ export type DashboardNavItem = {
   label: string;
   href: string;
   roles?: AppRole[];
+  children?: { label: string; href: string }[];
 };
 
 const commonNavigation: DashboardNavItem[] = [
@@ -14,8 +15,15 @@ const commonNavigation: DashboardNavItem[] = [
 
 const roleNavigation: DashboardNavItem[] = [
   { label: "Admin overview", href: "/dashboard/admin", roles: ["admin"] },
-  { label: "Do Not Call", href: "/dashboard/dnd-master", roles: ["admin", "sales_manager", "sales_executive", "consultant"] },
-  { label: "Old Graduate", href: "/dashboard/old-graduate-master", roles: ["admin", "sales_manager", "sales_executive", "consultant"] },
+  {
+    label: "Do Not Call",
+    href: "/dashboard/dnd-master",
+    roles: ["admin", "sales_manager", "sales_executive", "consultant"],
+    children: [
+      { label: "Do Not Call Master", href: "/dashboard/dnd-master" },
+      { label: "Old Graduate", href: "/dashboard/old-graduate-master" },
+    ],
+  },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
   { label: "Team", href: "/dashboard/team", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },
@@ -51,6 +59,7 @@ export function getDashboardNavigation(roles: AppRole[]) {
   if (isAmbassadorWorkspace(roles)) return [
     { label: "Dashboard", href: "/dashboard" },
     { label: "Leads", href: "/dashboard/leads" },
+    { label: "Do Not Call", href: "/dashboard/dnd-master" },
   ];
   return [
     ...commonNavigation,

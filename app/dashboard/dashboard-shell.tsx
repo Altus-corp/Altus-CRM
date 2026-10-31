@@ -16,6 +16,7 @@ type DashboardShellProps = {
   roles: AppRole[];
   displayName: string;
   ambassadorOwnerLabel?: string;
+  ambassadorOwnerPhone?: string;
   todayAssignedLeads: number;
   products: { id: string; code: string; name: string }[];
 };
@@ -84,12 +85,52 @@ function ProductsNavigation({ products, pathname }: { products: DashboardShellPr
   );
 }
 
+function DoNotCallNavigation({ item, pathname }: { item: DashboardNavItem; pathname: string }) {
+  if (!item.children?.length) {
+    const isActive = pathname === item.href;
+    return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
+      <span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="DND" /></span>
+      {item.label}
+    </Link>;
+  }
+
+  const isCurrentSection = pathname === item.href || item.children?.some((child) => child.href === pathname);
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  const open = isOpen ?? Boolean(isCurrentSection);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!open)}
+        aria-expanded={open}
+        aria-controls="do-not-call-navigation"
+        className={`flex min-h-9 w-full items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-left text-[13px] font-bold leading-tight transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}
+      >
+        <span className={isCurrentSection ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="DND" /></span>
+        {item.label}
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className={`ml-auto h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}><path d="m5 7.5 5 5 5-5" /></svg>
+      </button>
+      {open && (
+        <div id="do-not-call-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">
+          {item.children?.map((child) => (
+            <Link key={child.href} href={child.href} className={`block py-0.5 text-[11px] font-semibold ${pathname === child.href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>
+              {child.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DashboardShell({
   children,
   navigation,
   roles,
   displayName,
   ambassadorOwnerLabel,
+  ambassadorOwnerPhone,
   todayAssignedLeads,
   products,
 }: DashboardShellProps) {
@@ -98,6 +139,10 @@ export function DashboardShell({
   const [isConfigurationOpen, setIsConfigurationOpen] = useState(false);
   const isConfigurationPage = pathname === "/dashboard/lead-settings";
   const isAdmin = roles.includes("admin");
+  const ambassadorWhatsappNumber = ambassadorOwnerPhone?.replace(/\D/g, "");
+  const ambassadorWhatsappHref = ambassadorWhatsappNumber
+    ? `https://wa.me/${ambassadorWhatsappNumber.length === 10 ? `91${ambassadorWhatsappNumber}` : ambassadorWhatsappNumber}`
+    : undefined;
   const configurationLinks = [
     { label: "Lead configuration", href: "/dashboard/lead-settings" },
     { label: "Columns management", href: "/dashboard/lead-settings?tab=columns" },
@@ -129,6 +174,7 @@ export function DashboardShell({
         <nav className="mt-2.5 space-y-0" aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
+            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} />;
 
             const isActive = pathname === item.href;
 
@@ -207,11 +253,14 @@ export function DashboardShell({
             ALTUS CRM
           </Link>
           <p className="hidden text-[17px] font-extrabold tracking-[-0.035em] text-[#cf0000] md:block">
-            CRM <span className="mx-1 text-slate-400">›</span> {navigation.find((item) => item.href === pathname)?.label ?? "Workspace"}
+            CRM <span className="mx-1 text-slate-400">›</span> {navigation.find((item) => item.href === pathname)?.label ?? navigation.flatMap((item) => item.children ?? []).find((item) => item.href === pathname)?.label ?? "Workspace"}
           </p>
           <div className="flex items-center gap-2">
-            {ambassadorOwnerLabel && <span title={`Assigned Sales Person: ${ambassadorOwnerLabel}`} className="inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 sm:max-w-[260px]">
-              <span className="hidden shrink-0 font-medium sm:inline">Sales Person:</span><span className="truncate">{ambassadorOwnerLabel}</span>
+            {ambassadorWhatsappHref && <a href={ambassadorWhatsappHref} target="_blank" rel="noreferrer" aria-label="Message Sales Person on WhatsApp" title="Message Sales Person on WhatsApp" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="h-4 w-4"><path d="M20.5 11.6A8.5 8.5 0 0 1 8 19.1L3.5 20.5 4.9 16A8.5 8.5 0 1 1 20.5 11.6Z" /><path d="M8.1 8.4c.2-.5.4-.5.7-.5h.5c.2 0 .4.1.5.4l.7 1.7c.1.3.1.5-.1.7l-.5.6c.7 1.4 1.6 2.3 3 3l.6-.5c.2-.2.5-.2.7-.1l1.7.7c.3.1.4.3.4.5v.5c0 .3 0 .5-.5.7-.6.2-1.6.1-3-.6-1.5-.7-3-2.1-4.2-4.2-.7-1.4-.8-2.4-.6-3Z" /></svg>
+            </a>}
+            {ambassadorOwnerLabel && <span title={`Sales Person: ${ambassadorOwnerLabel}`} className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700">
+              <span className="shrink-0 font-medium">Sales Person:</span><span>{ambassadorOwnerLabel}</span>
             </span>}
             <LeadNavTools />
             <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>

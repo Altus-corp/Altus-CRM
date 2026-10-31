@@ -8,6 +8,7 @@ import { AdminLeadsMaster } from "@/components/leads/admin-leads-master";
 import { SalesLeadsWorkspace } from "@/components/leads/sales-leads-workspace";
 import { createClient } from "@/app/lib/supabase/server";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
+import { indiaToday } from "@/app/lib/lead-event-schedule";
 
 export const instant = false;
 
@@ -28,7 +29,15 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const isAdmin = user.roles.includes("admin");
   const ambassadorWorkspace = isAmbassadorWorkspace(user.roles);
   const sharedConfigPromise = getLeadSharedConfig();
-  const leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  const partnerLinksResult = ambassadorWorkspace
+    ? await supabase.from("lead_channel_partners").select("lead_id, focused_on").eq("ambassador_id", user.userId)
+    : { data: [] as { lead_id: string; focused_on: string | null }[], error: null };
+  const partnerLinksUnavailable = ambassadorWorkspace && Boolean(partnerLinksResult.error);
+  const partnerFocusByLead = new Map((partnerLinksResult.data ?? []).map((link) => [link.lead_id, link.focused_on]));
+  const partnerLeadIds = [...partnerFocusByLead.keys()];
+  let leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  if (ambassadorWorkspace && partnerLeadIds.length)
+    leadsPromise = leadsPromise.or(`ambassador_imported_by.eq.${user.userId},id.in.(${partnerLeadIds.join(",")})`);
   const preferencesPromise = supabase.from("lead_table_preferences").select("column_order, column_widths, frozen_column_keys, hidden_column_keys, layout_version").eq("user_id", user.userId).maybeSingle();
   const adminDataPromise = isAdmin ? Promise.all([
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "database_leads"),
@@ -38,7 +47,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     supabase.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name"),
     supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
   ]) : Promise.resolve(null);
-  const scopedLeadsPromise = ambassadorWorkspace ? leadsPromise.eq("ambassador_imported_by", user.userId) : leadsPromise;
+  const scopedLeadsPromise = ambassadorWorkspace && !partnerLeadIds.length ? leadsPromise.eq("ambassador_imported_by", user.userId) : leadsPromise;
   const [sharedConfig, leadsResult, preferencesResult, adminData] = await Promise.all([sharedConfigPromise, scopedLeadsPromise, preferencesPromise, adminDataPromise]);
   const { columns, columnsError, products, stages, resolutions, resolutionMappings } = sharedConfig;
   const { data: leads, error: leadsError } = leadsResult;
@@ -85,7 +94,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       custom_data: lead.custom_data,
       assigned_to: assignment.assigned_to,
       assigned_at: assignment.assigned_at,
-      focused_on: assignment.focused_on,
+      focused_on: ambassadorWorkspace ? (partnerFocusByLead.get(lead.id) ?? assignment.focused_on) : assignment.focused_on,
       next_follow_up_at: assignment.next_follow_up_at,
       last_called_at: lastCalledByAssignment.get(assignment.id) ?? lastCalledByLead.get(lead.id) ?? null,
       product: Array.isArray(assignment.product) ? assignment.product : assignment.product ? [assignment.product] : [],
@@ -114,10 +123,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
   const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [], hidden: tablePreferences?.hidden_column_keys ?? [], layoutVersion: tablePreferences?.layout_version ?? 0 };
   const pager = <LeadsPager page={page} hasNext={hasNextPage} view={params.view} />;
-  if (ambassadorWorkspace) return <section className="mx-auto max-w-[1500px]">
-    <header className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-extrabold text-slate-900">Leads</h1><p className="mt-1 text-sm text-slate-500">Import and manage your leads. Your imports stay outside round robin.</p></div><AdminLeadImport ownImports sampleColumns={columns} products={products} resolutions={resolutions} salesPeople={[{ id: user.userId, name: user.displayName }]} /></header>
-    <LeadsTable columns={columns} detailColumns={columns} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} editableConfiguration={{ products, stages, productResolutions }} />{pager}
-  </section>;
+  if (ambassadorWorkspace) {
+    const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === indiaToday()).map((lead) => lead.assignment_id);
+    return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} />{partnerLinksUnavailable && <p className="mx-auto mt-3 max-w-7xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Channel Partner leads will appear after the latest Channel Partner migration is run in Supabase.</p>}{pager}</>;
+  }
   if (user.roles.includes("admin")) return <><AdminLeadsMaster columns={columns ?? []} sampleColumns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} assignmentUsers={assignmentUsers} importUsers={importUsers} preferences={preferences} databaseCounts={{ databaseLeads: databaseLeadsCount ?? 0, referenceLeads: referenceLeadsCount ?? 0, qualifiedLeads: qualifiedLeadsCount ?? 0, leads: leadsCount ?? 0 }} products={products ?? []} stages={stages ?? []} resolutions={resolutions ?? []} productResolutions={productResolutions} />{pager}</>;
   const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date());
   const todayKey = [todayParts.find((part) => part.type === "year")?.value, todayParts.find((part) => part.type === "month")?.value, todayParts.find((part) => part.type === "day")?.value].join("-");

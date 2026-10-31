@@ -21,14 +21,29 @@ export async function POST(request: Request) {
   const { data: roleRows, error: roleError } = await admin.from("user_roles").select("user_id").eq("role", "ambassador");
   if (roleError) return Response.json({ ok: false, error: "Ambassadors could not be loaded." }, { status: 500 });
   const currentIds = new Set((roleRows ?? []).map((role) => role.user_id));
-  const ids = [...new Set([...currentIds, ...(leads ?? []).flatMap((lead) => lead.channel_partner_ids ?? [])])];
+  const relationResult = await admin
+    .from("lead_channel_partners")
+    .select("lead_id, ambassador_id")
+    .in("lead_id", (leads ?? []).map((lead) => lead.id));
+  const relationMissing = ["42P01", "PGRST205"].includes(relationResult.error?.code ?? "");
+  if (relationResult.error && !relationMissing)
+    return Response.json({ ok: false, error: "Channel Partners could not be loaded." }, { status: 500 });
+  const selectedByLead = new Map<string, string[]>();
+  if (!relationMissing) {
+    for (const relation of relationResult.data ?? []) {
+      selectedByLead.set(relation.lead_id, [...(selectedByLead.get(relation.lead_id) ?? []), relation.ambassador_id]);
+    }
+  }
+  const selectedFor = (lead: { id: string; channel_partner_ids?: string[] }) =>
+    relationMissing ? lead.channel_partner_ids ?? [] : selectedByLead.get(lead.id) ?? [];
+  const ids = [...new Set([...currentIds, ...(leads ?? []).flatMap(selectedFor)])];
   const { data: profiles, error: profilesError } = ids.length ? await admin.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", ids) : { data: [], error: null };
   if (profilesError) return Response.json({ ok: false, error: "Ambassadors could not be loaded." }, { status: 500 });
   const names = new Map((profiles ?? []).map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Ambassador"]));
   const options = (profiles ?? []).filter((profile) => currentIds.has(profile.id) && !profile.is_suspended).map((profile) => ({ id: profile.id, name: names.get(profile.id)! })).sort((a, b) => a.name.localeCompare(b.name));
   return Response.json({ ok: true,
-    partners: Object.fromEntries((leads ?? []).map((lead) => [lead.id, (lead.channel_partner_ids ?? []).map((id: string) => names.get(id) ?? "Unavailable Ambassador").join(", ")])),
-    selected: Object.fromEntries((leads ?? []).map((lead) => [lead.id, lead.channel_partner_ids ?? []])), options,
+    partners: Object.fromEntries((leads ?? []).map((lead) => [lead.id, selectedFor(lead).map((id: string) => names.get(id) ?? "Unavailable Ambassador").join(", ")])),
+    selected: Object.fromEntries((leads ?? []).map((lead) => [lead.id, selectedFor(lead)])), options,
     editable: user.roles.some((role) => ["admin", "sales_executive", "sales_manager"].includes(role)),
   });
 }
