@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import { Pin, PinOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { savePreConfirmation, saveStageDropdownValue, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
+import { createLeadNote, savePreConfirmation, saveStageDropdownValue, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import { formatCrmDate } from "@/app/lib/date";
 import { FollowUpActions } from "@/components/dashboard/follow-up-actions";
 import { FollowUpDateModal, type LeadColumn, type LeadRow } from "@/components/leads/leads-table";
@@ -48,10 +48,14 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
   const countFor = (stageId: string) => leads.filter((lead) => lead.stageId === stageId).length;
   const active = stages.find((stage) => stage.id === activeId) ?? stages[0];
   const visible = active ? leads.filter((lead) => lead.stageId === active.id) : [];
-  const isPrePso = product.code.toUpperCase() === "PSO" && active?.name.toLowerCase() === "pre pso";
-  const isDuringPso = product.code.toUpperCase() === "PSO" && active?.name.toLowerCase() === "during pso";
-  const isPostPso = product.code.toUpperCase() === "PSO" && active?.name.toLowerCase() === "pso attendant";
-  const isLeanLayout = isPrePso || isDuringPso || isPostPso;
+  const orientationCode = product.code.toUpperCase();
+  const isOrientation = orientationCode === "PSO" || orientationCode === "BSSO";
+  const stageName = active?.name.toLowerCase() ?? "";
+  const isPreOrientation = isOrientation && stageName === `pre ${orientationCode.toLowerCase()}`;
+  const isDuringOrientation = isOrientation && stageName === `during ${orientationCode.toLowerCase()}`;
+  const isPostOrientation = isOrientation && stageName === `post ${orientationCode.toLowerCase()}`;
+  const isPrePso = orientationCode === "PSO" && isPreOrientation;
+  const isLeanLayout = isPreOrientation || isDuringOrientation || isPostOrientation;
 
   function moveTo(lead: BoardLead, stageId: string) {
     if (!stageId || stageId === lead.stageId) return;
@@ -72,16 +76,17 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
   const dropdownColumns: BoardColumn[] = stageDropdowns.map((dropdown) => ({ key: `dropdown:${dropdown.id}`, label: dropdown.label, width: 190 }));
   const columnDefs: BoardColumn[] = isLeanLayout
     ? [
-      { key: "actions", label: "Action", width: 190 }, { key: "lead", label: "Full Name", width: 170 }, { key: "phone", label: "Number", width: 140 },
+      { key: "actions", label: isPostOrientation ? "Contact" : "Action", width: 190 }, { key: "lead", label: "Full Name", width: 170 }, { key: "phone", label: "Number", width: 140 },
       ...dropdownColumns, ...(isPrePso ? [{ key: "notes", label: "Confirmation Notes", width: 250 }] : []),
-      { key: "moveTo", label: "Move To", width: 170 },
+      ...(isPreOrientation && !isPrePso ? [{ key: "salesNote", label: "Confirmation Notes", width: 280 }] : []),
+      ...(isPostOrientation ? [{ key: "salesNote", label: "Sales Note", width: 280 }] : [{ key: "moveTo", label: "Move To", width: 170 }]),
     ]
     : [
       { key: "lead", label: "Lead", width: 170 }, { key: "phone", label: "Phone", width: 140 }, { key: "resolution", label: "Activity Resolution", width: 180 }, { key: "followUp", label: "Next follow-up", width: 170 },
       { key: "assignedOn", label: "Assigned on", width: 140 }, { key: "note", label: "Latest note", width: 240 }, ...dropdownColumns,
       { key: "moveTo", label: "Move to", width: 170 }, { key: "actions", label: "Actions", width: 190 },
     ];
-  const layoutKey = `altus-stage-board:${product.code}:${isPrePso ? "pre-pso" : isDuringPso ? "during-pso" : isPostPso ? "post-pso" : "default"}:${stageDropdowns.map((dropdown) => dropdown.id).join(",")}`;
+  const layoutKey = `altus-stage-board:${product.code}:${isPreOrientation ? "pre" : isDuringOrientation ? "during" : isPostOrientation ? "post" : "default"}:${stageDropdowns.map((dropdown) => dropdown.id).join(",")}`;
   const [layouts, setLayouts] = useState<Record<string, Layout>>({});
   const layout = layouts[layoutKey] ?? EMPTY_LAYOUT;
   const [dragged, setDragged] = useState<string | null>(null);
@@ -137,6 +142,7 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
       case "resolution": return <ResolutionCell key={`${lead.assignmentId}:${lead.resolutionId}`} lead={lead} resolutions={resolutions} />;
       case "followUp": return <span className="text-xs font-medium text-slate-700">{lead.nextFollowUpAt ? formatCrmDate(lead.nextFollowUpAt) : "—"}</span>;
       case "notes": return <PreNotesCell key={lead.assignmentId} lead={lead} ready={detailsReady} />;
+      case "salesNote": return <SalesNoteCell key={lead.assignmentId} lead={lead} />;
       case "assignedOn": return <span className="text-xs font-medium text-slate-700">{lead.assignedAt ? formatCrmDate(lead.assignedAt) : "—"}</span>;
       case "note": return <span className="block max-w-[220px] truncate text-xs text-slate-600" title={lead.note ?? undefined}>{lead.note ?? "—"}</span>;
       case "moveTo": return <select value={lead.stageId ?? ""} disabled={isPending && movingId === lead.assignmentId} onChange={(event) => moveTo(lead, event.target.value)} aria-label={`Move ${lead.name} to another stage`} className={selectClass}>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select>;
@@ -285,4 +291,36 @@ function PreNotesCell({ lead, ready }: { lead: BoardLead; ready: boolean }) {
     {status.saving && <p className="mt-1 text-[10px] font-semibold text-slate-400">Saving…</p>}
     {status.error && <p className="mt-1 max-w-[220px] whitespace-normal text-[10px] font-bold text-red-600" role="alert">{status.error}</p>}
   </>;
+}
+
+// Post PSO notes are stored as lead activities, preserving the actor and the
+// full note history in the lead-detail timeline.
+function SalesNoteCell({ lead }: { lead: BoardLead }) {
+  const router = useRouter();
+  const [value, setValue] = useState("");
+  const [status, setStatus] = useState<{ saving: boolean; error: string }>({ saving: false, error: "" });
+
+  async function save() {
+    const note = value.trim();
+    if (!note) return;
+    setStatus({ saving: true, error: "" });
+    const formData = new FormData();
+    formData.set("leadId", lead.leadId);
+    formData.set("assignmentId", lead.assignmentId);
+    formData.set("note", note);
+    try {
+      await createLeadNote(formData);
+      setValue("");
+      setStatus({ saving: false, error: "" });
+      router.refresh();
+    } catch (saveError) {
+      setStatus({ saving: false, error: saveError instanceof Error ? saveError.message : "Unable to save the sales note." });
+    }
+  }
+
+  return <div className="min-w-[230px]">
+    {lead.note && <p title={lead.note} className="mb-1 max-w-[250px] truncate text-[10px] font-medium text-slate-500">Latest: {lead.note}</p>}
+    <div className="flex gap-1.5"><input value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void save(); } }} maxLength={2000} placeholder="Add sales note" aria-label={`Sales note for ${lead.name}`} className="h-8 min-w-0 flex-1 rounded border border-slate-200 px-2 text-xs outline-none focus:border-red-400" /><button type="button" disabled={status.saving || !value.trim()} onClick={() => void save()} className="h-8 rounded bg-[#d90000] px-2.5 text-[10px] font-extrabold text-white disabled:opacity-50">{status.saving ? "Saving..." : "Save"}</button></div>
+    {status.error && <p role="alert" className="mt-1 text-[10px] font-bold text-red-600">{status.error}</p>}
+  </div>;
 }

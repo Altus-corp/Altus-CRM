@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ArrowRight, CheckCircle2, Clock, PhoneCall, PhoneIncoming, PhoneOutgoing, XCircle } from "lucide-react";
 import { FollowUpActions } from "./follow-up-actions";
+import { ActivityResolutionOverview } from "./activity-resolution-overview";
 import type { RecentCall, SalesDashboardData, UpcomingFollowUp } from "@/app/lib/sales-dashboard";
 
 const REFRESH_MS = 30_000;
@@ -51,7 +52,9 @@ export function SalesExecutiveDashboard() {
   const summary = data?.summary;
   const figure = (value: number | undefined) => (!data ? "…" : data.callsAvailable ? String(value ?? 0) : "—");
 
-  return <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+  return <div className="mx-auto max-w-7xl space-y-4">
+    <ActivityResolutionOverview mode="executive" />
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
     <section className="rounded-2xl bg-white p-4 shadow-sm" aria-label="Calling activity">
       <div className="flex items-center justify-between"><h2 className="text-lg font-extrabold tracking-[-0.03em] text-slate-900">Calling Activity</h2><ViewAll /></div>
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" role="alert">{error}</p>}
@@ -80,6 +83,7 @@ export function SalesExecutiveDashboard() {
       {!data && !error && <p className="py-6 text-center text-xs font-semibold text-slate-400">Loading follow-ups…</p>}
       {data && !data.upcomingFollowUps.length && <p className="py-6 text-center text-xs font-semibold text-slate-400">No follow-ups scheduled.</p>}
     </section>
+    </div>
   </div>;
 }
 

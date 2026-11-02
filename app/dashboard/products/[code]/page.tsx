@@ -19,7 +19,8 @@ type Row = { id: string; lead_id: string; stage_id: string | null; latest_resolu
 
 // Stages that make up a product's journey, in order. Products not listed here show every active stage.
 const PRODUCT_PHASES: Record<string, string[]> = {
-  PSO: ["Pre PSO", "During PSO", "PSO Attendant"],
+  PSO: ["Pre PSO", "During PSO", "Post PSO", "PSO Attendant"],
+  BSSO: ["Pre BSSO", "During BSSO", "Post BSSO"],
 };
 
 const one = <T,>(value: T | T[] | null): T | null => (Array.isArray(value) ? value[0] ?? null : value);
@@ -33,7 +34,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
   await connection();
   const { userId, roles } = await requireUser();
 
-  if (!roles.includes("sales_executive")) {
+  if (!roles.includes("sales_executive") && !roles.includes("sales_manager")) {
     redirect("/dashboard");
   }
 

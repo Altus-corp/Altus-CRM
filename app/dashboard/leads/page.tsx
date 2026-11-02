@@ -35,7 +35,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const partnerLinksUnavailable = ambassadorWorkspace && Boolean(partnerLinksResult.error);
   const partnerFocusByLead = new Map((partnerLinksResult.data ?? []).map((link) => [link.lead_id, link.focused_on]));
   const partnerLeadIds = [...partnerFocusByLead.keys()];
-  let leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  let leadsPromise = supabase.from("leads").select("id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))").order("created_at", { ascending: false }).range(offset, offset + pageSize);
   if (ambassadorWorkspace && partnerLeadIds.length)
     leadsPromise = leadsPromise.or(`ambassador_imported_by.eq.${user.userId},id.in.(${partnerLeadIds.join(",")})`);
   const preferencesPromise = supabase.from("lead_table_preferences").select("column_order, column_widths, frozen_column_keys, hidden_column_keys, layout_version").eq("user_id", user.userId).maybeSingle();
@@ -96,6 +96,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       assigned_at: assignment.assigned_at,
       focused_on: ambassadorWorkspace ? (partnerFocusByLead.get(lead.id) ?? assignment.focused_on) : assignment.focused_on,
       next_follow_up_at: assignment.next_follow_up_at,
+      is_new_inbound: assignment.is_new_inbound,
       last_called_at: lastCalledByAssignment.get(assignment.id) ?? lastCalledByLead.get(lead.id) ?? null,
       product: Array.isArray(assignment.product) ? assignment.product : assignment.product ? [assignment.product] : [],
       stage: Array.isArray(assignment.stage) ? assignment.stage : assignment.stage ? [assignment.stage] : [],
@@ -106,6 +107,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         assigned_at: item.assigned_at,
         focused_on: item.focused_on,
         next_follow_up_at: item.next_follow_up_at,
+        is_new_inbound: item.is_new_inbound,
         last_called_at: lastCalledByAssignment.get(item.id) ?? lastCalledByLead.get(lead.id) ?? null,
         product: Array.isArray(item.product) ? item.product[0] : item.product,
         stage: Array.isArray(item.stage) ? item.stage[0] : item.stage,

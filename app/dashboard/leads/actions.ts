@@ -3255,6 +3255,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
     latest_resolution_id: string;
     next_follow_up_at?: string | null;
     focused_on?: null;
+    stage_id?: string;
   } = {
     latest_resolution_id: resolutionId,
   };
@@ -3277,6 +3278,43 @@ export async function updateLeadResolutionInline(formData: FormData) {
     throw new Error("Choose a follow-up date and time.");
   if (requiresFollowUp && !followUpNote)
     throw new Error("Add a follow-up note.");
+
+  // Registration is product-specific: a PSO registration begins at Pre PSO,
+  // and a BSSO registration begins at Pre BSSO.  Do not apply this to other
+  // products that happen to use a similarly named resolution.
+  let registeredStageName: string | null = null;
+  if (normalizedResolution === "registered") {
+    const { data: product, error: productError } = await supabase
+      .from("lead_products")
+      .select("code")
+      .eq("id", lead.product_id)
+      .single();
+    if (productError || !product)
+      throw new Error("This lead's product could not be found.");
+
+    const productCode = product.code.trim().toUpperCase();
+    registeredStageName =
+      productCode === "PSO"
+        ? "Pre PSO"
+        : productCode === "BSSO"
+          ? "Pre BSSO"
+          : null;
+
+    if (registeredStageName) {
+      const { data: stage, error: stageError } = await supabase
+        .from("lead_stages")
+        .select("id")
+        .eq("product_id", lead.product_id)
+        .eq("name", registeredStageName)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (stageError || !stage)
+        throw new Error(
+          `${registeredStageName} is not configured for this product. Ask an admin to add the stage first.`,
+        );
+      update.stage_id = stage.id;
+    }
+  }
   const isDoNotCall = [
     "dnd",
     "not interested",
@@ -3345,7 +3383,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
       lead_id: leadId,
       lead_product_assignment_id: assignmentId,
       activity_type: "resolution_updated",
-      note: `Activity resolution set to ${resolutionName}.${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
+      note: `Activity resolution set to ${resolutionName}.${registeredStageName ? ` Moved to ${registeredStageName}.` : ""}${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
       metadata: {
         resolution_id: resolutionId,
         released_to_admin_pool: releasesAssignment,

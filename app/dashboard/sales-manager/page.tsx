@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { getSalesManagerReport } from "@/app/lib/sales-manager-report";
+import { ActivityResolutionOverview } from "@/components/dashboard/activity-resolution-overview";
 
 export const instant = false;
 
-export default async function SalesManagerPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; team?: string }> }) {
+type SalesManagerSearchParams = { from?: string; to?: string; team?: string };
+
+export async function SalesManagerDashboard({ searchParams = Promise.resolve({}) }: { searchParams?: Promise<SalesManagerSearchParams> } = {}) {
   const report = await getSalesManagerReport(await searchParams);
   const { totals, callsUnavailable } = report;
   const callValue = (value: number) => callsUnavailable ? "Unavailable" : value.toLocaleString("en-IN");
@@ -11,6 +14,7 @@ export default async function SalesManagerPage({ searchParams }: { searchParams:
 
   return <section className="mx-auto max-w-[1500px] space-y-5">
     <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sales overview</h1><p className="mt-1 text-sm text-slate-500">Call performance and lead progress for sales users in your assigned teams.</p></div><Link href="/dashboard/sales-team" className="text-sm font-bold text-red-700 hover:underline">View My Team</Link></header>
+    <ActivityResolutionOverview mode="manager" />
     <form className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-100 bg-white p-4">
       <label className="text-xs font-bold text-slate-600">Team<select name="team" defaultValue={report.selectedTeam} className="mt-1 block h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm"><option value="">All my teams</option>{report.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
       <label className="text-xs font-bold text-slate-600">From<input type="date" name="from" required defaultValue={report.from} max={report.today} className="mt-1 block h-10 rounded-lg border border-slate-200 px-3 text-sm" /></label>
@@ -53,4 +57,8 @@ export default async function SalesManagerPage({ searchParams }: { searchParams:
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm"><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-2 text-2xl font-extrabold text-slate-900">{value}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></div>;
+}
+
+export default function SalesManagerPage({ searchParams }: { searchParams: Promise<SalesManagerSearchParams> }) {
+  return <SalesManagerDashboard searchParams={searchParams} />;
 }
