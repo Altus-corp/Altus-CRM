@@ -15,6 +15,8 @@ type DashboardShellProps = {
   navigation: DashboardNavItem[];
   roles: AppRole[];
   displayName: string;
+  email: string;
+  roleLabel: string;
   ambassadorOwnerLabel?: string;
   ambassadorOwnerPhone?: string;
   todayAssignedLeads: number;
@@ -129,6 +131,8 @@ export function DashboardShell({
   navigation,
   roles,
   displayName,
+  email,
+  roleLabel,
   ambassadorOwnerLabel,
   ambassadorOwnerPhone,
   todayAssignedLeads,
@@ -137,6 +141,7 @@ export function DashboardShell({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isConfigurationOpen, setIsConfigurationOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const isConfigurationPage = pathname === "/dashboard/lead-settings";
   const isAdmin = roles.includes("admin");
   const ambassadorWhatsappNumber = ambassadorOwnerPhone?.replace(/\D/g, "");
@@ -148,9 +153,6 @@ export function DashboardShell({
     { label: "Columns management", href: "/dashboard/lead-settings?tab=columns" },
     { label: "Product management", href: "/dashboard/lead-settings?tab=products" },
     { label: "Dropdown management", href: "/dashboard/lead-settings?tab=stages" },
-    { label: "Call resolutions", href: "/dashboard/lead-settings?tab=resolutions" },
-    { label: "Workflow actions", href: "/dashboard/lead-settings?tab=workflows" },
-    { label: "Custom fields", href: "/dashboard/lead-settings?tab=custom-fields" },
   ];
 
   return (
@@ -265,7 +267,23 @@ export function DashboardShell({
             <LeadNavTools />
             <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
             <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>
-            <WmsProfileAvatar initials={initialsFor(displayName)} />
+            <div className="relative">
+              <WmsProfileAvatar initials={initialsFor(displayName)} expanded={isProfileMenuOpen} onClick={() => setIsProfileMenuOpen((value) => !value)} />
+              {isProfileMenuOpen && <div role="dialog" aria-label="Account menu" className="absolute right-0 top-[46px] z-50 w-[280px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_18px_46px_rgba(25,38,61,0.22)]">
+                <div className="flex items-center gap-3 px-1 py-2">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-red-50 text-xs font-extrabold text-red-700">{initialsFor(displayName)}</span>
+                  <div className="min-w-0"><p className="truncate text-sm font-extrabold text-slate-900">{displayName}</p><p className="truncate text-xs font-medium text-slate-500">{email || "No email address"}</p><span className="mt-1 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{roleLabel}</span></div>
+                </div>
+                <div className="my-2 border-t border-slate-200" />
+                <Link href="/dashboard/settings" onClick={() => setIsProfileMenuOpen(false)} className="flex min-h-10 items-center gap-3 rounded-xl px-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-red-700">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="h-4 w-4"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.55V20.3h-3v-.09A1.7 1.7 0 0 0 10.68 18.66a1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7.02 15 1.7 1.7 0 0 0 5.47 14H5.4v-3h.07A1.7 1.7 0 0 0 7.02 9.97a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.55V4.7h3v.06a1.7 1.7 0 0 0 1.03 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.12 2.12-.06.06A1.7 1.7 0 0 0 19.4 15Z" /></svg>
+                  Settings
+                  <span className="ml-auto text-lg font-medium text-slate-400">›</span>
+                </Link>
+                <div className="my-2 border-t border-slate-200" />
+                <form action={signOut}><button className="flex min-h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm font-extrabold text-red-700 transition hover:bg-red-50"><span className="text-lg">↪</span>Sign out</button></form>
+              </div>}
+            </div>
           </div>
         </header>
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { connection } from "next/server";
 import { requireUser } from "@/app/lib/auth";
-import { isAmbassadorWorkspace } from "@/app/lib/roles";
+import { isAmbassadorWorkspace, ROLE_LABELS } from "@/app/lib/roles";
 import { getAmbassadorOwner } from "@/app/lib/ambassador-owner";
 import { getDashboardNavigation } from "@/app/lib/navigation";
 import { createClient } from "@/app/lib/supabase/server";
@@ -16,7 +16,8 @@ export default async function DashboardLayout({
   children: ReactNode;
 }) {
   await connection();
-  const { roles, userId, displayName } = await requireUser();
+  const { roles, userId, displayName, email } = await requireUser();
+  const roleLabel = roles.map((role) => ROLE_LABELS[role]).join(" · ");
   const ambassadorOwner = isAmbassadorWorkspace(roles) ? await getAmbassadorOwner() : undefined;
   const hasSalesWorkspace = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant");
   const supabase = await createClient();
@@ -28,7 +29,7 @@ export default async function DashboardLayout({
     : { count: 0 };
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
+    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} email={email} roleLabel={roleLabel} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
       {children}
     </DashboardShell>
   );

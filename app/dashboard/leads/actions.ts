@@ -665,7 +665,7 @@ export async function importLeadsCsv(
   };
 }
 
-export async function syncProductivityShastraQualifiedLeads(): Promise<{
+export async function syncProductivityShastraQualifiedLeads(actorUserId?: string): Promise<{
   ok: boolean;
   message: string;
   imported?: number;
@@ -673,7 +673,7 @@ export async function syncProductivityShastraQualifiedLeads(): Promise<{
   skipped?: number;
 }> {
   try {
-    const { userId } = await requireAdmin();
+    const userId = actorUserId ?? (await requireAdmin()).userId;
     const apiKey = process.env.PRODUCTIVITY_SHASTRA_API_KEY?.trim();
     const baseUrl = (
       process.env.PRODUCTIVITY_SHASTRA_API_BASE_URL?.trim() ||
@@ -904,9 +904,10 @@ type LeadSourceSyncResult = {
 
 async function syncGoogleAppsScriptLeadSource(
   sourceKey: keyof typeof externalLeadSources,
+  actorUserId?: string,
 ): Promise<LeadSourceSyncResult> {
   try {
-    const { userId } = await requireAdmin();
+    const userId = actorUserId ?? (await requireAdmin()).userId;
     const source = externalLeadSources[sourceKey];
     const sourceUrl = configuredSourceUrl(source);
     if (!sourceUrl)
@@ -1425,15 +1426,15 @@ async function syncGoogleAppsScriptLeadSource(
   }
 }
 
-export async function syncGoogleAppsScriptPsoLeads(): Promise<LeadSourceSyncResult> {
-  return syncGoogleAppsScriptLeadSource("google_apps_script_pso");
+export async function syncGoogleAppsScriptPsoLeads(actorUserId?: string): Promise<LeadSourceSyncResult> {
+  return syncGoogleAppsScriptLeadSource("google_apps_script_pso", actorUserId);
 }
 
-export async function syncGoogleAppsScriptBssoLeads(): Promise<LeadSourceSyncResult> {
-  return syncGoogleAppsScriptLeadSource("google_apps_script_bsso");
+export async function syncGoogleAppsScriptBssoLeads(actorUserId?: string): Promise<LeadSourceSyncResult> {
+  return syncGoogleAppsScriptLeadSource("google_apps_script_bsso", actorUserId);
 }
 
-export async function syncMananvasaQualifiedLeads(): Promise<{
+export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise<{
   ok: boolean;
   message: string;
   imported?: number;
@@ -1441,7 +1442,7 @@ export async function syncMananvasaQualifiedLeads(): Promise<{
   skipped?: number;
 }> {
   try {
-    const { userId } = await requireAdmin();
+    const userId = actorUserId ?? (await requireAdmin()).userId;
     const apiKey = process.env.MANANVASA_API_TOKEN?.trim();
     const baseUrl = (
       process.env.MANANVASA_API_BASE_URL?.trim() ||
@@ -1728,7 +1729,7 @@ export async function syncMananvasaQualifiedLeads(): Promise<{
   }
 }
 
-export async function syncAltusCorpQualifiedLeads(): Promise<{
+export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise<{
   ok: boolean;
   message: string;
   imported?: number;
@@ -1736,7 +1737,7 @@ export async function syncAltusCorpQualifiedLeads(): Promise<{
   skipped?: number;
 }> {
   try {
-    const { userId } = await requireAdmin();
+    const userId = actorUserId ?? (await requireAdmin()).userId;
     const apiKey = process.env.ALTUSCORP_EXTERNAL_LEADS_API_KEY?.trim();
     const baseUrl = (
       process.env.ALTUSCORP_EXTERNAL_LEADS_API_BASE_URL?.trim() ||

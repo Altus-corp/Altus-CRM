@@ -28,8 +28,6 @@ const roleNavigation: DashboardNavItem[] = [
   { label: "Team", href: "/dashboard/team", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },
   { label: "Lead configuration", href: "/dashboard/lead-settings", roles: ["admin"] },
-  { label: "Settings", href: "/dashboard/settings", roles: ["admin", "sales_executive", "sales_manager"] },
-
   { label: "Sales overview", href: "/dashboard/sales-manager", roles: ["sales_manager"] },
   { label: "Deals", href: "/dashboard/deals", roles: ["sales_manager"] },
   { label: "Products", href: "/dashboard/products", roles: ["sales_executive"] },

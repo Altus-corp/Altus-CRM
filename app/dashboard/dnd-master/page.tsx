@@ -57,11 +57,11 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   const reassignUsers = canReviewAll ? (allProfiles ?? []).filter((profile) => !profile.is_suspended && eligibleAssignees.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" })) : [];
   const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [], hidden: tablePreferences?.hidden_column_keys ?? [], layoutVersion: tablePreferences?.layout_version ?? 0 };
   const resolutionNames = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
-  const rows: DndRow[] = ((activities ?? []) as unknown as Row[]).flatMap((row) => {
+  const allRows: DndRow[] = ((activities ?? []) as unknown as Row[]).flatMap((row) => {
     const status = row.metadata?.resolution_id ? resolutionNames.get(row.metadata.resolution_id) : undefined;
     const assignment = one(row.assignment);
     const lead = assignment ? one(assignment.lead) : null;
-    if (!status || !assignment || !lead || (activeFilter !== "all" && status.toLowerCase() !== activeFilter)) return [];
+    if (!status || !assignment || !lead) return [];
     const product = one(assignment.product);
     const stage = one(assignment.stage);
     const resolution = one(assignment.resolution);
@@ -85,12 +85,15 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
       },
     }];
   });
+  const rows = activeFilter === "all" ? allRows : allRows.filter((row) => row.status.toLowerCase() === activeFilter);
+  const filterCounts = new Map<string, number>([["all", allRows.length]]);
+  for (const filter of filters.slice(1)) filterCounts.set(filter.key, allRows.filter((row) => row.status.toLowerCase() === filter.key).length);
   const visibleColumns = list(sharedConfig.columns).filter((column) => column.is_visible);
 
   return <section className="mx-auto max-w-[1500px]">
     <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
       <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as DND, Not Interested, or Wrong Number by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, or Wrong Number." : "Leads you marked as DND, Not Interested, or Wrong Number."} Double-click a lead to open its details.</p></div>
-      <div className="flex gap-2">{filters.map((filter) => <Link key={filter.key} href={filter.key === "all" ? "/dashboard/dnd-master" : `/dashboard/dnd-master?type=${encodeURIComponent(filter.key)}`} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label}</Link>)}</div>
+      <div className="flex flex-wrap gap-2">{filters.map((filter) => <Link key={filter.key} href={filter.key === "all" ? "/dashboard/dnd-master" : `/dashboard/dnd-master?type=${encodeURIComponent(filter.key)}`} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label} <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${activeFilter === filter.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{filterCounts.get(filter.key) ?? 0}</span></Link>)}</div>
     </header>
     <DndMasterTable rows={rows} columns={visibleColumns} assignedNames={assignedNames} preferences={preferences} reassignUsers={reassignUsers} />
   </section>;
