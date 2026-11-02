@@ -267,7 +267,17 @@ function indiaToday() {
   return { date: `${get("year")}-${get("month")}-${get("day")}`, dayOfWeek };
 }
 
-const releasedResolutionNames = new Set(["dnd", "not interested"]);
+// These outcomes remain assigned to the same CRM user but are status work,
+// never normal Lead Master or Focused Lead work.
+const releasedResolutionNames = new Set([
+  "dnd",
+  "not interested",
+  "lost",
+  "i will get back",
+  "wrong number",
+  "old graduate",
+  "abandoned",
+]);
 
 function relatedName(value: unknown) {
   const related = Array.isArray(value) ? value[0] : value;

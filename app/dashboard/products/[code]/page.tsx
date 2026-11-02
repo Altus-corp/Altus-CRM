@@ -26,7 +26,7 @@ const one = <T,>(value: T | T[] | null): T | null => (Array.isArray(value) ? val
 
 const isDoNotCallResolution = (resolution: Named) => {
   const name = one(resolution)?.name?.trim().toLowerCase().replace(/[,_-]+/g, " ").replace(/\s+/g, " ") ?? "";
-  return ["dnd", "not interested", "wrong number", "old graduate"].includes(name);
+  return ["dnd", "not interested", "lost", "i will get back", "wrong number", "old graduate", "abandoned"].includes(name);
 };
 
 export default async function ProductPage({ params }: ProductPageProps) {

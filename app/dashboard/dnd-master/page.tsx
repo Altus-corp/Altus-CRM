@@ -15,17 +15,26 @@ type Row = { id: string; created_by: string; created_at: string; metadata: { res
 
 const one = <T,>(value: T | T[] | null): T | null => (Array.isArray(value) ? value[0] ?? null : value);
 const list = <T,>(value: T | T[] | null): T[] => (Array.isArray(value) ? value : value ? [value] : []);
-const filters = [{ key: "all", label: "All" }, { key: "dnd", label: "DND" }, { key: "not interested", label: "Not Interested" }, { key: "wrong number", label: "Wrong Number" }];
+const baseFilters = [
+  { key: "all", label: "All" },
+  { key: "dnd", label: "DND" },
+  { key: "not interested", label: "Not Interested" },
+  { key: "lost", label: "Lost" },
+  { key: "i will get back", label: "I Will Get Back" },
+  { key: "wrong number", label: "Wrong Number" },
+];
 const dateFormat = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 export default async function DndMasterPage({ searchParams }: { searchParams: Promise<{ type?: string }> }) {
   await connection();
   const { roles, userId } = await requireUser();
   const isAmbassador = isAmbassadorWorkspace(roles);
+  const isAdmin = roles.includes("admin");
   const canReviewAll = roles.includes("admin") || roles.includes("sales_manager");
   const canUseDoNotCall = isAmbassador || canReviewAll || roles.some((role) => role === "sales_executive" || role === "consultant");
   if (!canUseDoNotCall) return <section className="mx-auto max-w-3xl rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">You do not have access to Do Not Call.</section>;
 
+  const filters = isAdmin ? [...baseFilters, { key: "abandoned", label: "Abandoned" }] : baseFilters;
   const { type } = await searchParams;
   const activeFilter = filters.find((filter) => filter.key === type)?.key ?? "all";
   const supabase = await createClient();
@@ -41,7 +50,7 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   else if (!canReviewAll) activitiesQuery = activitiesQuery.eq("created_by", userId);
   const [sharedConfig, { data: resolutions }, { data: activities, error }, { data: allProfiles }, { data: salesRoles }, { data: tablePreferences }] = await Promise.all([
     getLeadSharedConfig(),
-    supabase.from("lead_resolutions").select("id, name").in("name", ["DND", "Not Interested", "Wrong Number"]),
+    supabase.from("lead_resolutions").select("id, name").in("name", ["DND", "Not Interested", "Lost", "I will get Back", "I Will Get Back", "Wrong Number", "Abandoned"]),
     activitiesQuery,
     supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended"),
     supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
@@ -61,7 +70,7 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
     const status = row.metadata?.resolution_id ? resolutionNames.get(row.metadata.resolution_id) : undefined;
     const assignment = one(row.assignment);
     const lead = assignment ? one(assignment.lead) : null;
-    if (!status || !assignment || !lead) return [];
+    if (!status || !assignment || !lead || (!isAdmin && status.toLowerCase() === "abandoned")) return [];
     const product = one(assignment.product);
     const stage = one(assignment.stage);
     const resolution = one(assignment.resolution);
@@ -92,7 +101,7 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
 
   return <section className="mx-auto max-w-[1500px]">
     <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-      <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as DND, Not Interested, or Wrong Number by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, or Wrong Number." : "Leads you marked as DND, Not Interested, or Wrong Number."} Double-click a lead to open its details.</p></div>
+      <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as a Do Not Call status by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, Lost, I Will Get Back, or Wrong Number. Admins can also review Abandoned leads released back to the pool." : "Leads you marked as a Do Not Call status."} Double-click a lead to open its details.</p></div>
       <div className="flex flex-wrap gap-2">{filters.map((filter) => <Link key={filter.key} href={filter.key === "all" ? "/dashboard/dnd-master" : `/dashboard/dnd-master?type=${encodeURIComponent(filter.key)}`} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label} <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${activeFilter === filter.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{filterCounts.get(filter.key) ?? 0}</span></Link>)}</div>
     </header>
     <DndMasterTable rows={rows} columns={visibleColumns} assignedNames={assignedNames} preferences={preferences} reassignUsers={reassignUsers} />

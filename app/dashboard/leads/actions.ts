@@ -3251,7 +3251,11 @@ export async function updateLeadResolutionInline(formData: FormData) {
     .maybeSingle();
   if (mappingError || !mapping)
     throw new Error("Choose a call resolution for this lead's product.");
-  const update: { latest_resolution_id: string; next_follow_up_at?: string } = {
+  const update: {
+    latest_resolution_id: string;
+    next_follow_up_at?: string | null;
+    focused_on?: null;
+  } = {
     latest_resolution_id: resolutionId,
   };
   if (followUpDate) update.next_follow_up_at = followUpDate.toISOString();
@@ -3273,13 +3277,27 @@ export async function updateLeadResolutionInline(formData: FormData) {
     throw new Error("Choose a follow-up date and time.");
   if (requiresFollowUp && !followUpNote)
     throw new Error("Add a follow-up note.");
-  const isDoNotCall = ["dnd", "not interested", "wrong number"].includes(
+  const isDoNotCall = [
+    "dnd",
+    "not interested",
+    "lost",
+    "i will get back",
+    "wrong number",
+  ].includes(
     normalizedResolution,
   );
   const isOldGraduate = normalizedResolution === "old graduate";
+  const isAbandoned = normalizedResolution === "abandoned";
   // Status work remains assigned to its current owner. It is hidden from Lead Master,
   // but administrators and Sales Managers can reassign it from its status workspace.
-  const releasesAssignment = false;
+  // Abandoned work returns to Admin's unassigned pool. The activity trail
+  // below preserves the CRM user who released it and the exact time.
+  const releasesAssignment = isAbandoned;
+  if (releasesAssignment) update.next_follow_up_at = null;
+  // Status-work leads remain owned by the CRM user, but must immediately leave
+  // the daily calling list. Lead Master visibility is handled by resolution
+  // filtering in the workspace.
+  if (isDoNotCall || isOldGraduate) update.focused_on = null;
   if (isDoNotCall) {
     const { error: doNotCallError } = await supabase
       .from("lead_do_not_call_entries")
@@ -3327,7 +3345,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
       lead_id: leadId,
       lead_product_assignment_id: assignmentId,
       activity_type: "resolution_updated",
-      note: `Activity resolution set to ${resolutionName}.${isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
+      note: `Activity resolution set to ${resolutionName}.${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
       metadata: {
         resolution_id: resolutionId,
         released_to_admin_pool: releasesAssignment,
@@ -3381,6 +3399,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
   }
   revalidatePath("/dashboard/leads");
   if (isDoNotCall) revalidatePath("/dashboard/dnd-master");
+  if (isAbandoned) revalidatePath("/dashboard/dnd-master");
   if (isOldGraduate) revalidatePath("/dashboard/old-graduate-master");
   revalidatePath("/dashboard/my-ambassador");
   revalidatePath("/dashboard/products", "layout");

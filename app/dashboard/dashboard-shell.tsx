@@ -87,8 +87,9 @@ function ProductsNavigation({ products, pathname }: { products: DashboardShellPr
   );
 }
 
-function DoNotCallNavigation({ item, pathname }: { item: DashboardNavItem; pathname: string }) {
-  if (!item.children?.length) {
+function DoNotCallNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
+  const children = item.children?.filter((child) => child.href !== "/dashboard/dnd-master?type=abandoned" || isAdmin) ?? [];
+  if (!children.length) {
     const isActive = pathname === item.href;
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
       <span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="DND" /></span>
@@ -96,7 +97,7 @@ function DoNotCallNavigation({ item, pathname }: { item: DashboardNavItem; pathn
     </Link>;
   }
 
-  const isCurrentSection = pathname === item.href || item.children?.some((child) => child.href === pathname);
+  const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
   const open = isOpen ?? Boolean(isCurrentSection);
 
@@ -115,8 +116,8 @@ function DoNotCallNavigation({ item, pathname }: { item: DashboardNavItem; pathn
       </button>
       {open && (
         <div id="do-not-call-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">
-          {item.children?.map((child) => (
-            <Link key={child.href} href={child.href} className={`block py-0.5 text-[11px] font-semibold ${pathname === child.href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>
+          {children.map((child) => (
+            <Link key={child.href} href={child.href} className={`block py-0.5 text-[11px] font-semibold ${activeHref === child.href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>
               {child.label}
             </Link>
           ))}
@@ -176,7 +177,7 @@ export function DashboardShell({
         <nav className="mt-2.5 space-y-0" aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
-            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} />;
+            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}`} isAdmin={isAdmin} />;
 
             const isActive = pathname === item.href;
 

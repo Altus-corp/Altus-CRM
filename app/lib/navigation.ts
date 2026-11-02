@@ -22,6 +22,7 @@ const roleNavigation: DashboardNavItem[] = [
     children: [
       { label: "Do Not Call Master", href: "/dashboard/dnd-master" },
       { label: "Old Graduate", href: "/dashboard/old-graduate-master" },
+      { label: "Abandoned", href: "/dashboard/dnd-master?type=abandoned" },
     ],
   },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
