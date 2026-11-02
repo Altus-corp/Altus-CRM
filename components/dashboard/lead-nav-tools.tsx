@@ -50,7 +50,8 @@ export function LeadNavTools() {
     const fresh = notifications.find(
       (notification) =>
         notification.notification_type === "fresh_form_lead" ||
-        notification.notification_type === "pre_paid_lead",
+        notification.notification_type === "pre_paid_lead" ||
+        notification.notification_type === "qualified_inbound_lead",
     );
     if (fresh && fresh.id !== freshLeadNotification?.id)
       setFreshLeadNotification(fresh);
@@ -239,11 +240,11 @@ export function LeadNavTools() {
           <section
             role="dialog"
             aria-modal="true"
-            aria-label="New form lead"
+            aria-label="New inbound lead"
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
           >
             <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-red-600">
-              New form lead
+              New inbound lead
             </p>
             <h2 className="mt-2 text-xl font-extrabold text-slate-900">
               {freshLeadNotification.title}

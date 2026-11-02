@@ -5,6 +5,7 @@ import { LeadConfiguration } from "@/components/leads/lead-configuration";
 import { ColumnsManagement } from "@/components/leads/columns-management";
 import { LeadDatabasePriority } from "@/components/leads/lead-database-priority";
 import { RoundRobinWeeklyTargets } from "@/components/leads/round-robin-weekly-targets";
+import { QualifiedLeadDistribution } from "@/components/leads/qualified-lead-distribution";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { attendanceAvailability, attendanceForEmail, getWmsAttendance } from "@/app/lib/wms-attendance";
@@ -16,7 +17,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
   await requireAdmin();
   const { tab } = await searchParams;
   const supabase = await createClient();
-  const [{ data: products, error: productsError }, { data: stages }, { data: resolutions }, { data: mappings }, { data: columns, error: columnsError }, { data: priorities, error: prioritiesError }, { data: profiles }, { data: userRoles }, { data: weeklyTargets, error: weeklyTargetsError }, { data: schedule, error: scheduleError }] = await Promise.all([
+  const [{ data: products, error: productsError }, { data: stages }, { data: resolutions }, { data: mappings }, { data: columns, error: columnsError }, { data: priorities, error: prioritiesError }, { data: profiles }, { data: userRoles }, { data: weeklyTargets, error: weeklyTargetsError }, { data: schedule, error: scheduleError }, { data: qualifiedRules, error: qualifiedRulesError }] = await Promise.all([
     supabase.from("lead_products").select("id, code, name").order("code"),
     supabase.from("lead_stages").select("id, product_id, name, position").order("position"),
     supabase.from("lead_resolutions").select("id, name"),
@@ -27,6 +28,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
     supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
     supabase.from("lead_round_robin_weekly_targets").select("user_id, product_id, day_of_week, target_count"),
     supabase.from("lead_round_robin_schedule").select("start_time, end_time, retry_interval_minutes").eq("id", 1).maybeSingle(),
+    supabase.from("qualified_lead_distribution_members").select("user_id, weight, position").order("position"),
   ]);
 
   // Dropdown management is only needed on its own tab, and its tables may not exist until the migration is run.
@@ -74,6 +76,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
         <LeadConfiguration products={products ?? []} stages={stages ?? []} resolutions={productResolutions} />
       </> : !tab ? <>
         {prioritiesError ? <p className="mb-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">Round-robin priorities are unavailable. Run the lead database priorities migration first.</p> : <LeadDatabasePriority priorities={priorities ?? []} />}
+        {qualifiedRulesError ? <p className="mt-4 rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">Qualified-lead distribution is unavailable. Run the qualified-lead ratio database migration first.</p> : <QualifiedLeadDistribution members={roundRobinMembers} rules={qualifiedRules ?? []} />}
         {weeklyTargetsError ? <p className="rounded-xl bg-red-50 p-4 text-sm font-bold text-red-700">Round-robin weekly targets are unavailable. Run the round-robin weekly targets database migration first.</p> : <RoundRobinWeeklyTargets members={roundRobinMembers} products={products ?? []} targets={weeklyTargets ?? []} schedule={schedule ?? { start_time: "10:30", end_time: "15:00", retry_interval_minutes: 15 }} scheduleAvailable={!scheduleError} />}
       </> : null}
     </section>

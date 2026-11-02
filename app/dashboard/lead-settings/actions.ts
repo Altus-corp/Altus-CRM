@@ -29,6 +29,68 @@ function refresh() {
   revalidatePath("/dashboard/products", "layout");
 }
 
+export async function updateQualifiedLeadDistribution(
+  entries: { userId: string; weight: number; position: number }[],
+) {
+  await requireAdmin();
+  const uniqueUserIds = new Set(entries.map((entry) => entry.userId));
+  if (
+    !entries.length ||
+    uniqueUserIds.size !== entries.length ||
+    entries.some(
+      (entry) =>
+        !entry.userId ||
+        !Number.isInteger(entry.weight) ||
+        entry.weight < 1 ||
+        entry.weight > 1000 ||
+        !Number.isInteger(entry.position) ||
+        entry.position < 1,
+    )
+  ) {
+    throw new Error("Select at least one user and use whole-number ratios from 1 to 1000.");
+  }
+
+  const supabase = await createClient();
+  const [{ data: activeProfiles, error: profilesError }, { data: roles, error: rolesError }] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id")
+        .in("id", [...uniqueUserIds])
+        .eq("is_suspended", false),
+      supabase
+        .from("user_roles")
+        .select("user_id")
+        .in("user_id", [...uniqueUserIds])
+        .in("role", ["sales_executive", "sales_manager", "consultant"]),
+    ]);
+  if (profilesError || rolesError)
+    throw new Error(profilesError?.message ?? rolesError?.message ?? "Unable to validate selected users.");
+  const eligibleUserIds = new Set((roles ?? []).map((role) => role.user_id));
+  if ((activeProfiles ?? []).filter((profile) => eligibleUserIds.has(profile.id)).length !== entries.length)
+    throw new Error("Every selected user must be active and have a sales or consultant CRM role.");
+
+  const selectedIds = [...uniqueUserIds];
+  const removeQuery = supabase.from("qualified_lead_distribution_members").delete();
+  const { error: removeError } = await (selectedIds.length
+    ? removeQuery.not("user_id", "in", `(${selectedIds.join(",")})`)
+    : removeQuery);
+  if (removeError) throw new Error(removeError.message);
+  const { error: upsertError } = await supabase
+    .from("qualified_lead_distribution_members")
+    .upsert(
+      entries.map((entry) => ({
+        user_id: entry.userId,
+        weight: entry.weight,
+        position: entry.position,
+        updated_at: new Date().toISOString(),
+      })),
+      { onConflict: "user_id" },
+    );
+  if (upsertError) throw new Error(upsertError.message);
+  refresh();
+}
+
 export async function updateLeadDatabasePriority(formData: FormData) {
   await requireAdmin();
   const databaseKey = String(formData.get("databaseKey") ?? "");
