@@ -97,3 +97,28 @@ export async function notifyPaidPreStageLead({
   if (error && error.code !== "42P01" && error.code !== "PGRST205")
     throw new Error(error.message);
 }
+
+export async function notifyLeadMovedToAmbassador({
+  userId,
+  leadName,
+}: {
+  userId: string;
+  leadName: string;
+}) {
+  if (!userId) return;
+  const { error } = await createAdminClient()
+    .from("crm_notifications")
+    .insert({
+      user_id: userId,
+      notification_type: "lead_moved_to_ambassador",
+      title: "Lead moved to Ambassador",
+      body: `${leadName || "A lead"} is now managed in the Ambassador workspace.`,
+      href: "/dashboard/my-ambassador",
+      metadata: { lead_name: leadName },
+    });
+
+  // The Ambassador move remains valid even before the notifications migration
+  // has been deployed in a new environment.
+  if (error && error.code !== "42P01" && error.code !== "PGRST205")
+    throw new Error(error.message);
+}
