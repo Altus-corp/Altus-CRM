@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/app/lib/supabase/server";
+import { cookies } from "next/headers";
 import { resetPassword, verifyPasswordResetOtp } from "./actions";
 
 export const instant = false;
@@ -17,11 +17,10 @@ const errors: Record<string, string> = {
 };
 
 export default async function ResetPasswordPage({ searchParams }: ResetPasswordPageProps) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const resetSession = (await cookies()).get("crm_password_reset")?.value;
   const { email = "", error, sent } = await searchParams;
 
-  if (!user) {
+  if (!resetSession) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <form action={verifyPasswordResetOtp} className="w-full max-w-md space-y-5 rounded-2xl bg-white p-7 shadow-sm">
