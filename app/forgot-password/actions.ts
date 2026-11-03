@@ -38,9 +38,12 @@ export async function requestPasswordReset(formData: FormData) {
         otp,
       });
     }
-  } catch {
+  } catch (error) {
     // Keep the response identical for unknown accounts and mail failures so
-    // this public form cannot be used to discover CRM email addresses.
+    // this public form cannot be used to discover CRM email addresses. The
+    // server log is still needed to diagnose delivery providers such as
+    // Resend without leaking those details to the browser.
+    console.error("CRM password reset delivery failed", error);
   }
 
   // Deliberately do not disclose whether this email belongs to a CRM account.
