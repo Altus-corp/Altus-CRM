@@ -33,8 +33,9 @@ const isDoNotCallResolution = (resolution: Named) => {
 export default async function ProductPage({ params }: ProductPageProps) {
   await connection();
   const { userId, roles } = await requireUser();
+  const isAdmin = roles.includes("admin");
 
-  if (!roles.includes("sales_executive") && !roles.includes("sales_manager")) {
+  if (!isAdmin && !roles.includes("sales_executive") && !roles.includes("sales_manager")) {
     redirect("/dashboard");
   }
 
@@ -47,13 +48,18 @@ export default async function ProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
-  const [{ data: assignments, error }, dropdownResult]  = await Promise.all([
-    supabase
+  let assignmentsQuery = supabase
       .from("lead_product_assignments")
       .select("id, lead_id, stage_id, latest_resolution_id, assigned_at, next_follow_up_at, resolution:lead_resolutions(name), lead:leads(lead_number, first_name, last_name, phone, email, created_at, custom_data, assignments:lead_product_assignments(id, assigned_to, assigned_at, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name)))")
-      .eq("assigned_to", userId).eq("product_id", product.id).eq("is_active", true).eq("is_closed", false)
-      .order("assigned_at", { ascending: false, nullsFirst: false }).limit(200),
+      .eq("product_id", product.id).eq("is_active", true).eq("is_closed", false)
+      .order("assigned_at", { ascending: false, nullsFirst: false }).limit(200);
+  if (!isAdmin) assignmentsQuery = assignmentsQuery.eq("assigned_to", userId);
+
+  const [{ data: assignments, error }, dropdownResult, profilesResult, rolesResult]  = await Promise.all([
+    assignmentsQuery,
     supabase.from("lead_stage_dropdowns").select("id, stage_id, label, position, options:lead_stage_dropdown_options(id, label, position)").eq("product_id", product.id).eq("is_active", true).order("position"),
+    isAdmin ? supabase.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name") : Promise.resolve({ data: [] as { id: string; first_name: string | null; last_name: string | null; full_name: string | null }[] }),
+    isAdmin ? supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]) : Promise.resolve({ data: [] as { user_id: string; role: string }[] }),
   ]);
 
   if (error) {
@@ -66,8 +72,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
     .sort((a, b) => phases ? phases.findIndex((phase) => phase.toLowerCase() === a.name.toLowerCase()) - phases.findIndex((phase) => phase.toLowerCase() === b.name.toLowerCase()) : a.position - b.position)
     .map((stage) => ({ id: stage.id, name: stage.name }));
 
-  // These resolutions belong exclusively to the Do Not Call workspace.
-  const rows = ((assignments ?? []) as unknown as Row[]).filter((row) => !isDoNotCallResolution(row.resolution));
+  // Sales workspaces keep Do Not Call items in their dedicated queue. Admins
+  // see every active product assignment here so they can audit or reassign it.
+  const rows = ((assignments ?? []) as unknown as Row[]).filter((row) => isAdmin || !isDoNotCallResolution(row.resolution));
   const assignmentIds = rows.map((row) => row.id);
   const resolutionNames = new Map(sharedConfig.resolutions.map((resolution) => [resolution.id, resolution.name]));
   const resolutions = sharedConfig.resolutionMappings.filter((mapping) => mapping.product_id === product.id).flatMap((mapping) => {
@@ -94,7 +101,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
   const details = new Map<string, PreDetails>((detailsResult.data ?? []).map((row) => [row.assignment_id, { notes: row.confirmation_notes ?? "" }]));
 
   // The lead detail panel (double-click a row) needs the same data the Leads table gives it.
-  const assignedNames = Object.fromEntries((assigneesResult.data ?? []).map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Unassigned user"]));
+  const allProfiles = [...(profilesResult.data ?? []), ...((assigneesResult.data ?? []) as { id: string; first_name: string | null; last_name: string | null; full_name: string | null }[])];
+  const assignedNames = Object.fromEntries(allProfiles.map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unassigned user"]));
+  const eligibleAssigneeIds = new Set((rolesResult.data ?? []).map((role) => role.user_id));
+  const assignmentUsers = (profilesResult.data ?? []).filter((profile) => eligibleAssigneeIds.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
   const detailColumns = (sharedConfig.columns as (LeadColumn & { is_visible: boolean })[]).filter((column) => column.is_visible);
 
   const leads: BoardLead[] = rows.flatMap((row) => {
@@ -113,7 +123,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
       phone: lead.phone,
       created_at: lead.created_at,
       custom_data: lead.custom_data ?? {},
-      assigned_to: mine?.assigned_to ?? userId,
+      assigned_to: mine?.assigned_to ?? (isAdmin ? null : userId),
       assigned_at: row.assigned_at,
       focused_on: null,
       next_follow_up_at: row.next_follow_up_at,
@@ -136,8 +146,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
       nextFollowUpAt: row.next_follow_up_at,
       assignedAt: row.assigned_at,
       note: latestNote.get(row.id) ?? null,
+      assignedTo: mine?.assigned_to ?? null,
     }];
   });
 
-  return <ProductStageBoard product={{ code: product.code, name: product.name }} stages={stages} leads={leads} resolutions={resolutions} dropdowns={dropdowns} dropdownsReady={dropdownsReady} detailsReady={detailsReady} detailColumns={detailColumns} assignedNames={assignedNames} />;
+  return <ProductStageBoard product={{ code: product.code, name: product.name }} stages={stages} leads={leads} resolutions={resolutions} dropdowns={dropdowns} dropdownsReady={dropdownsReady} detailsReady={detailsReady} detailColumns={detailColumns} assignedNames={assignedNames} canReassign={isAdmin} assignmentUsers={assignmentUsers} />;
 }

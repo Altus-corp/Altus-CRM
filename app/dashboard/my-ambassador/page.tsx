@@ -16,11 +16,12 @@ type Assignment = {
 };
 const one = <T,>(value: T | T[] | null): T | null => Array.isArray(value) ? value[0] ?? null : value;
 
-export default async function MyAmbassadorPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+export default async function MyAmbassadorPage({ searchParams }: { searchParams: Promise<{ page?: string; owner?: string }> }) {
   const { userId, roles } = await requireUser();
   const isAdmin = roles.includes("admin");
   const params = await searchParams;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
+  const ownerFilter = params.owner ?? "";
   const pageSize = 50;
   const supabase = await createClient();
   let query = supabase.from("lead_product_assignments")
@@ -28,6 +29,8 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     .eq("is_ambassador", true).eq("is_active", true)
     .order("assigned_at", { ascending: false }).order("id").range((page - 1) * pageSize, page * pageSize);
   if (!isAdmin) query = query.eq("assigned_to", userId);
+  else if (ownerFilter === "unassigned") query = query.is("assigned_to", null);
+  else if (/^[0-9a-f-]{36}$/i.test(ownerFilter)) query = query.eq("assigned_to", ownerFilter);
   const [result, config] = await Promise.all([query, getLeadSharedConfig()]);
   if (result.error) return <section className="mx-auto max-w-5xl"><h1 className="text-2xl font-extrabold">My Ambassador</h1><p role="alert" className="mt-4 rounded-xl bg-amber-50 p-5 text-sm text-amber-800">Ambassadors could not be loaded. Ask an admin to check that the Ambassador migration has been applied.</p></section>;
 
@@ -51,6 +54,23 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
   const assignedNames = Object.fromEntries(profiles.map((person) => [person.id, nameOf(person)]));
   const eligibleIds = new Set((eligibleResult.data ?? []).map((item) => item.user_id));
   const reassignUsers = isAdmin ? profiles.filter((person) => !person.is_suspended && eligibleIds.has(person.id)).map((person) => ({ id: person.id, name: nameOf(person) })) : [];
+  const ownerOptions = profiles
+    .filter((person) => eligibleIds.has(person.id))
+    .map((person) => ({ id: person.id, name: nameOf(person) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const visibleColumns = config.columns.filter((column) => column.is_visible);
+  // An Ambassador page must always show who owns the relationship, even if an
+  // admin hid Sales Person in the generic Leads configuration.
+  const ambassadorColumns = visibleColumns.some((column) => column.field_key === "assigned_to")
+    ? visibleColumns
+    : [...visibleColumns, ...config.columns.filter((column) => column.field_key === "assigned_to").map((column) => ({ ...column, is_visible: true }))];
+  const filterHref = (owner: string, targetPage = 1) => {
+    const query = new URLSearchParams();
+    if (owner) query.set("owner", owner);
+    if (targetPage > 1) query.set("page", String(targetPage));
+    const value = query.toString();
+    return `/dashboard/my-ambassador${value ? `?${value}` : ""}`;
+  };
   const rows: DndRow[] = assignments.flatMap((assignment) => {
     if (!assignment.lead) return [];
     const lead: LeadRow = {
@@ -69,13 +89,18 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
   });
 
   return <section className="mx-auto max-w-[1500px]">
-    <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">My Ambassador</h1>
+    <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{isAdmin ? "Ambassador" : "My Ambassador"}</h1>
     <p className="mt-1 text-sm text-slate-500">{isAdmin ? "Completed Ambassador agreements and their CRM owners. Only admins can reassign them." : "Your Ambassadors remain assigned to you. Contact an admin to request reassignment."}</p>
-    <DndMasterTable rows={rows} columns={config.columns.filter((column) => column.is_visible)} detailColumns={config.columns} assignedNames={assignedNames} reassignUsers={reassignUsers} reassignDescription="Only an admin can transfer an Ambassador to another CRM user." emptyLabel="No Ambassadors yet." />
+    {isAdmin && <nav aria-label="Filter Ambassadors by CRM user" className="mt-3 flex flex-wrap gap-2">
+      <Link href={filterHref("")} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${!ownerFilter ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>All Ambassadors</Link>
+      {ownerOptions.map((owner) => <Link key={owner.id} href={filterHref(owner.id)} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${ownerFilter === owner.id ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{owner.name}</Link>)}
+      <Link href={filterHref("unassigned")} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${ownerFilter === "unassigned" ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>Unassigned</Link>
+    </nav>}
+    <DndMasterTable rows={rows} columns={ambassadorColumns} detailColumns={config.columns} assignedNames={assignedNames} reassignUsers={reassignUsers} reassignDescription="Only an admin can transfer an Ambassador to another CRM user." emptyLabel="No Ambassadors yet." />
     <nav aria-label="Ambassador pages" className="mt-4 flex items-center justify-end gap-3 text-sm">
       <span className="mr-auto text-slate-500">Page {page}</span>
-      {page > 1 && <Link href={`/dashboard/my-ambassador?page=${page - 1}`} className="font-bold text-red-700">Previous</Link>}
-      {(result.data?.length ?? 0) > pageSize && <Link href={`/dashboard/my-ambassador?page=${page + 1}`} className="font-bold text-red-700">Next</Link>}
+      {page > 1 && <Link href={filterHref(ownerFilter, page - 1)} className="font-bold text-red-700">Previous</Link>}
+      {(result.data?.length ?? 0) > pageSize && <Link href={filterHref(ownerFilter, page + 1)} className="font-bold text-red-700">Next</Link>}
     </nav>
   </section>;
 }

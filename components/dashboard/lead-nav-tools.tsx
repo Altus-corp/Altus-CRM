@@ -11,8 +11,12 @@ type Notification = {
   title: string;
   body: string | null;
   href: string | null;
+  metadata?: { count?: number } | null;
   created_at: string;
 };
+type AssignmentPopup = { ids: string[]; leadCount: number };
+const isAssignmentPopupNotification = (notification: Notification) =>
+  ["lead_assigned", "fresh_form_lead", "pre_paid_lead", "qualified_inbound_lead"].includes(notification.notification_type ?? "");
 type SearchResult = {
   assignmentId: string;
   leadId: string;
@@ -30,16 +34,20 @@ export function LeadNavTools() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [freshLeadNotification, setFreshLeadNotification] =
-    useState<Notification | null>(null);
+  const [assignmentPopupsEnabled, setAssignmentPopupsEnabled] = useState(true);
+  const [assignmentPopup, setAssignmentPopup] = useState<AssignmentPopup | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const loadNotifications = async () => {
     const response = await fetch("/api/notifications", { cache: "no-store" });
     const payload = (await response.json().catch(() => null)) as {
       notifications?: Notification[];
+      assignmentPopupsEnabled?: boolean;
     } | null;
-    if (response.ok) setNotifications(payload?.notifications ?? []);
+    if (response.ok) {
+      setNotifications(payload?.notifications ?? []);
+      setAssignmentPopupsEnabled(payload?.assignmentPopupsEnabled ?? true);
+    }
   };
   useEffect(() => {
     void loadNotifications();
@@ -47,15 +55,14 @@ export function LeadNavTools() {
     return () => window.clearInterval(interval);
   }, []);
   useEffect(() => {
-    const fresh = notifications.find(
-      (notification) =>
-        notification.notification_type === "fresh_form_lead" ||
-        notification.notification_type === "pre_paid_lead" ||
-        notification.notification_type === "qualified_inbound_lead",
-    );
-    if (fresh && fresh.id !== freshLeadNotification?.id)
-      setFreshLeadNotification(fresh);
-  }, [notifications, freshLeadNotification?.id]);
+    if (!assignmentPopupsEnabled || assignmentPopup) return;
+    const batch = notifications.filter(isAssignmentPopupNotification);
+    if (!batch.length) return;
+    setAssignmentPopup({
+      ids: batch.map((notification) => notification.id),
+      leadCount: batch.reduce((total, notification) => total + Math.max(1, Number(notification.metadata?.count) || 1), 0),
+    });
+  }, [notifications, assignmentPopup, assignmentPopupsEnabled]);
   useEffect(() => {
     if (searchOpen) window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [searchOpen]);
@@ -90,20 +97,21 @@ export function LeadNavTools() {
       body: JSON.stringify({ notificationIds: ids }),
     });
   };
-  const dismissFreshLead = async (openLeadList: boolean) => {
-    const notification = freshLeadNotification;
-    if (!notification) return;
-    setFreshLeadNotification(null);
+  const dismissAssignmentPopup = async (openLeadList: boolean, stopNotifying = false) => {
+    const popup = assignmentPopup;
+    if (!popup) return;
+    setAssignmentPopup(null);
+    if (stopNotifying) setAssignmentPopupsEnabled(false);
     setNotifications((current) =>
-      current.filter((item) => item.id !== notification.id),
+      current.filter((item) => !popup.ids.includes(item.id)),
     );
     await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notificationIds: [notification.id] }),
+      body: JSON.stringify({ notificationIds: popup.ids, disableAssignmentPopups: stopNotifying }),
     });
     if (openLeadList)
-      router.push(notification.href ?? "/dashboard/leads?view=focused");
+      router.push("/dashboard/leads?view=focused");
   };
 
   return (
@@ -235,35 +243,34 @@ export function LeadNavTools() {
           </div>
         )}
       </div>
-      {freshLeadNotification && (
+      {assignmentPopup && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/40 p-4">
           <section
             role="dialog"
             aria-modal="true"
-            aria-label="New inbound lead"
+            aria-label="New lead assignments"
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
           >
             <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-red-600">
-              New inbound lead
+              New lead assignment
             </p>
             <h2 className="mt-2 text-xl font-extrabold text-slate-900">
-              {freshLeadNotification.title}
+              {assignmentPopup.leadCount} new lead{assignmentPopup.leadCount === 1 ? "" : "s"} assigned
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              {freshLeadNotification.body ??
-                "A newly registered lead has been added to your focused list."}
+              Your new leads are ready in Focused Leads. Please work on them as soon as possible.
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => void dismissFreshLead(false)}
+                onClick={() => void dismissAssignmentPopup(false, true)}
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600"
               >
                 Stop notifying
               </button>
               <button
                 type="button"
-                onClick={() => void dismissFreshLead(true)}
+                onClick={() => void dismissAssignmentPopup(true)}
                 className="rounded-lg bg-[#df0000] px-4 py-2 text-sm font-bold text-white"
               >
                 Accepted

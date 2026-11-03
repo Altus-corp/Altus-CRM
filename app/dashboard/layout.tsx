@@ -23,9 +23,9 @@ export default async function DashboardLayout({
   const supabase = await createClient();
   const indiaDateParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
   const indiaDate = [indiaDateParts.find((part) => part.type === "year")?.value, indiaDateParts.find((part) => part.type === "month")?.value, indiaDateParts.find((part) => part.type === "day")?.value].join("-");
-  // The Products submenu is available to both Sales Executives and Sales
-  // Managers, so both roles need the shared active-product configuration.
-  const sharedConfig = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager")
+  // The Products submenu is available to Admin, Sales Executives, and Sales
+  // Managers, so each needs the shared active-product configuration.
+  const sharedConfig = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager")
     ? await getLeadSharedConfig()
     : null;
   const { count: todayAssignedLeads } = hasSalesWorkspace

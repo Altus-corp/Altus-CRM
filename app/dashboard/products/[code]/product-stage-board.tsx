@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import { Pin, PinOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createLeadNote, savePreConfirmation, saveStageDropdownValue, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
+import { createLeadNote, manuallyAssignLeads, savePreConfirmation, saveStageDropdownValue, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import { formatCrmDate } from "@/app/lib/date";
 import { FollowUpActions } from "@/components/dashboard/follow-up-actions";
 import { FollowUpDateModal, type LeadColumn, type LeadRow } from "@/components/leads/leads-table";
@@ -24,6 +24,7 @@ export type BoardLead = {
   resolutionId: string;
   nextFollowUpAt: string | null;
   assignedAt: string | null;
+  assignedTo: string | null;
   note: string | null;
   details: PreDetails | null;
   detail: LeadRow;
@@ -38,12 +39,13 @@ type Resolution = { id: string; name: string };
 
 const selectClass = "h-8 w-full min-w-[130px] rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50";
 
-export function ProductStageBoard({ product, stages, leads, resolutions, dropdowns, dropdownsReady, detailsReady, detailColumns, assignedNames }: { product: { code: string; name: string }; stages: Stage[]; leads: BoardLead[]; resolutions: Resolution[]; dropdowns: BoardDropdown[]; dropdownsReady: boolean; detailsReady: boolean; detailColumns: LeadColumn[]; assignedNames: Record<string, string> }) {
+export function ProductStageBoard({ product, stages, leads, resolutions, dropdowns, dropdownsReady, detailsReady, detailColumns, assignedNames, canReassign = false, assignmentUsers = [] }: { product: { code: string; name: string }; stages: Stage[]; leads: BoardLead[]; resolutions: Resolution[]; dropdowns: BoardDropdown[]; dropdownsReady: boolean; detailsReady: boolean; detailColumns: LeadColumn[]; assignedNames: Record<string, string>; canReassign?: boolean; assignmentUsers?: { id: string; name: string }[] }) {
   const router = useRouter();
   const [activeId, setActiveId] = useState(stages[0]?.id ?? "");
   const [error, setError] = useState("");
   const [movingId, setMovingId] = useState("");
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
+  const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const countFor = (stageId: string) => leads.filter((lead) => lead.stageId === stageId).length;
   const active = stages.find((stage) => stage.id === activeId) ?? stages[0];
@@ -77,12 +79,13 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
   const columnDefs: BoardColumn[] = isLeanLayout
     ? [
       { key: "actions", label: isPostOrientation ? "Contact" : "Action", width: 190 }, { key: "lead", label: "Full Name", width: 170 }, { key: "phone", label: "Number", width: 140 },
+      ...(canReassign ? [{ key: "salesPerson", label: "Sales Person", width: 190 }] : []),
       ...dropdownColumns, ...(isPrePso ? [{ key: "notes", label: "Confirmation Notes", width: 250 }] : []),
       ...(isPreOrientation && !isPrePso ? [{ key: "salesNote", label: "Confirmation Notes", width: 280 }] : []),
       ...(isPostOrientation ? [{ key: "salesNote", label: "Sales Note", width: 280 }] : [{ key: "moveTo", label: "Move To", width: 170 }]),
     ]
     : [
-      { key: "lead", label: "Lead", width: 170 }, { key: "phone", label: "Phone", width: 140 }, { key: "resolution", label: "Activity Resolution", width: 180 }, { key: "followUp", label: "Next follow-up", width: 170 },
+      { key: "lead", label: "Lead", width: 170 }, { key: "phone", label: "Phone", width: 140 }, ...(canReassign ? [{ key: "salesPerson", label: "Sales Person", width: 190 }] : []), { key: "resolution", label: "Activity Resolution", width: 180 }, { key: "followUp", label: "Next follow-up", width: 170 },
       { key: "assignedOn", label: "Assigned on", width: 140 }, { key: "note", label: "Latest note", width: 240 }, ...dropdownColumns,
       { key: "moveTo", label: "Move to", width: 170 }, { key: "actions", label: "Actions", width: 190 },
     ];
@@ -139,7 +142,8 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
     switch (key) {
       case "lead": return <span className="font-semibold text-slate-900">{lead.name}</span>;
       case "phone": return <span className="text-xs font-medium text-slate-700">{lead.phone ?? "—"}</span>;
-      case "resolution": return <ResolutionCell key={`${lead.assignmentId}:${lead.resolutionId}`} lead={lead} resolutions={resolutions} />;
+      case "salesPerson": return <AssigneeCell lead={lead} users={assignmentUsers} assignedNames={assignedNames} />;
+      case "resolution": return <ResolutionCell key={`${lead.assignmentId}:${lead.resolutionId}`} lead={lead} resolutions={resolutions} onTransferred={() => setTransferNotice(lead.name)} />;
       case "followUp": return <span className="text-xs font-medium text-slate-700">{lead.nextFollowUpAt ? formatCrmDate(lead.nextFollowUpAt) : "—"}</span>;
       case "notes": return <PreNotesCell key={lead.assignmentId} lead={lead} ready={detailsReady} />;
       case "salesNote": return <SalesNoteCell key={lead.assignmentId} lead={lead} />;
@@ -149,7 +153,7 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
       case "actions": return <FollowUpActions leadId={lead.leadId} assignmentId={lead.assignmentId} phone={lead.phone} email={lead.email} />;
       default: {
         const dropdown = stageDropdowns.find((item) => `dropdown:${item.id}` === key);
-        return dropdown ? <DropdownCell key={`${lead.assignmentId}:${dropdown.id}`} dropdown={dropdown} lead={lead} ready={dropdownsReady} /> : null;
+        return dropdown ? <DropdownCell key={`${lead.assignmentId}:${dropdown.id}`} dropdown={dropdown} lead={lead} ready={dropdownsReady} onTransferred={() => setTransferNotice(lead.name)} /> : null;
       }
     }
   }
@@ -199,11 +203,53 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
       </div>
     </div>}
     {detailLead && <LeadDetailPanel lead={detailLead} columns={detailColumns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
+    {transferNotice && <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby="ps-onboarding-transfer-title">
+      <section className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <p className="text-[10px] font-extrabold tracking-[0.14em] text-red-600">PRODUCT TRANSFER</p>
+        <h2 id="ps-onboarding-transfer-title" className="mt-2 text-xl font-extrabold text-slate-900">Lead transferred to PS Onboarding</h2>
+        <p className="mt-3 text-sm font-medium leading-6 text-slate-600"><strong className="text-slate-900">{transferNotice}</strong> has been removed from Post PSO and moved to <strong className="text-slate-900">PS · Pre PS</strong>.</p>
+        <button type="button" onClick={() => setTransferNotice(null)} className="mt-5 h-10 w-full rounded-lg bg-[#d90000] text-sm font-extrabold text-white hover:bg-red-700">Done</button>
+      </section>
+    </div>}
   </section>;
 }
 
+function AssigneeCell({ lead, users, assignedNames }: { lead: BoardLead; users: { id: string; name: string }[]; assignedNames: Record<string, string> }) {
+  const router = useRouter();
+  const [value, setValue] = useState(lead.assignedTo ?? "");
+  const [status, setStatus] = useState<{ saving: boolean; error: string }>({ saving: false, error: "" });
+
+  async function assign(next: string) {
+    if (!next || next === value) return;
+    const previous = value;
+    setValue(next);
+    setStatus({ saving: true, error: "" });
+    const formData = new FormData();
+    formData.set("assignmentId", lead.assignmentId);
+    formData.set("assigneeId", next);
+    try {
+      await manuallyAssignLeads(formData);
+      setStatus({ saving: false, error: "" });
+      router.refresh();
+    } catch (assignError) {
+      setValue(previous);
+      setStatus({ saving: false, error: assignError instanceof Error ? assignError.message : "Unable to reassign this product work." });
+    }
+  }
+
+  return <div>
+    <select value={value} disabled={status.saving || !users.length} onChange={(event) => void assign(event.target.value)} aria-label={`Sales person for ${lead.name}`} className={selectClass}>
+      <option value="">Unassigned</option>
+      {value && !users.some((user) => user.id === value) && <option value={value}>{assignedNames[value] ?? "Current user"}</option>}
+      {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
+    </select>
+    {status.saving && <p className="mt-1 text-[10px] font-semibold text-slate-400">Assigning...</p>}
+    {status.error && <p className="mt-1 max-w-[190px] whitespace-normal text-[10px] font-bold text-red-600" role="alert">{status.error}</p>}
+  </div>;
+}
+
 // The lead's own call resolution for this product, editable with the product's resolutions.
-function ResolutionCell({ lead, resolutions }: { lead: BoardLead; resolutions: Resolution[] }) {
+function ResolutionCell({ lead, resolutions, onTransferred }: { lead: BoardLead; resolutions: Resolution[]; onTransferred?: () => void }) {
   const router = useRouter();
   const [value, setValue] = useState(lead.resolutionId);
   const [followUpFor, setFollowUpFor] = useState<string | null>(null);
@@ -218,7 +264,12 @@ function ResolutionCell({ lead, resolutions }: { lead: BoardLead; resolutions: R
     if (followUpAt) formData.set("followUpAt", followUpAt);
     if (followUpNote) formData.set("followUpNote", followUpNote);
     setError("");
-    try { await updateLeadResolutionInline(formData); setFollowUpFor(null); router.refresh(); }
+    try {
+      const result = await updateLeadResolutionInline(formData);
+      if (result?.transferredToPsOnboarding) onTransferred?.();
+      setFollowUpFor(null);
+      router.refresh();
+    }
     catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save this lead."); setValue(lead.resolutionId); setFollowUpFor(null); }
   });
   const choose = (resolutionId: string) => {
@@ -238,7 +289,8 @@ function ResolutionCell({ lead, resolutions }: { lead: BoardLead; resolutions: R
 }
 
 // An admin-defined dropdown for this stage. The choice saves as soon as it changes.
-function DropdownCell({ dropdown, lead, ready }: { dropdown: BoardDropdown; lead: BoardLead; ready: boolean }) {
+function DropdownCell({ dropdown, lead, ready, onTransferred }: { dropdown: BoardDropdown; lead: BoardLead; ready: boolean; onTransferred?: () => void }) {
+  const router = useRouter();
   const [value, setValue] = useState(lead.choices[dropdown.id] ?? "");
   const [status, setStatus] = useState<{ saving: boolean; error: string }>({ saving: false, error: "" });
 
@@ -251,7 +303,12 @@ function DropdownCell({ dropdown, lead, ready }: { dropdown: BoardDropdown; lead
     formData.set("assignmentId", lead.assignmentId);
     formData.set("dropdownId", dropdown.id);
     formData.set("optionId", next);
-    try { await saveStageDropdownValue(formData); setStatus({ saving: false, error: "" }); }
+    try {
+      const result = await saveStageDropdownValue(formData);
+      if (result?.transferredToPsOnboarding) onTransferred?.();
+      setStatus({ saving: false, error: "" });
+      router.refresh();
+    }
     catch (saveError) { setValue(previous); setStatus({ saving: false, error: saveError instanceof Error ? saveError.message : "Unable to save." }); }
   }
 

@@ -32,7 +32,7 @@ function NavigationIcon({ label }: { label: string }) {
   if (label.includes("DND")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><circle cx="12" cy="12" r="9" /><path d="m5.6 5.6 12.8 12.8" /></svg>;
   }
-  if (label.includes("Lead") || label.includes("Client") || label === "Users" || label === "Team" || label === "My Team" || label === "My Ambassador") {
+  if (label.includes("Lead") || label.includes("Client") || label === "Users" || label === "Team" || label === "My Team" || label === "My Ambassador" || label === "Ambassador") {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
   }
   if (label.includes("Task") || label.includes("Roles")) {
@@ -197,7 +197,7 @@ export function DashboardShell({
                   {item.label}
                 </Link>
 
-                {isAdmin && item.label === "Users" && (
+                {isAdmin && item.label === "Roles & permissions" && (
                   <div className="mt-0.5">
                     <button
                       type="button"

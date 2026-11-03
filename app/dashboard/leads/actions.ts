@@ -3279,6 +3279,16 @@ export async function updateLeadResolutionInline(formData: FormData) {
   if (requiresFollowUp && !followUpNote)
     throw new Error("Add a follow-up note.");
 
+  let transfersToPsOnboarding = false;
+  if (["deposit paid", "fully paid"].includes(normalizedResolution)) {
+    const [{ data: sourceProduct }, { data: sourceAssignment }] = await Promise.all([
+      supabase.from("lead_products").select("code").eq("id", lead.product_id).single(),
+      supabase.from("lead_product_assignments").select("stage:lead_stages(name)").eq("id", assignmentId).single(),
+    ]);
+    const sourceStage = Array.isArray(sourceAssignment?.stage) ? sourceAssignment.stage[0] : sourceAssignment?.stage;
+    transfersToPsOnboarding = sourceProduct?.code?.trim().toUpperCase() === "PSO" && sourceStage?.name?.trim().toLowerCase() === "post pso";
+  }
+
   // Registration is product-specific: a PSO registration begins at Pre PSO,
   // and a BSSO registration begins at Pre BSSO.  Do not apply this to other
   // products that happen to use a similarly named resolution.
@@ -3441,6 +3451,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
   if (isOldGraduate) revalidatePath("/dashboard/old-graduate-master");
   revalidatePath("/dashboard/my-ambassador");
   revalidatePath("/dashboard/products", "layout");
+  return { transferredToPsOnboarding: transfersToPsOnboarding };
 }
 
 export async function updateLeadFollowUp(formData: FormData) {
@@ -3819,7 +3830,7 @@ export async function saveStageDropdownValue(formData: FormData) {
       .single(),
     supabase
       .from("lead_stage_dropdowns")
-      .select("id, stage_id, product_id")
+      .select("id, label, stage_id, product_id")
       .eq("id", dropdownId)
       .eq("is_active", true)
       .maybeSingle(),
@@ -3841,11 +3852,11 @@ export async function saveStageDropdownValue(formData: FormData) {
       .eq("assignment_id", assignmentId)
       .eq("dropdown_id", dropdownId);
     if (error) throw new Error(error.message);
-    return;
+    return { transferredToPsOnboarding: false };
   }
   const { data: option } = await supabase
     .from("lead_stage_dropdown_options")
-    .select("id")
+    .select("id, label")
     .eq("id", optionId)
     .eq("dropdown_id", dropdownId)
     .eq("is_active", true)
@@ -3864,4 +3875,12 @@ export async function saveStageDropdownValue(formData: FormData) {
     { onConflict: "assignment_id,dropdown_id" },
   );
   if (error) throw new Error(error.message);
+
+  // The database trigger performs the actual transfer. This result only lets
+  // the product board show a clear confirmation to the CRM user.
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const transferredToPsOnboarding =
+    ["salesresolution", "salesresolutions"].includes(normalize(dropdown.label)) &&
+    ["depositpaid", "fullypaid"].includes(normalize(option.label));
+  return { transferredToPsOnboarding };
 }

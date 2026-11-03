@@ -52,14 +52,14 @@ For security, you will be required to change this password when you sign in for 
   });
 }
 
-export async function sendPasswordResetEmail({
+export async function sendPasswordResetOtp({
   email,
   fullName,
-  resetUrl,
+  otp,
 }: {
   email: string;
   fullName?: string | null;
-  resetUrl: string;
+  otp: string;
 }) {
   const smtp = getSmtpConfig();
   const transporter = nodemailer.createTransport({
@@ -78,10 +78,11 @@ export async function sendPasswordResetEmail({
 
 We received a request to reset your Altus CRM password.
 
-Use this secure one-time link to choose a new password:
-${resetUrl}
+Your one-time verification code is:
 
-This link expires automatically. If you did not request a password reset, you can safely ignore this email.
+${otp}
+
+Enter this code on the Altus CRM password reset page. It expires automatically. If you did not request a password reset, you can safely ignore this email.
 `,
   });
 }
