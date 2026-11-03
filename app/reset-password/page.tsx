@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { resetPassword, verifyPasswordResetOtp } from "./actions";
+import { PasswordField } from "@/components/auth/password-field";
 
 export const instant = false;
 
@@ -12,6 +13,7 @@ type ResetPasswordPageProps = {
 const errors: Record<string, string> = {
   "weak-password": "Use at least 12 characters with uppercase, lowercase, a number, and a symbol.",
   "password-mismatch": "The passwords do not match.",
+  "same-password": "Enter a new password that is different from your current password.",
   "update-failed": "We could not update your password. Please try again.",
   "invalid-otp": "That verification code is invalid or has expired. Request a new one.",
 };
@@ -49,8 +51,8 @@ export default async function ResetPasswordPage({ searchParams }: ResetPasswordP
           <p className="mt-2 text-sm font-medium text-slate-500">Your email code was verified. Use a strong password that you do not use elsewhere.</p>
         </div>
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{errors[error] ?? "Unable to update your password."}</p>}
-        <label className="block text-sm font-bold text-slate-700">New password<input name="password" type="password" required minLength={12} autoComplete="new-password" className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
-        <label className="block text-sm font-bold text-slate-700">Confirm new password<input name="confirmPassword" type="password" required minLength={12} autoComplete="new-password" className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
+        <label className="block text-sm font-bold text-slate-700">New password<PasswordField name="password" required minLength={12} autoComplete="new-password" className="h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
+        <label className="block text-sm font-bold text-slate-700">Confirm new password<PasswordField name="confirmPassword" required minLength={12} autoComplete="new-password" className="h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
         <button className="w-full rounded-lg bg-[#d90000] py-3 text-sm font-bold text-white">Reset password</button>
       </form>
     </main>

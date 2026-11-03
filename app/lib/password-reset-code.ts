@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 function secret() {
-  const value = process.env.PASSWORD_RESET_CODE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const value = process.env.PASSWORD_RESET_CODE_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!value) throw new Error("Password reset code secret is not configured.");
   return value;
 }

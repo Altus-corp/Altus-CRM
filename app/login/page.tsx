@@ -1,5 +1,6 @@
 import { login } from "./actions";
 import Link from "next/link";
+import { PasswordField } from "@/components/auth/password-field";
 
 export const instant = false;
 
@@ -54,12 +55,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
                 <label className="block text-sm font-medium text-slate-700">
                     Password
-                    <input
+                    <PasswordField
                         name="password"
-                        type="password"
                         required
                         autoComplete="current-password"
-                        className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-blue-600"
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-blue-600"
                     />
                 </label>
 

@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { createResetSessionToken, hashResetCode, hashResetSessionToken, hashesMatch } from "@/app/lib/password-reset-code";
 
@@ -69,11 +70,24 @@ export async function resetPassword(formData: FormData) {
   const admin = createAdminClient();
   const { data: resetCode, error: resetCodeError } = await admin
     .from("crm_password_reset_codes")
-    .select("user_id, expires_at, verified_token_hash")
+    .select("user_id, email, expires_at, verified_token_hash")
     .eq("verified_token_hash", hashResetSessionToken(resetToken))
     .maybeSingle();
   if (resetCodeError || !resetCode?.verified_token_hash || new Date(resetCode.expires_at).getTime() <= Date.now() || !hashesMatch(resetCode.verified_token_hash, hashResetSessionToken(resetToken)))
     redirect("/forgot-password?error=recovery-link-invalid");
+
+  // Supabase stores password hashes, so a safe password login check is the
+  // only way to reject reusing the current password.
+  const passwordCheck = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } },
+  );
+  const { error: currentPasswordError } = await passwordCheck.auth.signInWithPassword({
+    email: resetCode.email,
+    password,
+  });
+  if (!currentPasswordError) redirect("/reset-password?error=same-password");
 
   const { data: userResult, error: userError } = await admin.auth.admin.getUserById(resetCode.user_id);
   if (userError || !userResult.user) redirect("/forgot-password?error=recovery-link-invalid");

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requestPasswordReset } from "./actions";
+import { PasswordResetSubmitButton } from "@/components/auth/password-reset-submit-button";
 
 export const instant = false;
 
@@ -45,7 +46,7 @@ export default async function ForgotPasswordPage({ searchParams }: ForgotPasswor
           />
         </label>
 
-        <button className="w-full rounded-lg bg-[#d90000] py-3 text-sm font-bold text-white">Send verification code</button>
+        <PasswordResetSubmitButton />
         <Link href="/login" className="block text-center text-sm font-semibold text-slate-600 hover:text-red-600">Back to sign in</Link>
       </form>
     </main>

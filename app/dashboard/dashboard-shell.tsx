@@ -145,6 +145,7 @@ export function DashboardShell({
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const isConfigurationPage = pathname === "/dashboard/lead-settings";
   const isAdmin = roles.includes("admin");
+  const canUseTemplates = roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager");
   const ambassadorWhatsappNumber = ambassadorOwnerPhone?.replace(/\D/g, "");
   const ambassadorWhatsappHref = ambassadorWhatsappNumber
     ? `https://wa.me/${ambassadorWhatsappNumber.length === 10 ? `91${ambassadorWhatsappNumber}` : ambassadorWhatsappNumber}`
@@ -174,7 +175,7 @@ export function DashboardShell({
           </div>
         </Link>
 
-        <nav className="mt-2.5 space-y-0" aria-label="Dashboard navigation">
+        <nav className="mt-2.5 min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain pr-1" aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
             if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}`} isAdmin={isAdmin} />;
@@ -239,7 +240,7 @@ export function DashboardShell({
           })}
         </nav>
 
-        <div className="mt-auto">
+        <div className="mt-2 shrink-0">
           {!isAdmin && !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && <TodaysCallTarget assignedLeads={todayAssignedLeads} />}
           <form action={signOut}>
           <button className="flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700">
@@ -256,7 +257,7 @@ export function DashboardShell({
             ALTUS CRM
           </Link>
           <p className="hidden text-[17px] font-extrabold tracking-[-0.035em] text-[#cf0000] md:block">
-            CRM <span className="mx-1 text-slate-400">›</span> {navigation.find((item) => item.href === pathname)?.label ?? navigation.flatMap((item) => item.children ?? []).find((item) => item.href === pathname)?.label ?? "Workspace"}
+            CRM <span className="mx-1 text-slate-400">›</span> {pathname === "/dashboard/message-templates" ? "Templates" : navigation.find((item) => item.href === pathname)?.label ?? navigation.flatMap((item) => item.children ?? []).find((item) => item.href === pathname)?.label ?? "Workspace"}
           </p>
           <div className="flex items-center gap-2">
             {ambassadorWhatsappHref && <a href={ambassadorWhatsappHref} target="_blank" rel="noreferrer" aria-label="Message Sales Person on WhatsApp" title="Message Sales Person on WhatsApp" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100">
@@ -281,6 +282,11 @@ export function DashboardShell({
                   Settings
                   <span className="ml-auto text-lg font-medium text-slate-400">›</span>
                 </Link>
+                {canUseTemplates && <Link href="/dashboard/message-templates" onClick={() => setIsProfileMenuOpen(false)} className="flex min-h-10 items-center gap-3 rounded-xl px-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-red-700">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="h-4 w-4"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" /><path d="M8 8h8M8 12h5" /></svg>
+                  Templates
+                  <span className="ml-auto text-lg font-medium text-slate-400">›</span>
+                </Link>}
                 <div className="my-2 border-t border-slate-200" />
                 <form action={signOut}><button className="flex min-h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm font-extrabold text-red-700 transition hover:bg-red-50"><span className="text-lg">↪</span>Sign out</button></form>
               </div>}
