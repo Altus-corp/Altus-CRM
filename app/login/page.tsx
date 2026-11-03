@@ -1,4 +1,5 @@
 import { login } from "./actions";
+import Link from "next/link";
 
 export const instant = false;
 
@@ -61,6 +62,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                         className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 outline-none focus:border-blue-600"
                     />
                 </label>
+
+                <div className="flex justify-end">
+                    <Link
+                        href="/forgot-password"
+                        className="text-sm font-semibold text-red-600 transition hover:text-red-700"
+                    >
+                        Forgot password?
+                    </Link>
+                </div>
 
                 <button
                     type="submit"

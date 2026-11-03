@@ -52,6 +52,40 @@ For security, you will be required to change this password when you sign in for 
   });
 }
 
+export async function sendPasswordResetEmail({
+  email,
+  fullName,
+  resetUrl,
+}: {
+  email: string;
+  fullName?: string | null;
+  resetUrl: string;
+}) {
+  const smtp = getSmtpConfig();
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.port === 465,
+    auth: { user: smtp.user, pass: smtp.pass },
+  });
+
+  const greeting = fullName?.trim() || "there";
+  await transporter.sendMail({
+    from: smtp.from,
+    to: email,
+    subject: "Reset your Altus CRM password",
+    text: `Hello ${greeting},
+
+We received a request to reset your Altus CRM password.
+
+Use this secure one-time link to choose a new password:
+${resetUrl}
+
+This link expires automatically. If you did not request a password reset, you can safely ignore this email.
+`,
+  });
+}
+
 export async function sendLeadMeetingInvitation({ email, name, topic, agenda, startTime, duration, joinUrl }: { email: string; name: string; topic: string; agenda: string; startTime: string; duration: number; joinUrl: string }) {
   const smtp = getSmtpConfig();
   const transporter = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, auth: { user: smtp.user, pass: smtp.pass } });
