@@ -205,7 +205,7 @@ export async function updateAmbassadorDetails(assignmentId: string, input: Omit<
   } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to update Ambassador." }; }
 }
 
-export async function updateAmbassadorActuals(assignmentId: string, input: { actualLeads: string; actualDemo: string; actualProposals: string; actualSales: string }) {
+export async function updateAmbassadorActuals(assignmentId: string, input: { actualSales: string }) {
   try {
     const user = await requireUser();
     if (!user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) throw new Error("Only sales users can update Ambassador actuals.");
@@ -217,9 +217,6 @@ export async function updateAmbassadorActuals(assignmentId: string, input: { act
       return number;
     };
     const actuals = {
-      ambassador_actual_leads: parseActual(input.actualLeads, "Actual Lead"),
-      ambassador_actual_demo: parseActual(input.actualDemo, "Actual Demo"),
-      ambassador_actual_proposals: parseActual(input.actualProposals, "Actual Proposal"),
       ambassador_actual_sales: parseActual(input.actualSales, "Actual Sales"),
     };
     const supabase = createAdminClient();

@@ -26,13 +26,13 @@ const countValue = (value: number | null) => String(value ?? 0);
 
 export function SalesAmbassadorTable({ rows, columns, assignedNames }: { rows: SalesAmbassadorRow[]; columns: LeadColumn[]; assignedNames: Record<string, string> }) {
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, { actualLeads: string; actualDemo: string; actualProposals: string; actualSales: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { actualSales: string }>>({});
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
   const draftFor = (row: SalesAmbassadorRow) => drafts[row.assignmentId] ?? {
-    actualLeads: countValue(row.actualLeads), actualDemo: countValue(row.actualDemo), actualProposals: countValue(row.actualProposals), actualSales: countValue(row.actualSales),
+    actualSales: countValue(row.actualSales),
   };
-  const change = (row: SalesAmbassadorRow, field: "actualLeads" | "actualDemo" | "actualProposals" | "actualSales", value: string) => {
+  const change = (row: SalesAmbassadorRow, field: "actualSales", value: string) => {
     setDrafts((current) => ({ ...current, [row.assignmentId]: { ...draftFor(row), [field]: value.replace(/\D/g, "") } }));
   };
   const save = (row: SalesAmbassadorRow) => startTransition(async () => {
@@ -52,9 +52,9 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames }: { rows: S
           return <tr key={row.assignmentId} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("input,button,a")) setDetailLead(row.lead); }} title="Double-click to open Ambassador detail" className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50">
             <td className="px-3 py-3"><div className="flex items-center gap-2">{contact ? <a href={`tel:${contact}`} onClick={(event) => event.stopPropagation()} title="Call" className="text-red-500 hover:text-red-700"><PhoneCall className="h-4 w-4" /></a> : <PhoneCall className="h-4 w-4 text-slate-300" />}{contact ? <a href={`https://wa.me/91${contact.slice(-10)}`} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="WhatsApp" className="text-emerald-500 hover:text-emerald-700"><MessageCircle className="h-4 w-4" /></a> : null}{row.lead.email ? <a href={`mailto:${row.lead.email}`} onClick={(event) => event.stopPropagation()} title="Email" className="text-slate-500 hover:text-slate-700"><Mail className="h-4 w-4" /></a> : null}</div></td>
             <td className="px-3 py-3 font-extrabold text-slate-800">{[row.lead.first_name, row.lead.last_name].filter(Boolean).join(" ")}</td><td className="px-3 py-3 font-semibold text-slate-600">{row.lead.phone || "—"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.agreementStatus || "—"}</td>
-            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetLeads)}</td><td className="px-3 py-3"><input aria-label="Actual Lead" value={draft.actualLeads} onChange={(event) => change(row, "actualLeads", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /></td>
-            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetDemo)}</td><td className="px-3 py-3"><input aria-label="Actual Demo" value={draft.actualDemo} onChange={(event) => change(row, "actualDemo", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /></td>
-            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetProposals)}</td><td className="px-3 py-3"><input aria-label="Actual Proposal" value={draft.actualProposals} onChange={(event) => change(row, "actualProposals", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /></td>
+            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetLeads)}</td><td className="px-3 py-3 font-extrabold text-slate-800" title="Automatically calculated from leads shared with this Ambassador">{countValue(row.actualLeads)}</td>
+            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetDemo)}</td><td className="px-3 py-3 font-extrabold text-slate-800" title="Automatically calculated from eligible product resolutions">{countValue(row.actualDemo)}</td>
+            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetProposals)}</td><td className="px-3 py-3 font-extrabold text-slate-800" title="Automatically calculated from eligible product resolutions">{countValue(row.actualProposals)}</td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetSales)}</td><td className="px-3 py-3"><input aria-label="Actual Sales" value={draft.actualSales} onChange={(event) => change(row, "actualSales", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /></td>
             <td className="px-3 py-3"><button type="button" disabled={isPending} onClick={() => save(row)} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:opacity-50">Save</button></td>
           </tr>;

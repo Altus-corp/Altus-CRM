@@ -14,7 +14,14 @@ const commonNavigation: DashboardNavItem[] = [
 const roleNavigation: DashboardNavItem[] = [
   // Keep the primary CRM workflow in one consistent order for every role.
   { label: "Reports", href: "/dashboard/reports", roles: ["admin"] },
-  { label: "Leads", href: "/dashboard/leads" },
+  {
+    label: "Leads",
+    href: "/dashboard/leads",
+    children: [
+      { label: "Leads Master", href: "/dashboard/leads" },
+      { label: "Team Leads", href: "/dashboard/leads?team=1" },
+    ],
+  },
   {
     label: "Do Not Call",
     href: "/dashboard/dnd-master",

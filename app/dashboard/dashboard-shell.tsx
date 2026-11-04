@@ -87,8 +87,28 @@ function ProductsNavigation({ products, pathname }: { products: DashboardShellPr
   );
 }
 
+function LeadsNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
+  const children = item.children?.filter((child) => child.href !== "/dashboard/leads?team=1" || isAdmin) ?? [];
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  if (!children.length) {
+    const isActive = pathname === item.href;
+    return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}><span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Leads" /></span>{item.label}</Link>;
+  }
+
+  const isCurrentSection = pathname === item.href;
+  const open = isOpen ?? isCurrentSection;
+  return <div>
+    <div className={`flex min-h-9 items-center rounded-[12px] transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
+      <Link href={item.href} className="flex min-h-9 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1 text-[13px] font-bold leading-tight"><span className={isCurrentSection ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Leads" /></span>{item.label}</Link>
+      <button type="button" onClick={() => setIsOpen(!open)} aria-expanded={open} aria-controls="leads-navigation" aria-label={`${open ? "Collapse" : "Expand"} Leads menu`} className="mr-1 grid h-7 w-7 place-items-center rounded text-slate-500 hover:bg-white/70"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}><path d="m5 7.5 5 5 5-5" /></svg></button>
+    </div>
+    {open && <div id="leads-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">{children.map((child) => <Link key={child.href} href={child.href} className={`block py-0.5 text-[11px] font-semibold ${activeHref === child.href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>{child.label}</Link>)}</div>}
+  </div>;
+}
+
 function DoNotCallNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
   const children = item.children?.filter((child) => child.href !== "/dashboard/dnd-master?type=abandoned" || isAdmin) ?? [];
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
   if (!children.length) {
     const isActive = pathname === item.href;
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
@@ -98,7 +118,6 @@ function DoNotCallNavigation({ item, pathname, activeHref, isAdmin }: { item: Da
   }
 
   const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
-  const [isOpen, setIsOpen] = useState<boolean | null>(null);
   const open = isOpen ?? Boolean(isCurrentSection);
 
   return (
@@ -178,6 +197,7 @@ export function DashboardShell({
         <nav className="mt-2.5 min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain pr-1" aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
+            if (item.href === "/dashboard/leads" && isAdmin) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}`} isAdmin={isAdmin} />;
             if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}`} isAdmin={isAdmin} />;
 
             const isActive = pathname === item.href;
@@ -257,7 +277,7 @@ export function DashboardShell({
             ALTUS CRM
           </Link>
           <p className="hidden text-[17px] font-extrabold tracking-[-0.035em] text-[#cf0000] md:block">
-            CRM <span className="mx-1 text-slate-400">›</span> {pathname === "/dashboard/message-templates" ? "Templates" : navigation.find((item) => item.href === pathname)?.label ?? navigation.flatMap((item) => item.children ?? []).find((item) => item.href === pathname)?.label ?? "Workspace"}
+            CRM <span className="mx-1 text-slate-400">›</span> {pathname === "/dashboard/leads" && searchParams.get("team") === "1" ? "Team Leads" : pathname === "/dashboard/message-templates" ? "Templates" : navigation.find((item) => item.href === pathname)?.label ?? navigation.flatMap((item) => item.children ?? []).find((item) => item.href === pathname)?.label ?? "Workspace"}
           </p>
           <div className="flex items-center gap-2">
             {ambassadorWhatsappHref && <a href={ambassadorWhatsappHref} target="_blank" rel="noreferrer" aria-label="Message Sales Person on WhatsApp" title="Message Sales Person on WhatsApp" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100">

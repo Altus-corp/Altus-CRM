@@ -623,11 +623,14 @@ export async function importLeadsCsv(
           };
       }
       const { data: importedAssignments, error: importedAssignmentsError } = await supabase
-        .from("lead_product_assignments").select("id, lead_id, product_id")
+        .from("lead_product_assignments").select("id, lead_id, product_id, assigned_to")
         .in("lead_id", insertedLeads.map((lead) => lead.id));
       if (importedAssignmentsError) return { ok: false, message: importedAssignmentsError.message, imported: index + insertedLeads.length, skipped };
       const primaryAssignmentIds = new Map(insertedLeads.map((lead, batchIndex) => [lead.id,
         importedAssignments?.find((assignment) => assignment.lead_id === lead.id && assignment.product_id === batch[batchIndex]?.lead.product_id)?.id,
+      ]));
+      const primaryAssignmentOwners = new Map(insertedLeads.map((lead, batchIndex) => [lead.id,
+        importedAssignments?.find((assignment) => assignment.lead_id === lead.id && assignment.product_id === batch[batchIndex]?.lead.product_id)?.assigned_to ?? null,
       ]));
       const { error: activityError } = await supabase
         .from("lead_activities")
@@ -641,7 +644,7 @@ export async function importLeadsCsv(
               source: "file_import",
               lead_database: batch[batchIndex]?.leadDatabase,
               product_codes: batch[batchIndex]?.productCodes,
-              assigned_to: batch[batchIndex]?.assigneeId,
+              assigned_to: primaryAssignmentOwners.get(lead.id) ?? batch[batchIndex]?.assigneeId,
             },
             created_by: userId,
           })),
@@ -2101,7 +2104,7 @@ export async function createManualLead(
       created_by: user.userId,
       lead_database: "leads",
     })
-    .select("id")
+    .select("id, assigned_to")
     .single();
   if (error || !lead)
     return {
@@ -2110,7 +2113,7 @@ export async function createManualLead(
     };
   const { data: assignment } = await supabase
     .from("lead_product_assignments")
-    .select("id")
+    .select("id, assigned_to")
     .eq("lead_id", lead.id)
     .eq("product_id", productId)
     .maybeSingle();
@@ -2123,7 +2126,7 @@ export async function createManualLead(
     }).format(new Date());
     await supabase
       .from("lead_product_assignments")
-      .update({ focused_on: isAmbassadorWorkspace(user.roles) ? null : today, assignment_origin: "manual" })
+      .update({ focused_on: today, assignment_origin: "manual" })
       .eq("id", assignment.id);
   }
   const { error: activityError } = await supabase
@@ -2132,10 +2135,12 @@ export async function createManualLead(
       lead_id: lead.id,
       lead_product_assignment_id: assignment?.id ?? null,
       activity_type: "lead_created",
-      note: `Lead manually added and assigned to the creating CRM user for ${product.code}.`,
+      note: isAmbassadorWorkspace(user.roles)
+        ? `Lead manually added by an Ambassador and routed to the Relationship Manager for ${product.code}.`
+        : `Lead manually added and assigned to the creating CRM user for ${product.code}.`,
       metadata: {
         source: "manual_lead_creation",
-        assigned_to: user.userId,
+        assigned_to: assignment?.assigned_to ?? user.userId,
         product_id: productId,
       },
       created_by: user.userId,
@@ -2143,7 +2148,12 @@ export async function createManualLead(
   if (activityError) return { ok: false, message: activityError.message };
   revalidatePath("/dashboard/leads");
   if (isAmbassadorWorkspace(user.roles)) revalidatePath("/dashboard");
-  return { ok: true, message: "Lead created and assigned to you." };
+  return {
+    ok: true,
+    message: isAmbassadorWorkspace(user.roles)
+      ? "Lead created and routed to your Relationship Manager."
+      : "Lead created and assigned to you.",
+  };
 }
 
 export async function manuallyAssignLeads(formData: FormData) {
