@@ -6,6 +6,7 @@ import {
   syncMananvasaQualifiedLeads,
   syncProductivityShastraQualifiedLeads,
 } from "@/app/dashboard/leads/actions";
+import { syncAltusCorpAmbassadors } from "@/app/dashboard/my-ambassador/actions";
 
 type SyncResult = {
   ok: boolean;
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
     { source: "BSSO Google Sheet", run: syncGoogleAppsScriptBssoLeads },
     { source: "Mananvasa", run: syncMananvasaQualifiedLeads },
     { source: "AltusCorp", run: syncAltusCorpQualifiedLeads },
+    { source: "AltusCorp Ambassadors", run: syncAltusCorpAmbassadors },
   ];
 
   const results: Array<SyncResult & { source: string }> = [];

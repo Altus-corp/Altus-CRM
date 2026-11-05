@@ -34,7 +34,16 @@ const roleNavigation: DashboardNavItem[] = [
   },
   { label: "Products", href: "/dashboard/products", roles: ["admin", "sales_executive", "sales_manager"] },
   { label: "My Ambassador", href: "/dashboard/my-ambassador", roles: ["sales_executive"] },
-  { label: "Ambassador", href: "/dashboard/my-ambassador", roles: ["admin", "sales_manager"] },
+  {
+    label: "Ambassador",
+    href: "/dashboard/my-ambassador",
+    roles: ["admin", "sales_manager"],
+    children: [
+      { label: "All Ambassadors", href: "/dashboard/my-ambassador" },
+      { label: "Pre Sales", href: "/dashboard/my-ambassador?stage=pre-sales" },
+      { label: "Onboarding Ambassador", href: "/dashboard/my-ambassador?stage=onboarding-ambassador" },
+    ],
+  },
   { label: "Admin overview", href: "/dashboard/admin", roles: ["admin"] },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
   { label: "Team", href: "/dashboard/team", roles: ["admin"] },

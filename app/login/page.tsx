@@ -2,6 +2,7 @@ import { login } from "./actions";
 import Link from "next/link";
 import { CircleHelp, LockKeyhole, Mail } from "lucide-react";
 import { PasswordField } from "@/components/auth/password-field";
+import { LoginSubmitButton } from "./login-submit-button";
 
 export const instant = false;
 
@@ -46,7 +47,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                         <label className="block text-[12px] font-extrabold text-slate-700">Email<span className="relative mt-2 block"><Mail aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input name="email" type="email" required autoComplete="email" placeholder="you@company.com" className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-10 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:bg-white focus:ring-4 focus:ring-red-50" /></span></label>
                         <label className="block text-[12px] font-extrabold text-slate-700">Password<span className="relative mt-2 block"><LockKeyhole aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" /><PasswordField name="password" required autoComplete="current-password" placeholder="Enter your password" className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-10 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:bg-white focus:ring-4 focus:ring-red-50" /></span></label>
                     </div>
-                    <button type="submit" className="mt-6 h-11 w-full rounded-xl bg-gradient-to-b from-[#f90b26] to-[#da000e] text-sm font-extrabold text-white shadow-[0_9px_18px_rgba(224,0,19,0.24)] transition hover:brightness-105 active:translate-y-px">Sign in</button>
+                    <LoginSubmitButton />
                     <Link href="/forgot-password" className="mt-4 flex min-h-12 items-center gap-3 rounded-xl border border-slate-200 px-4 py-2.5 text-left transition hover:border-red-200 hover:bg-red-50/40"><CircleHelp aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400" /><span><span className="block text-[12px] font-extrabold text-red-600">Forgot your password?</span><span className="mt-0.5 block text-[11px] font-medium text-slate-500">We’ll send a secure reset code to your email.</span></span></Link>
                     <div className="mt-5 border-t border-slate-200 pt-4 text-center text-[11px] font-medium text-slate-400">© {new Date().getFullYear()} Altus CRM</div>
                 </form>

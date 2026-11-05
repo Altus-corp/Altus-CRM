@@ -146,6 +146,25 @@ function DoNotCallNavigation({ item, pathname, activeHref, isAdmin }: { item: Da
   );
 }
 
+function AmbassadorNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
+  const children = isAdmin ? item.children ?? [] : [];
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  if (!children.length) {
+    const isActive = pathname === item.href;
+    return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}><span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Ambassador" /></span>{item.label}</Link>;
+  }
+
+  const isCurrentSection = pathname === item.href;
+  const open = isOpen ?? isCurrentSection;
+  return <div>
+    <div className={`flex min-h-9 items-center rounded-[12px] transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
+      <Link href={item.href} className="flex min-h-9 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1 text-[13px] font-bold leading-tight"><span className={isCurrentSection ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Ambassador" /></span>{item.label}</Link>
+      <button type="button" onClick={() => setIsOpen(!open)} aria-expanded={open} aria-controls="ambassador-navigation" aria-label={`${open ? "Collapse" : "Expand"} Ambassador menu`} className="mr-1 grid h-7 w-7 place-items-center rounded text-slate-500 hover:bg-white/70"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}><path d="m5 7.5 5 5 5-5" /></svg></button>
+    </div>
+    {open && <div id="ambassador-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">{children.map((child) => <Link key={child.href} href={child.href} className={`block py-0.5 text-[11px] font-semibold ${activeHref === child.href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>{child.label}</Link>)}</div>}
+  </div>;
+}
+
 export function DashboardShell({
   children,
   navigation,
@@ -199,6 +218,7 @@ export function DashboardShell({
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
             if (item.href === "/dashboard/leads" && isAdmin) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}`} isAdmin={isAdmin} />;
             if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}`} isAdmin={isAdmin} />;
+            if (item.href === "/dashboard/my-ambassador" && item.label === "Ambassador") return <AmbassadorNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("stage") ? `?stage=${searchParams.get("stage")}` : ""}`} isAdmin={isAdmin} />;
 
             const isActive = pathname === item.href;
 
