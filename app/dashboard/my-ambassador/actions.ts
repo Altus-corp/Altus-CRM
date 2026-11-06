@@ -68,6 +68,10 @@ function cleanText(value: unknown, max = 4000) {
   return String(value ?? "").trim().slice(0, max);
 }
 
+function workflowKey(value: unknown) {
+  return cleanText(value, 200).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 function normalizePhone(value: unknown) {
   const digits = cleanText(value, 40).replace(/\D/g, "");
   return digits.length >= 10 ? digits.slice(-10) : "";
@@ -226,13 +230,19 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
     for (const assignment of allAssignments ?? []) assignmentsByLead.set(assignment.lead_id, [...(assignmentsByLead.get(assignment.lead_id) ?? []), assignment]);
 
     let imported = 0, updated = 0, skipped = 0;
+    const skipReasons: string[] = [];
     for (const record of unique) {
       const externalId = cleanText(record.id, 120);
       const phone = normalizePhone(record.contactNumber);
       const names = splitName(record.ambassadorName || record.entityName);
-      if (!phone || !names.firstName) { skipped += 1; continue; }
+      if (!phone || !names.firstName) { skipped += 1; if (skipReasons.length < 3) skipReasons.push("A source record is missing a valid name or 10-digit Cell Number."); continue; }
       const signed = record.hasSignedPdf === true;
       const priorLead = mapped.get(externalId) ? leadById.get(mapped.get(externalId)!) : leadByPhone.get(phone);
+      const sourceState = priorLead?.custom_data && typeof priorLead.custom_data.altuscorp_ambassador === "object" && priorLead.custom_data.altuscorp_ambassador !== null
+        ? priorLead.custom_data.altuscorp_ambassador as Record<string, unknown>
+        : null;
+      // Do not recreate an API record deliberately removed by an admin.
+      if (sourceState?.locally_deleted_at) { skipped += 1; if (skipReasons.length < 3) skipReasons.push("A previously deleted Ambassador record was intentionally kept suppressed."); continue; }
       const owner = priorLead ? (assignmentsByLead.get(priorLead.id) ?? [])
         .filter((item) => item.assigned_to && item.is_active)
         .sort((a, b) => Number(b.product_id === product.id) - Number(a.product_id === product.id) || String(b.assigned_at ?? "").localeCompare(String(a.assigned_at ?? "")))[0]?.assigned_to ?? null : null;
@@ -243,11 +253,11 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       let leadId = priorLead?.id;
       if (leadId) {
         const { error } = await supabase.from("leads").update({ first_name: names.firstName, last_name: names.lastName || null, email: cleanText(record.email, 254) || null, phone, custom_data: customData, updated_at: new Date().toISOString() }).eq("id", leadId);
-        if (error) { skipped += 1; continue; }
+        if (error) { skipped += 1; if (skipReasons.length < 3) skipReasons.push(error.message); continue; }
         updated += 1;
       } else {
         const { data, error } = await supabase.from("leads").insert({ first_name: names.firstName, last_name: names.lastName || null, email: cleanText(record.email, 254) || null, phone, product_id: product.id, lead_database: "leads", external_source: source, external_id: externalId, custom_data: customData, created_by: actor.userId }).select("id").single();
-        if (error || !data) { skipped += 1; continue; }
+        if (error || !data) { skipped += 1; if (skipReasons.length < 3) skipReasons.push(error?.message || "The CRM lead could not be created."); continue; }
         leadId = data.id; imported += 1;
       }
       const { data: assignment, error: assignmentError } = await supabase.from("lead_product_assignments").upsert({
@@ -257,13 +267,13 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
         ambassador_commission: record.referralFeePercent === null || record.referralFeePercent === undefined || record.referralFeePercent === "" ? null : Number(record.referralFeePercent),
         ambassador_agreement_status: signed ? "Agreement Signed" : "Agreement Sent",
       }, { onConflict: "lead_id,product_id" }).select("id").single();
-      if (assignmentError || !assignment) { skipped += 1; continue; }
+      if (assignmentError || !assignment) { skipped += 1; if (skipReasons.length < 3) skipReasons.push(assignmentError?.message || "The Ambassador product assignment could not be created."); continue; }
       if (signed) await supabase.from("lead_product_assignments").update({ is_active: false, is_closed: true, focused_on: null, next_follow_up_at: null }).eq("lead_id", leadId).neq("product_id", product.id).eq("is_active", true).eq("is_closed", false);
       await supabase.from("lead_external_sources").upsert({ lead_id: leadId, source, external_id: externalId }, { onConflict: "source,external_id" });
       await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignment.id, activity_type: "altuscorp_ambassador_synced", note: `Ambassador agreement synced from AltusCorp (${signed ? "Onboarding Ambassador" : "Pre Sales"}).`, metadata: { external_id: externalId, has_signed_pdf: signed, updated_at: record.updatedAt ?? null }, created_by: actor.userId });
     }
     revalidatePath("/dashboard/my-ambassador"); revalidatePath("/dashboard/leads"); revalidatePath("/dashboard");
-    return { ok: true, message: `AltusCorp Ambassador sync completed. ${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}.`, imported, updated, skipped };
+    return { ok: true, message: `AltusCorp Ambassador sync completed. ${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}.${skipReasons.length ? ` ${[...new Set(skipReasons)].join(" ")}` : ""}`, imported, updated, skipped };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to sync AltusCorp Ambassadors." };
   }
@@ -371,15 +381,59 @@ export async function importAmbassadors(rows: AmbassadorInput[]) {
   } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to import Ambassadors." }; }
 }
 
+/** Removes only the Ambassador product assignment. The lead itself remains in
+ * CRM and receives a deletion audit entry without being re-imported by sync. */
+export async function deleteAmbassadorRecords(assignmentIds: string[]) {
+  try {
+    const user = await requireAdmin();
+    const ids = [...new Set((Array.isArray(assignmentIds) ? assignmentIds : []).filter((id) => /^[0-9a-f-]{36}$/i.test(id)))];
+    if (!ids.length || ids.length > 100) throw new Error("Select between 1 and 100 Ambassador records.");
+    const supabase = createAdminClient();
+    const [{ data: product }, { data: records, error: recordsError }] = await Promise.all([
+      supabase.from("lead_products").select("id").eq("code", "AMBASSADOR").maybeSingle(),
+      supabase.from("lead_product_assignments").select("id, lead_id, product_id").in("id", ids).eq("is_active", true),
+    ]);
+    if (!product || recordsError) throw new Error(recordsError?.message || "AMBASSADOR product is not configured.");
+    const valid = (records ?? []).filter((record) => record.product_id === product.id);
+    if (!valid.length) throw new Error("No active Ambassador records were selected.");
+    // Onboarded records are protected by retain_ambassador_assignment, which
+    // intentionally turns normal "inactive" updates back on. Deleting the
+    // selected product assignment is the explicit administrator removal path.
+    const { error } = await supabase.from("lead_product_assignments").delete().in("id", valid.map((record) => record.id));
+    if (error) throw new Error(error.message);
+    const { data: deletedLeads } = await supabase.from("leads").select("id, custom_data").in("id", valid.map((record) => record.lead_id));
+    const deletedAt = new Date().toISOString();
+    await Promise.all((deletedLeads ?? []).map((lead) => {
+      const priorSource = lead.custom_data && typeof lead.custom_data.altuscorp_ambassador === "object" && lead.custom_data.altuscorp_ambassador !== null
+        ? lead.custom_data.altuscorp_ambassador as Record<string, unknown>
+        : {};
+      return supabase.from("leads").update({
+        custom_data: { ...(lead.custom_data ?? {}), altuscorp_ambassador: { ...priorSource, locally_deleted_at: deletedAt } },
+      }).eq("id", lead.id);
+    }));
+    await supabase.from("lead_activities").insert(valid.map((record) => ({
+      lead_id: record.lead_id, lead_product_assignment_id: null, activity_type: "ambassador_record_deleted",
+      note: "Ambassador product record removed by an administrator. The original lead remains in CRM.", created_by: user.userId,
+    })));
+    revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: `${valid.length} Ambassador record${valid.length === 1 ? "" : "s"} deleted.` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to delete Ambassador records." };
+  }
+}
+
 export async function updateAmbassadorDetails(assignmentId: string, input: Omit<AmbassadorInput, "firstName" | "lastName" | "cellNumber">) {
   try {
     const user = await requireAdmin();
     if (!/^[0-9a-f-]{36}$/i.test(assignmentId)) throw new Error("Invalid Ambassador record.");
     const supabase = createAdminClient();
-    const { data: assignment } = await supabase.from("lead_product_assignments").select("lead_id, is_ambassador").eq("id", assignmentId).maybeSingle();
-    if (!assignment?.is_ambassador) throw new Error("Ambassador record not found.");
+    const { data: assignment } = await supabase.from("lead_product_assignments").select("lead_id, product_id, assigned_to, is_ambassador").eq("id", assignmentId).maybeSingle();
+    if (!assignment) throw new Error("Ambassador record not found.");
+    const { data: product } = await supabase.from("lead_products").select("code").eq("id", assignment.product_id).maybeSingle();
+    if (workflowKey(product?.code) !== "ambassador") throw new Error("Ambassador record not found.");
     const data = parseInput({ ...input, firstName: "Record", lastName: "Update", cellNumber: "9999999999" });
-    const { error } = await supabase.from("lead_product_assignments").update({
+    const patch: Record<string, unknown> = {
       assigned_to: data.salesPersonId, assigned_at: data.salesPersonId ? new Date().toISOString() : null,
       ambassador_commission: data.commission, ambassador_commission_notes: data.commissionNotes || null,
       ambassador_priority: data.priority, ambassador_agreement_status: data.agreementStatus,
@@ -388,10 +442,46 @@ export async function updateAmbassadorDetails(assignmentId: string, input: Omit<
       ambassador_manan_sir_notes: data.mananSirNotes || null, updated_at: new Date().toISOString(),
       ambassador_target_leads: data.targetLeads, ambassador_target_demo: data.targetDemo,
       ambassador_target_proposals: data.targetProposals, ambassador_target_sales: data.targetSales,
-    }).eq("id", assignmentId);
+    };
+
+    // Agreement Status is not merely display text: it controls the real
+    // product resolution and stage that power the Pre Sales/Onboarding views.
+    if (data.agreementStatus === "Agreement Signed") {
+      const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
+        supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
+        supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+      ]);
+      if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
+      const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
+      const signed = (resolutions ?? []).find((resolution) => ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"].includes(workflowKey(resolution.name)));
+      if (!onboarding || !signed) throw new Error("Configure Onboarding Ambassador and Agreement Signed / Waived before marking this Ambassador as signed.");
+      Object.assign(patch, {
+        stage_id: onboarding.id,
+        latest_resolution_id: signed.id,
+        is_ambassador: true,
+        is_active: true,
+        is_closed: true,
+        focused_on: null,
+        next_follow_up_at: null,
+      });
+    } else if (data.agreementStatus === "Agreement Sent" && !assignment.is_ambassador) {
+      const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
+        supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
+        supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+      ]);
+      if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
+      const preSales = (stages ?? []).find((stage) => workflowKey(stage.name) === "presales");
+      const sent = (resolutions ?? []).find((resolution) => workflowKey(resolution.name) === "agreementsent");
+      if (!preSales || !sent) throw new Error("Configure Pre Sales and Agreement Sent before saving this Ambassador.");
+      Object.assign(patch, { stage_id: preSales.id, latest_resolution_id: sent.id, is_active: true, is_closed: false });
+    }
+
+    const { error } = await supabase.from("lead_product_assignments").update(patch).eq("id", assignmentId);
     if (error) throw new Error(error.message);
-    await supabase.from("lead_activities").insert({ lead_id: assignment.lead_id, lead_product_assignment_id: assignmentId, activity_type: "ambassador_record_updated", note: "Ambassador commercial details updated by an administrator.", created_by: user.userId });
+    const workflowNote = data.agreementStatus === "Agreement Signed" ? " Moved from Pre Sales to Onboarding Ambassador." : "";
+    await supabase.from("lead_activities").insert({ lead_id: assignment.lead_id, lead_product_assignment_id: assignmentId, activity_type: "ambassador_record_updated", note: `Ambassador commercial details updated by an administrator.${workflowNote}`, created_by: user.userId });
     revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/senior-ambassadors");
     return { ok: true, message: "Ambassador details saved." };
   } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to update Ambassador." }; }
 }

@@ -8,36 +8,36 @@ type ReportData = {
   to: string;
   people: { id: string; name: string }[];
   selectedScope: string;
-  counts: Record<string, number>;
+  days: string[];
+  dailyTotals: Record<string, number>;
+  resolutions: { id: string; name: string; count: number; dailyCounts: Record<string, number> }[];
   total: number;
 };
 
-type Period = "today" | "yesterday" | "day_before_yesterday" | "custom";
+type Period = "today" | "yesterday" | "day_before_yesterday" | "last_7_days" | "custom";
 
-const cards = [
-  ["Registered", ["registered"], "bg-[#b9d9ac] text-slate-900 border-[#7ca871]"],
-  ["Registered for Next", ["registered for next"], "bg-[#cce6bd] text-slate-900 border-[#89b77b]"],
-  ["Verbal Yes", ["verbal yes"], "bg-[#cfe8bd] text-slate-900 border-[#8ab37b]"],
-  ["Tentative", ["tentative"], "bg-[#f6c994] text-slate-900 border-[#d89c60]"],
-  ["Tentative for Next", ["tentative for next"], "bg-[#f8d3a6] text-slate-900 border-[#d9aa72]"],
-  ["Call for Next", ["call for next"], "bg-[#fff0b3] text-slate-900 border-[#e9cc6a]"],
-  ["I will get back if I want", ["i will get back", "i will get back if i want"], "bg-[#f5b1b1] text-slate-900 border-[#df8585]"],
-  ["Not Interested", ["not interested"], "bg-[#ec0000] text-white border-[#b40000]"],
-  ["DND", ["dnd"], "bg-[#dc0000] text-white border-[#a90000]"],
-  ["Past Attended", ["past attended", "did not attend"], "bg-[#e7baff] text-slate-900 border-[#bc77df]"],
-  ["Old Graduate", ["old graduate", "old graduate"], "bg-[#f2b5ff] text-slate-900 border-[#ca6dde]"],
-  ["No Busy", ["no busy"], "bg-white text-slate-900 border-[#4273da]"],
-  ["Ringing", ["ringing"], "bg-white text-slate-900 border-[#4273da]"],
-  ["Call Back", ["call back", "callback"], "bg-white text-slate-900 border-[#4273da]"],
-  ["Wrong Number", ["wrong number"], "bg-[#a2a2a2] text-slate-950 border-[#656565]"],
-] as const;
+function resolutionTone(name: string) {
+  const key = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (/(^| )(dnd|not interested|wrong number|lost|abandoned|cancelled|meeting cancelled)( |$)/.test(key)) return "border-red-300 bg-red-600 text-white";
+  if (/(registered|verbal yes|agreement signed|proposal signed|delivered|demo given)/.test(key)) return "border-emerald-300 bg-emerald-100 text-slate-900";
+  if (/(follow|tentative|call for next|call back|next month|scheduled|meeting scheduled|invite again)/.test(key)) return "border-amber-300 bg-amber-100 text-slate-900";
+  if (/(old graduate|did not attend|past attended)/.test(key)) return "border-fuchsia-300 bg-fuchsia-100 text-slate-900";
+  if (/(no busy|ringing)/.test(key)) return "border-blue-400 bg-white text-slate-900";
+  return "border-slate-200 bg-slate-50 text-slate-900";
+}
 
 const periodLabel: Record<Period, string> = {
   today: "Today",
   yesterday: "Yesterday",
   day_before_yesterday: "Day before yesterday",
+  last_7_days: "Last 7 days",
   custom: "Custom",
 };
+
+function average(value: number, days: number) {
+  const result = days ? value / days : 0;
+  return Number.isInteger(result) ? String(result) : result.toFixed(1);
+}
 
 export function ActivityResolutionOverview({ mode }: { mode: "executive" | "manager" | "admin" }) {
   const [period, setPeriod] = useState<Period>("today");
@@ -70,7 +70,11 @@ export function ActivityResolutionOverview({ mode }: { mode: "executive" | "mana
 
   useEffect(() => { void load(); }, [load]);
   const shownPeople = data?.people ?? [];
-  const cardCount = (aliases: readonly string[]) => aliases.reduce((sum, key) => sum + (data?.counts[key] ?? 0), 0);
+  const resolutions = data?.resolutions ?? [];
+  const days = data?.days ?? [];
+  const dayLabel = (day: string) => new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Kolkata" }).format(new Date(`${day}T12:00:00Z`));
+  const reportDay = days.length === 1 ? dayLabel(days[0]) : "Selected period";
+  const freezeResolutionColumns = days.length >= 5;
 
   return <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Activity resolution overview">
     <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
@@ -82,10 +86,45 @@ export function ActivityResolutionOverview({ mode }: { mode: "executive" | "mana
     </div>
     {period === "custom" && <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 p-2.5"><label className="text-[10px] font-bold text-slate-600">From<input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 block h-8 rounded border border-slate-200 bg-white px-2 text-xs" /></label><label className="text-[10px] font-bold text-slate-600">To<input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 block h-8 rounded border border-slate-200 bg-white px-2 text-xs" /></label><button type="button" onClick={() => void load()} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white">Apply</button></div>}
     {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</p>}
-    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-8">
-      {cards.map(([label, aliases, tone]) => <div key={label} className={`min-h-[72px] rounded-lg border px-2.5 py-2 ${tone}`}><p className="text-[10px] font-extrabold leading-tight">{label}</p><p className="mt-2 text-2xl font-extrabold leading-none">{loading ? "…" : cardCount(aliases)}</p></div>)}
+    {mode === "admin" && <div className="mt-4 overflow-hidden rounded-lg border border-slate-500 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="border-separate border-spacing-0 text-left text-xs" style={{ minWidth: `${Math.max(620, 340 + (days.length * 94))}px` }}>
+          <thead><tr className="font-extrabold text-slate-900"><th className={`w-11 min-w-11 border-b border-r border-slate-500 bg-slate-50 px-2 py-1.5 text-right ${freezeResolutionColumns ? "sticky left-0 z-30" : ""}`}>#</th><th className={`min-w-56 border-b border-r border-slate-500 bg-slate-50 px-2 py-1.5 ${freezeResolutionColumns ? "sticky left-11 z-30 shadow-[3px_0_5px_rgba(15,23,42,0.12)]" : ""}`}>Activity Resolution</th>{days.map((day) => <th key={day} className="min-w-[94px] border-b border-r border-slate-500 bg-violet-100 px-2 py-1.5 text-center" title={day}>{dayLabel(day)}</th>)}<th className="min-w-20 border-b border-slate-500 bg-slate-200 px-2 py-1.5 text-center">Average</th></tr></thead>
+          <tbody>
+            {resolutions.map((resolution, index) => <tr key={resolution.id}>
+              <td className={`border-b border-r border-slate-500 bg-white px-2 py-1 text-right font-bold text-slate-700 ${freezeResolutionColumns ? "sticky left-0 z-20" : ""}`}>{index + 1}</td>
+              <td className={`border-b border-r border-slate-500 px-2 py-1 font-semibold ${resolutionTone(resolution.name)} ${freezeResolutionColumns ? "sticky left-11 z-20 shadow-[3px_0_5px_rgba(15,23,42,0.12)]" : ""}`}>{resolution.name}</td>
+              {days.map((day) => <td key={day} className="border-b border-r border-slate-500 px-2 py-1 text-center font-extrabold text-slate-900">{loading ? "…" : resolution.dailyCounts[day] ?? 0}</td>)}
+              <td className="border-b border-slate-500 bg-slate-50 px-2 py-1 text-center font-extrabold text-slate-900">{loading ? "…" : average(resolution.count, days.length)}</td>
+            </tr>)}
+            <tr><td className={`border-r border-slate-500 bg-zinc-700 px-2 py-1 text-right font-extrabold text-white ${freezeResolutionColumns ? "sticky left-0 z-20" : ""}`}>{resolutions.length + 1}</td><td className={`border-r border-slate-500 bg-zinc-700 px-2 py-1 font-extrabold text-white ${freezeResolutionColumns ? "sticky left-11 z-20 shadow-[3px_0_5px_rgba(15,23,42,0.12)]" : ""}`}>Total Calls</td>{days.map((day) => <td key={day} className="border-r border-slate-500 bg-zinc-700 px-2 py-1 text-center font-extrabold text-white">{loading ? "…" : data?.dailyTotals[day] ?? 0}</td>)}<td className="bg-zinc-800 px-2 py-1 text-center font-extrabold text-white">{loading ? "…" : average(data?.total ?? 0, days.length)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>}
+    {false && <div className="mt-4 max-w-2xl overflow-hidden rounded-lg border border-slate-500 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] border-collapse text-left text-xs">
+          <thead><tr className="font-extrabold text-slate-900"><th className="w-11 border-b border-r border-slate-500 bg-slate-50 px-2 py-1.5 text-right">#</th><th className="border-b border-r border-slate-500 bg-slate-50 px-2 py-1.5">Day</th><th className="w-24 border-b border-slate-500 bg-violet-100 px-2 py-1.5 text-center capitalize">{reportDay}</th></tr></thead>
+          <tbody>
+            {resolutions.map((resolution, index) => <tr key={resolution.id}>
+              <td className="border-b border-r border-slate-500 px-2 py-1 text-right font-bold text-slate-700">{index + 1}</td>
+              <td className={`border-b border-r border-slate-500 px-2 py-1 font-semibold ${resolutionTone(resolution.name)}`}>{resolution.name}</td>
+              <td className="border-b border-slate-500 px-2 py-1 text-center font-extrabold text-slate-900">{loading ? "…" : resolution.count}</td>
+            </tr>)}
+            <tr><td className="border-r border-slate-500 bg-zinc-700 px-2 py-1 text-right font-extrabold text-white">{resolutions.length + 1}</td><td className="border-r border-slate-500 bg-zinc-700 px-2 py-1 font-extrabold text-white">Total Calls</td><td className="bg-zinc-700 px-2 py-1 text-center font-extrabold text-white">{loading ? "…" : data?.total ?? 0}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>}
+    <div className={mode === "admin" ? "hidden" : "mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-7"}>
+      {resolutions.map((resolution) => <div key={resolution.id} className={`min-h-[72px] rounded-lg border px-2.5 py-2 ${resolutionTone(resolution.name)}`}>
+        <p className="text-[10px] font-extrabold leading-tight">{resolution.name}</p>
+        <p className="mt-2 text-2xl font-extrabold leading-none">{loading ? "…" : resolution.count}</p>
+      </div>)}
       <div className="min-h-[72px] rounded-lg border border-[#4d4d4d] bg-[#555] px-2.5 py-2 text-white"><p className="text-[10px] font-extrabold leading-tight">Total Calls</p><p className="mt-2 text-2xl font-extrabold leading-none">{loading ? "…" : data?.total ?? 0}</p></div>
     </div>
+    {!loading && !resolutions.length && <p className="mt-4 rounded-lg bg-slate-50 px-3 py-4 text-center text-xs font-semibold text-slate-500">No active activity resolutions are configured yet.</p>}
     {data && <p className="mt-3 text-[10px] font-semibold text-slate-400">Showing {data.from === data.to ? data.from : `${data.from} to ${data.to}`}{mode === "manager" && scope === "team" ? " · team members only" : ""}.</p>}
   </section>;
 }

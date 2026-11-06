@@ -2671,6 +2671,39 @@ export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok:
   return { ok: true, message: "Channel Partners saved." };
 }
 
+export async function saveLeadSeniorAmbassador(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  const user = await requireUser();
+  if (isAmbassadorWorkspace(user.roles)) return { ok: false, message: "Ambassadors cannot change Senior Ambassador selections." };
+  const leadId = String(formData.get("leadId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const seniorAmbassadorId = String(formData.get("seniorAmbassadorId") ?? "").trim();
+  if (seniorAmbassadorId && !/^[0-9a-f-]{36}$/i.test(seniorAmbassadorId)) return { ok: false, message: "Choose a valid Senior Ambassador." };
+  const { supabase } = await getEditableLead(leadId, assignmentId);
+  if (seniorAmbassadorId) {
+    const [roles, profiles] = await Promise.all([
+      supabase.from("user_roles").select("user_id").eq("role", "ambassador").eq("user_id", seniorAmbassadorId),
+      supabase.from("profiles").select("id").eq("id", seniorAmbassadorId).eq("is_suspended", false),
+    ]);
+    if (roles.error || profiles.error || !roles.data?.length || !profiles.data?.length)
+      return { ok: false, message: "Choose an active Ambassador." };
+    const { error } = await supabase.from("lead_senior_ambassadors").upsert({
+      lead_id: leadId,
+      senior_ambassador_id: seniorAmbassadorId,
+      selected_by: user.userId,
+      selected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    if (error) return { ok: false, message: "Senior Ambassador could not be saved. Run the latest database migration, then retry." };
+  } else {
+    const { error } = await supabase.from("lead_senior_ambassadors").delete().eq("lead_id", leadId);
+    if (error && !["42P01", "PGRST205"].includes(error.code ?? "")) return { ok: false, message: "Senior Ambassador could not be cleared. Please retry." };
+  }
+  revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/my-ambassador");
+  revalidatePath("/dashboard");
+  return { ok: true, message: seniorAmbassadorId ? "Senior Ambassador saved." : "Senior Ambassador cleared." };
+}
+
 export async function createLeadActivity(formData: FormData) {
   const leadId = String(formData.get("leadId") ?? "");
   const assignmentId = String(formData.get("assignmentId") ?? "");

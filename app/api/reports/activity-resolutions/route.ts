@@ -3,6 +3,27 @@ import { DATE_KEY, istDayRange, istTodayKey } from "@/app/lib/altus-call-utils";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 
 type Person = { id: string; name: string };
+type Resolution = { id: string; name: string; count: number; dailyCounts: Record<string, number> };
+
+async function loadConfiguredResolutions(admin: ReturnType<typeof createAdminClient>) {
+  const { data: mappings, error: mappingsError } = await admin
+    .from("lead_product_resolutions")
+    .select("resolution_id")
+    .eq("is_active", true);
+  if (mappingsError) throw new Error(mappingsError.message);
+
+  const resolutionIds = [...new Set((mappings ?? []).map((mapping) => mapping.resolution_id))];
+  if (!resolutionIds.length) return [] as { id: string; name: string }[];
+
+  const { data: resolutions, error: resolutionsError } = await admin
+    .from("lead_resolutions")
+    .select("id, name")
+    .eq("is_active", true)
+    .in("id", resolutionIds)
+    .order("name");
+  if (resolutionsError) throw new Error(resolutionsError.message);
+  return resolutions ?? [];
+}
 
 function previousIstDay(day: string, amount: number) {
   const date = new Date(`${day}T00:00:00.000Z`);
@@ -14,17 +35,39 @@ function validDay(value: string | null, maximum: string) {
   return Boolean(value && DATE_KEY.test(value) && value <= maximum);
 }
 
+function daysInRange(from: string, to: string) {
+  const days: string[] = [];
+  const cursor = new Date(`${from}T00:00:00.000Z`);
+  const end = new Date(`${to}T00:00:00.000Z`);
+  while (cursor <= end) {
+    days.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
+function istDayKey(value: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
 async function loadActivities(
   admin: ReturnType<typeof createAdminClient>,
   userIds: string[],
   start: Date,
   end: Date,
 ) {
-  const rows: { metadata: unknown }[] = [];
+  const rows: { metadata: unknown; created_at: string }[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await admin
       .from("lead_activities")
-      .select("metadata")
+      .select("metadata, created_at")
       .eq("activity_type", "resolution_updated")
       .in("created_by", userIds)
       .gte("created_at", start.toISOString())
@@ -59,8 +102,14 @@ export async function GET(request: Request) {
       : range === "day_before_yesterday"
         ? previousIstDay(today, 2)
         : today;
-  const from = range === "custom" && validDay(customFrom, today) ? customFrom! : day;
-  const to = range === "custom" && validDay(customTo, today) && customTo! >= from ? customTo! : from;
+  const from = range === "last_7_days"
+    ? previousIstDay(today, 6)
+    : range === "custom" && validDay(customFrom, today) ? customFrom! : day;
+  const to = range === "last_7_days"
+    ? today
+    : range === "custom" && validDay(customTo, today) && customTo! >= from ? customTo! : from;
+  const days = daysInRange(from, to);
+  const emptyDailyCounts = () => Object.fromEntries(days.map((key) => [key, 0]));
   const start = istDayRange(from).start;
   const end = new Date(istDayRange(to).end.getTime());
   const admin = createAdminClient();
@@ -101,11 +150,28 @@ export async function GET(request: Request) {
       : [user.userId];
 
   if (!chosenIds.length) {
-    return Response.json({ ok: true, data: { from, to, people, selectedScope, cards: [], total: 0 } }, { headers: { "Cache-Control": "no-store" } });
+    try {
+      const configuredResolutions = await loadConfiguredResolutions(admin);
+      return Response.json({ ok: true, data: {
+        from,
+        to,
+        people,
+        selectedScope,
+        resolutions: configuredResolutions.map((resolution): Resolution => ({ ...resolution, count: 0, dailyCounts: emptyDailyCounts() })),
+        days,
+        dailyTotals: emptyDailyCounts(),
+        total: 0,
+      } }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      return Response.json({ ok: false, error: error instanceof Error ? error.message : "Activity resolutions could not be loaded." }, { status: 500 });
+    }
   }
 
   try {
-    const activities = await loadActivities(admin, chosenIds, start, end);
+    const [activities, configuredResult] = await Promise.all([
+      loadActivities(admin, chosenIds, start, end),
+      loadConfiguredResolutions(admin),
+    ]);
     const resolutionIds = [...new Set(activities.map((activity) => {
       const metadata = activity.metadata;
       return metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof (metadata as Record<string, unknown>).resolution_id === "string"
@@ -116,15 +182,29 @@ export async function GET(request: Request) {
       ? await admin.from("lead_resolutions").select("id, name").in("id", resolutionIds)
       : { data: [], error: null };
     if (resolutionsError) throw new Error(resolutionsError.message);
-    const names = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
+    const names = new Set((resolutions ?? []).map((resolution) => resolution.id));
     const counts = new Map<string, number>();
+    const dailyCounts = new Map<string, Record<string, number>>();
+    const dailyTotals = emptyDailyCounts();
     for (const activity of activities) {
+      const activityDay = istDayKey(activity.created_at);
+      if (activityDay in dailyTotals) dailyTotals[activityDay] += 1;
       const metadata = activity.metadata as Record<string, unknown> | null;
       const id = typeof metadata?.resolution_id === "string" ? metadata.resolution_id : "";
-      const name = names.get(id);
-      if (name) counts.set(name.trim().toLowerCase().replace(/[,_-]+/g, " ").replace(/\s+/g, " "), (counts.get(name.trim().toLowerCase().replace(/[,_-]+/g, " ").replace(/\s+/g, " ")) ?? 0) + 1);
+      if (names.has(id)) {
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+        const resolutionDays = dailyCounts.get(id) ?? emptyDailyCounts();
+        if (activityDay in resolutionDays) resolutionDays[activityDay] += 1;
+        dailyCounts.set(id, resolutionDays);
+      }
     }
-    return Response.json({ ok: true, data: { from, to, people, selectedScope, counts: Object.fromEntries(counts), total: activities.length } }, { headers: { "Cache-Control": "no-store" } });
+    const resolutionsForReport = configuredResult.map((resolution): Resolution => ({
+      id: resolution.id,
+      name: resolution.name,
+      count: counts.get(resolution.id) ?? 0,
+      dailyCounts: dailyCounts.get(resolution.id) ?? emptyDailyCounts(),
+    }));
+    return Response.json({ ok: true, data: { from, to, people, selectedScope, days, dailyTotals, resolutions: resolutionsForReport, total: activities.length } }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return Response.json({ ok: false, error: error instanceof Error ? error.message : "Resolution report could not be loaded." }, { status: 500 });
   }

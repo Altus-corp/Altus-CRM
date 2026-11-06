@@ -42,6 +42,7 @@ const roleNavigation: DashboardNavItem[] = [
       { label: "All Ambassadors", href: "/dashboard/my-ambassador" },
       { label: "Pre Sales", href: "/dashboard/my-ambassador?stage=pre-sales" },
       { label: "Onboarding Ambassador", href: "/dashboard/my-ambassador?stage=onboarding-ambassador" },
+      { label: "Senior Ambassadors", href: "/dashboard/senior-ambassadors" },
     ],
   },
   { label: "Admin overview", href: "/dashboard/admin", roles: ["admin"] },
@@ -73,6 +74,7 @@ export function getDashboardNavigation(roles: AppRole[]) {
     { label: "Dashboard", href: "/dashboard" },
     { label: "Leads", href: "/dashboard/leads" },
     { label: "Do Not Call", href: "/dashboard/dnd-master" },
+    { label: "My Ambassador", href: "/dashboard/senior-ambassadors" },
   ];
   return [
     ...commonNavigation,

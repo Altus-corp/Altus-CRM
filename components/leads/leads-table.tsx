@@ -9,14 +9,15 @@ import { WhatsappLeadModal } from "./whatsapp-lead-modal";
 import { Columns3, Eye, EyeOff, Mail, MessageCircle, PhoneCall, Pin, PinOff } from "lucide-react";
 import { formatCrmDate } from "@/app/lib/date";
 import { ChannelPartnerSelect } from "./channel-partner-select";
-import { isChannelPartnerColumn } from "@/app/lib/channel-partner";
+import { SeniorAmbassadorSelect } from "./senior-ambassador-select";
+import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { ActivityColumn } from "./activity-column";
 import { addProductToMyLead, saveLeadTablePreferences, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 
 const LeadDetailPanel = dynamic(() => import("./lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
 export type LeadColumn = { id: string; field_key: string; label: string; field_type: string; options?: string[]; computed_from?: string[]; is_visible?: boolean; read_only?: boolean };
-export type LeadRow = { id: string; lead_number: number | null; assignment_id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; last_called_at?: string | null; is_new_inbound?: boolean; created_at: string; custom_data: Record<string, unknown>; channel_partner_name?: string | null; channel_partner_ids?: string[]; channel_partner_options?: { id: string; name: string }[]; channel_partner_editable?: boolean; detail_product_assignments?: LeadRow["product_assignments"]; product: { id: string; code: string; name: string }[] | null; stage: { name: string }[] | null; resolution: { name: string }[] | null; product_assignments: { id: string; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; last_called_at?: string | null; is_new_inbound?: boolean; product: { id: string; code: string; name: string } | null; stage: { name: string } | null; resolution: { name: string } | null }[] };
+export type LeadRow = { id: string; lead_number: number | null; assignment_id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; last_called_at?: string | null; is_new_inbound?: boolean; created_at: string; custom_data: Record<string, unknown>; channel_partner_name?: string | null; channel_partner_ids?: string[]; channel_partner_options?: { id: string; name: string }[]; channel_partner_editable?: boolean; senior_ambassador?: { id: string; name: string } | null; senior_ambassador_options?: { id: string; name: string }[]; senior_ambassador_editable?: boolean; detail_product_assignments?: LeadRow["product_assignments"]; product: { id: string; code: string; name: string }[] | null; stage: { name: string }[] | null; resolution: { name: string }[] | null; product_assignments: { id: string; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; last_called_at?: string | null; is_new_inbound?: boolean; product: { id: string; code: string; name: string } | null; stage: { name: string } | null; resolution: { name: string } | null }[] };
 type EditableConfiguration = { products: { id: string; code: string; name: string }[]; stages: { id: string; product_id: string; name: string }[]; productResolutions: { product_id: string; resolution_id: string; resolution_name: string }[] };
 type Preferences = { order: string[]; widths: Record<string, number>; frozen: string[]; hidden: string[]; layoutVersion?: number };
 
@@ -53,8 +54,9 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
   const [partnerError, setPartnerError] = useState("");
   const [partnerNames, setPartnerNames] = useState<Record<string, string | null>>({});
   const [partnerConfig, setPartnerConfig] = useState<{ selected: Record<string, string[]>; options: { id: string; name: string }[]; editable: boolean }>({ selected: {}, options: [], editable: false });
+  const [seniorConfig, setSeniorConfig] = useState<{ selected: Record<string, { id: string; name: string } | null>; editable: boolean }>({ selected: {}, editable: false });
   const partnerLeadIds = [...new Set(inputLeads.map((lead) => lead.id))].sort().join(",");
-  const hasPartnerColumn = [...columns, ...(detailColumns ?? [])].some(isChannelPartnerColumn);
+  const hasPartnerColumn = [...columns, ...(detailColumns ?? [])].some((column) => isChannelPartnerColumn(column) || isSeniorAmbassadorColumn(column));
   useEffect(() => {
     if (!hasPartnerColumn || !partnerLeadIds) return;
     let active = true;
@@ -62,13 +64,13 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
     const batches = Array.from({ length: Math.ceil(ids.length / 100) }, (_, index) => ids.slice(index * 100, index * 100 + 100));
     void Promise.all(batches.map(async (leadIds) => {
       const response = await fetch("/api/leads/channel-partners", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadIds }), cache: "no-store" });
-      const data = await response.json() as { ok?: boolean; error?: string; warning?: string; partners?: Record<string, string | null>; selected?: Record<string, string[]>; options?: { id: string; name: string }[]; editable?: boolean };
+      const data = await response.json() as { ok?: boolean; error?: string; warning?: string; partners?: Record<string, string | null>; selected?: Record<string, string[]>; options?: { id: string; name: string }[]; editable?: boolean; seniors?: Record<string, { id: string; name: string } | null>; seniorEditable?: boolean };
       if (!response.ok || !data.ok) throw new Error(data.error || "Channel Partners could not be loaded. Refresh and retry.");
       return data;
-    })).then((results) => { if (active) { setPartnerError(results.find((data) => data.warning)?.warning ?? ""); setPartnerNames(Object.assign({}, ...results.map((data) => data.partners ?? {}))); setPartnerConfig({ selected: Object.assign({}, ...results.map((data) => data.selected ?? {})), options: results[0]?.options ?? [], editable: results[0]?.editable ?? false }); } }).catch((error: unknown) => { if (active) setPartnerError(error instanceof Error ? error.message : "Channel Partners could not be loaded."); });
+    })).then((results) => { if (active) { setPartnerError(results.find((data) => data.warning)?.warning ?? ""); setPartnerNames(Object.assign({}, ...results.map((data) => data.partners ?? {}))); setPartnerConfig({ selected: Object.assign({}, ...results.map((data) => data.selected ?? {})), options: results[0]?.options ?? [], editable: results[0]?.editable ?? false }); setSeniorConfig({ selected: Object.assign({}, ...results.map((data) => data.seniors ?? {})), editable: results[0]?.seniorEditable ?? false }); } }).catch((error: unknown) => { if (active) setPartnerError(error instanceof Error ? error.message : "Channel Partners could not be loaded."); });
     return () => { active = false; };
   }, [hasPartnerColumn, partnerLeadIds, inputLeads]);
-  const leads = inputLeads.map((lead) => ({ ...lead, channel_partner_name: partnerNames[lead.id] ?? lead.channel_partner_name, channel_partner_ids: partnerConfig.selected[lead.id] ?? [], channel_partner_options: partnerConfig.options, channel_partner_editable: partnerConfig.editable }));
+  const leads = inputLeads.map((lead) => ({ ...lead, channel_partner_name: partnerNames[lead.id] ?? lead.channel_partner_name, channel_partner_ids: partnerConfig.selected[lead.id] ?? [], channel_partner_options: partnerConfig.options, channel_partner_editable: partnerConfig.editable, senior_ambassador: seniorConfig.selected[lead.id] ?? lead.senior_ambassador ?? null, senior_ambassador_options: partnerConfig.options, senior_ambassador_editable: seniorConfig.editable }));
   const router = useRouter();
   const hasSavedLayout = preferences.layoutVersion === 1 && (preferences.order.length > 0 || preferences.frozen.length > 0 || preferences.hidden.length > 0 || Object.keys(preferences.widths).length > 0);
   const initialLayout = hasSavedLayout ? preferences : defaultLeadLayout(columns);
@@ -162,7 +164,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
       })}</Fragment>;
       })}</tbody>
     </table>{!leads.length && <div className="px-4 py-12 text-center"><p className="text-sm font-bold text-slate-700">No leads yet</p><p className="mt-1 text-xs text-slate-500">New leads will appear here using the columns selected by the admin.</p></div>}</div>}
-    {detailLead && <LeadDetailPanel lead={{ ...detailLead, channel_partner_name: partnerNames[detailLead.id] ?? detailLead.channel_partner_name }} columns={(detailColumns ?? orderedColumns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
+    {detailLead && <LeadDetailPanel lead={{ ...detailLead, channel_partner_name: partnerNames[detailLead.id] ?? detailLead.channel_partner_name, senior_ambassador: seniorConfig.selected[detailLead.id] ?? detailLead.senior_ambassador ?? null }} columns={(detailColumns ?? orderedColumns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
   </section>;
 }
 
@@ -181,6 +183,7 @@ function InlineLeadField({ lead, column, assignedNames, configuration }: { lead:
   const saveResolution = (resolutionId: string, followUpAt?: string, followUpNote?: string) => startTransition(async () => { const formData = new FormData(); formData.set("leadId", lead.id); formData.set("assignmentId", lead.assignment_id); formData.set("resolutionId", resolutionId); if (followUpAt) formData.set("followUpAt", followUpAt); if (followUpNote) formData.set("followUpNote", followUpNote); setSaveError(""); try { await updateLeadResolutionInline(formData); setFollowUpResolutionId(null); router.refresh(); } catch (error) { setSaveError(error instanceof Error ? error.message : "Unable to save this lead."); } });
   if (isActivityColumn(column)) return <ActivityColumn leadId={lead.id} assignmentId={lead.assignment_id} />;
   if (isChannelPartnerColumn(column) && lead.channel_partner_editable) return <ChannelPartnerSelect leadId={lead.id} assignmentId={lead.assignment_id} names={lead.channel_partner_name} options={lead.channel_partner_options ?? []} selectedIds={lead.channel_partner_ids ?? []} onSaved={() => router.refresh()} />;
+  if (isSeniorAmbassadorColumn(column) && lead.senior_ambassador_editable) return <SeniorAmbassadorSelect leadId={lead.id} assignmentId={lead.assignment_id} selected={lead.senior_ambassador} options={lead.senior_ambassador_options ?? []} onSaved={() => router.refresh()} />;
   if (!configuration) return <LeadFieldValue lead={lead} column={column} assignedNames={assignedNames} />;
   if (column.field_key === "product") return <><ProductAssignmentsMenu lead={lead} products={configuration.products} onAdd={() => setAddingProduct(true)} />{addingProduct && <AddProductModal lead={lead} products={configuration.products} onClose={() => setAddingProduct(false)} />}</>;
   if ((column.field_key === "stage" || column.field_key === "call_resolution") && lead.product_assignments.length > 1) return <ProductScopedMenu key={lead.product_assignments.map((item) => `${item.id}:${item.stage?.name ?? ""}:${item.resolution?.name ?? ""}`).join("|")} lead={lead} kind={column.field_key === "stage" ? "stage" : "resolution"} configuration={configuration} />;
@@ -350,6 +353,7 @@ function LeadFieldValue({ lead, column, assignedNames }: { lead: LeadRow; column
 
 function valueFor(lead: LeadRow, column: LeadColumn, assignedNames: Record<string, string>) {
   if (isChannelPartnerColumn(column)) return lead.channel_partner_name || "—";
+  if (isSeniorAmbassadorColumn(column)) return lead.senior_ambassador?.name || "—";
   const computedValue = column.computed_from?.length
     ? column.computed_from.map((field) => field === "first_name" ? lead.first_name : field === "last_name" ? lead.last_name : field === "email" ? lead.email : field === "phone" ? lead.phone : lead.custom_data?.[field]).filter((part): part is string | number => typeof part === "string" || typeof part === "number").join(" ")
     : undefined;
