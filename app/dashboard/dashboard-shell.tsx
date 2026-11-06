@@ -146,15 +146,15 @@ function DoNotCallNavigation({ item, pathname, activeHref, isAdmin }: { item: Da
   );
 }
 
-function AmbassadorNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
-  const children = isAdmin ? item.children ?? [] : [];
+function AmbassadorNavigation({ item, pathname, activeHref }: { item: DashboardNavItem; pathname: string; activeHref: string }) {
+  const children = item.children ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
   if (!children.length) {
     const isActive = pathname === item.href;
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}><span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Ambassador" /></span>{item.label}</Link>;
   }
 
-  const isCurrentSection = pathname === item.href;
+  const isCurrentSection = pathname === item.href || children.some((child) => child.href === pathname);
   const open = isOpen ?? isCurrentSection;
   return <div>
     <div className={`flex min-h-9 items-center rounded-[12px] transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
@@ -218,7 +218,7 @@ export function DashboardShell({
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
             if (item.href === "/dashboard/leads" && isAdmin) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}`} isAdmin={isAdmin} />;
             if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}`} isAdmin={isAdmin} />;
-            if (item.href === "/dashboard/my-ambassador" && item.label === "Ambassador") return <AmbassadorNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("stage") ? `?stage=${searchParams.get("stage")}` : ""}`} isAdmin={isAdmin} />;
+            if ((item.href === "/dashboard/my-ambassador" && item.label === "Ambassador") || (item.href === "/dashboard/senior-ambassadors" && item.label === "My Ambassador")) return <AmbassadorNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("stage") ? `?stage=${searchParams.get("stage")}` : ""}`} />;
 
             const isActive = pathname === item.href;
 

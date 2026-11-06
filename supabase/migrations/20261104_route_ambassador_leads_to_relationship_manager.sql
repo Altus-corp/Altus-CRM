@@ -6,7 +6,7 @@ create table if not exists public.ambassador_relationship_managers (
   crm_user_id uuid not null references auth.users(id) on delete restrict,
   assigned_by uuid references auth.users(id) on delete set null,
   updated_at timestamptz not null default now(),
-  created_at timestamptz not null default now()Good you had done great should we proceed
+  created_at timestamptz not null default now()
 );
 
 alter table public.ambassador_relationship_managers enable row level security;

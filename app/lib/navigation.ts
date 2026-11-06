@@ -74,7 +74,14 @@ export function getDashboardNavigation(roles: AppRole[]) {
     { label: "Dashboard", href: "/dashboard" },
     { label: "Leads", href: "/dashboard/leads" },
     { label: "Do Not Call", href: "/dashboard/dnd-master" },
-    { label: "My Ambassador", href: "/dashboard/senior-ambassadors" },
+    {
+      label: "My Ambassador",
+      href: "/dashboard/senior-ambassadors",
+      children: [
+        { label: "My Ambassadors", href: "/dashboard/senior-ambassadors" },
+        { label: "Ambassador Leads", href: "/dashboard/ambassador-leads" },
+      ],
+    },
   ];
   return [
     ...commonNavigation,
