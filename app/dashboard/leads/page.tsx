@@ -35,7 +35,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const selectedAssigneeId = showTeamLeads && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.assignee ?? "")
     ? params.assignee!
     : null;
-  const selectedWorkspaceView = params.workspace === "focused" ? "focused" as const : "master" as const;
+  const selectedWorkspaceView = params.workspace === "focused" ? "focused" as const : params.workspace === "ambassador" ? "ambassador" as const : "master" as const;
   const ambassadorWorkspace = isAmbassadorWorkspace(user.roles);
   const sharedConfigPromise = getLeadSharedConfig();
   const partnerLinksResult = ambassadorWorkspace
@@ -49,8 +49,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   if (selectedAssigneeId) {
     leadsPromise = leadsPromise
       .eq("assignments.assigned_to", selectedAssigneeId)
-      .eq("assignments.is_active", true)
-      .eq("assignments.is_closed", false);
+      .eq("assignments.is_active", true);
+    if (selectedWorkspaceView === "ambassador") leadsPromise = leadsPromise.eq("assignments.is_ambassador", true);
+    else leadsPromise = leadsPromise.eq("assignments.is_closed", false);
     if (selectedWorkspaceView === "focused") leadsPromise = leadsPromise.eq("assignments.focused_on", indiaToday());
   }
   if (ambassadorWorkspace && partnerLeadIds.length)
@@ -107,7 +108,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const normalizedLeads = (leads ?? []).slice(0, pageSize).flatMap((lead) => {
     // Do Not Call work is deliberately kept out of normal Lead Master views.
     // A lead can still be visible here through any other active product assignment.
-    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace || (!item.is_ambassador && !isDoNotCallResolution(item.resolution)));
+    const includeTeamAmbassadors = showTeamLeads && selectedWorkspaceView === "ambassador";
+    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace ? true : includeTeamAmbassadors ? item.is_ambassador : (!item.is_ambassador && !isDoNotCallResolution(item.resolution)));
     const assignment = assignments[0];
     if (!assignment) return [];
     return [{
@@ -166,7 +168,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   return <><section className="mx-auto max-w-7xl" aria-label="Leads"><LeadsTable columns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} /></section>{pager}</>;
 }
 
-function LeadsPager({ page, hasNext, view, team, assignee, workspace }: { page: number; hasNext: boolean; view?: string; team?: boolean; assignee?: string | null; workspace?: "master" | "focused" }) {
+function LeadsPager({ page, hasNext, view, team, assignee, workspace }: { page: number; hasNext: boolean; view?: string; team?: boolean; assignee?: string | null; workspace?: "master" | "focused" | "ambassador" }) {
   const href = (nextPage: number) => {
     const query = new URLSearchParams({ page: String(nextPage) });
     if (view) query.set("view", view);
