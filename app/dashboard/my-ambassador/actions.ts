@@ -15,6 +15,10 @@ type AltusCorpExternalAmbassador = {
   status?: string;
   referralFeePercent?: number | string | null;
   agreementDate?: string | null;
+  agreementAcceptedAt?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  city?: string | null;
   entityName?: string | null;
   entityType?: string | null;
   legalName?: string | null;
@@ -23,6 +27,11 @@ type AltusCorpExternalAmbassador = {
   email?: string | null;
   contactNumber?: string | null;
   address?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  landmark?: string | null;
   pan?: string | null;
   gstin?: string | null;
   bank?: {
@@ -33,7 +42,15 @@ type AltusCorpExternalAmbassador = {
     invoiceEmail?: string | null;
   } | null;
   kyc?: {
+    aadhaarNumber?: string | null;
     aadhaarOrGovId?: string | null;
+    documentsUploaded?: {
+      cancelledCheque?: boolean | null;
+      selfie?: boolean | null;
+      panCopy?: boolean | null;
+      kycIdProof?: boolean | null;
+      gstCertificate?: boolean | null;
+    } | null;
     hasCancelledCheque?: boolean | null;
     hasPanCopy?: boolean | null;
     hasKycIdProof?: boolean | null;
@@ -88,6 +105,10 @@ function mask(value: unknown, visible = 4) {
   return text.length > visible ? `${"•".repeat(Math.max(4, text.length - visible))}${text.slice(-visible)}` : text;
 }
 
+function yesNo(value: boolean | null | undefined) {
+  return value === true ? "Yes" : value === false ? "No" : "";
+}
+
 function ambassadorFormMessage(record: AltusCorpExternalAmbassador) {
   // Do not copy raw bank-account numbers or government-ID values into the
   // sales workspace. The source API remains the authoritative KYC record.
@@ -102,11 +123,20 @@ function ambassadorFormMessage(record: AltusCorpExternalAmbassador) {
     ["Email", cleanText(record.email, 254)],
     ["Referral fee percent", cleanText(record.referralFeePercent, 40)],
     ["Agreement date", cleanText(record.agreementDate, 120)],
+    ["Agreement accepted at", cleanText(record.agreementAcceptedAt, 120)],
+    ["First name", cleanText(record.firstName, 120)],
+    ["Last name", cleanText(record.lastName, 120)],
+    ["City", cleanText(record.city, 160)],
     ["Entity name", cleanText(record.entityName, 240)],
     ["Entity type", cleanText(record.entityType, 120)],
     ["Legal name", mask(record.legalName)],
     ["Designation", cleanText(record.designation, 160)],
     ["Address", cleanText(record.address, 2000)],
+    ["Address line 1", cleanText(record.addressLine1, 600)],
+    ["Address line 2", cleanText(record.addressLine2, 600)],
+    ["State", cleanText(record.state, 160)],
+    ["Postal code", cleanText(record.postalCode, 40)],
+    ["Landmark", cleanText(record.landmark, 400)],
     ["PAN", mask(record.pan)],
     ["GSTIN", mask(record.gstin)],
     ["Bank", cleanText(record.bank?.bankName, 160)],
@@ -114,11 +144,12 @@ function ambassadorFormMessage(record: AltusCorpExternalAmbassador) {
     ["Account number", mask(record.bank?.accountNumber)],
     ["IFSC", mask(record.bank?.ifscCode)],
     ["Invoice email", cleanText(record.bank?.invoiceEmail, 254)],
-    ["Cancelled cheque", String(Boolean(record.kyc?.hasCancelledCheque))],
-    ["PAN copy", String(Boolean(record.kyc?.hasPanCopy))],
-    ["KYC ID proof", String(Boolean(record.kyc?.hasKycIdProof))],
-    ["Government ID", mask(record.kyc?.aadhaarOrGovId)],
-    ["GST certificate", String(Boolean(record.kyc?.hasGstCertificate))],
+    ["Cancelled cheque", yesNo(record.kyc?.documentsUploaded?.cancelledCheque ?? record.kyc?.hasCancelledCheque)],
+    ["Selfie uploaded", yesNo(record.kyc?.documentsUploaded?.selfie)],
+    ["PAN copy", yesNo(record.kyc?.documentsUploaded?.panCopy ?? record.kyc?.hasPanCopy)],
+    ["KYC ID proof", yesNo(record.kyc?.documentsUploaded?.kycIdProof ?? record.kyc?.hasKycIdProof)],
+    ["Government ID / Aadhaar", mask(record.kyc?.aadhaarNumber ?? record.kyc?.aadhaarOrGovId)],
+    ["GST certificate", yesNo(record.kyc?.documentsUploaded?.gstCertificate ?? record.kyc?.hasGstCertificate)],
     ["Altus signatory", cleanText(record.altusSignatory?.name, 240)],
     ["Signatory designation", cleanText(record.altusSignatory?.designation, 160)],
     ["Signed at", cleanText(record.altusSignatory?.signedAt, 120)],
@@ -241,7 +272,11 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
     for (const record of unique) {
       const externalId = cleanText(record.id, 120);
       const phone = normalizePhone(record.contactNumber);
-      const names = splitName(record.ambassadorName || record.entityName);
+      const fallbackNames = splitName(record.ambassadorName || record.entityName);
+      const names = {
+        firstName: cleanText(record.firstName, 120) || fallbackNames.firstName,
+        lastName: cleanText(record.lastName, 120) || fallbackNames.lastName,
+      };
       if (!phone || !names.firstName) { skipped += 1; if (skipReasons.length < 3) skipReasons.push("A source record is missing a valid name or 10-digit Cell Number."); continue; }
       const signed = record.hasSignedPdf === true;
       // A matching Cell Number is the CRM identity for an Ambassador. Prefer
@@ -250,11 +285,9 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       const mappedLead = mapped.get(externalId) ? leadById.get(mapped.get(externalId)!) : undefined;
       const phoneMatchedLead = leadByPhone.get(phone);
       const priorLead = phoneMatchedLead ?? mappedLead;
-      const sourceState = priorLead?.custom_data && typeof priorLead.custom_data.altuscorp_ambassador === "object" && priorLead.custom_data.altuscorp_ambassador !== null
-        ? priorLead.custom_data.altuscorp_ambassador as Record<string, unknown>
-        : null;
-      // Do not recreate an API record deliberately removed by an admin.
-      if (sourceState?.locally_deleted_at) { skipped += 1; if (skipReasons.length < 3) skipReasons.push("A previously deleted Ambassador record was intentionally kept suppressed."); continue; }
+      // An admin can remove the Ambassador product assignment without losing
+      // the CRM lead. A later source sync is allowed to restore that missing
+      // assignment, which also makes the external sync safe to test.
       const owner = priorLead ? (assignmentsByLead.get(priorLead.id) ?? [])
         .filter((item) => item.assigned_to && item.is_active)
         .sort((a, b) => Number(b.product_id === product.id) - Number(a.product_id === product.id) || String(b.assigned_at ?? "").localeCompare(String(a.assigned_at ?? "")))[0]?.assigned_to ?? priorLead.assigned_to ?? null : null;

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/app/lib/supabase/server";
 import { changePassword } from "./actions";
+import { PasswordField } from "@/components/auth/password-field";
+import { AuthSubmitButton } from "@/components/auth/auth-submit-button";
 
 export const instant = false;
 
@@ -34,9 +36,9 @@ export default async function ChangePasswordPage({ searchParams }: ChangePasswor
           <p className="mt-2 text-sm font-medium text-slate-500">For security, change the temporary password provided by your administrator.</p>
         </div>
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{errors[error] ?? "Unable to update your password."}</p>}
-        <label className="block text-sm font-bold text-slate-700">New password<input name="password" type="password" required minLength={12} autoComplete="new-password" className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
-        <label className="block text-sm font-bold text-slate-700">Confirm new password<input name="confirmPassword" type="password" required minLength={12} autoComplete="new-password" className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
-        <button className="w-full rounded-lg bg-[#d90000] py-3 text-sm font-bold text-white">Save password and continue</button>
+        <label className="block text-sm font-bold text-slate-700">New password<PasswordField name="password" required minLength={12} autoComplete="new-password" className="h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
+        <label className="block text-sm font-bold text-slate-700">Confirm new password<PasswordField name="confirmPassword" required minLength={12} autoComplete="new-password" className="h-11 w-full rounded-lg border border-slate-200 px-3 outline-none focus:border-red-500" /></label>
+        <AuthSubmitButton idleLabel="Save password and continue" pendingLabel="Saving password..." />
       </form>
     </main>
   );

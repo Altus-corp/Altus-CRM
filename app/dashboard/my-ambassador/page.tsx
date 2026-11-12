@@ -147,6 +147,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     lastName: assignment.lead.last_name ?? "",
     email: assignment.lead.email,
     createdAt: assignment.lead.created_at,
+    customData: assignment.lead.custom_data ?? {},
     product: assignment.product,
     stage: assignment.stage,
     cellNumber: assignment.lead.phone ?? "",

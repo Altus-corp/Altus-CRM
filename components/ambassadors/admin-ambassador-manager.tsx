@@ -17,6 +17,7 @@ export type AmbassadorRecord = AmbassadorInput & {
   leadNumber: number | null;
   email: string | null;
   createdAt: string;
+  customData: Record<string, unknown>;
   product: { id: string; code: string; name: string } | null;
   stage: { name: string } | null;
 };
@@ -118,7 +119,7 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
     focused_on: null,
     next_follow_up_at: null,
     created_at: row.createdAt,
-    custom_data: {},
+    custom_data: row.customData,
     product: row.product ? [row.product] : null,
     stage: row.stage ? [row.stage] : null,
     resolution: null,
