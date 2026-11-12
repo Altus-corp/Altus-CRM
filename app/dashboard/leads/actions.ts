@@ -34,6 +34,7 @@ import {
   sourceRecordValue,
 } from "@/app/lib/external-lead-sources";
 import { indiaToday, scheduledIndiaDate } from "@/app/lib/lead-event-schedule";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 type ImportResult = {
   ok: boolean;
@@ -2180,19 +2181,8 @@ export async function manuallyAssignLeads(formData: FormData) {
   const supabase = createAdminClient();
   let teamMemberIds = new Set<string>();
   if (!isAdmin) {
-    const { data: teams, error: teamsError } = await supabase
-      .from("crm_teams")
-      .select("id")
-      .eq("manager_id", userId);
-    if (teamsError) throw new Error("Unable to load your sales team.");
-    const teamIds = (teams ?? []).map((team) => team.id);
-    if (!teamIds.length) throw new Error("You do not have a configured sales team.");
-    const { data: memberships, error: membershipsError } = await supabase
-      .from("crm_team_members")
-      .select("user_id")
-      .in("team_id", teamIds);
-    if (membershipsError) throw new Error("Unable to load your sales team.");
-    teamMemberIds = new Set((memberships ?? []).map((membership) => membership.user_id));
+    teamMemberIds = new Set(await getSalesManagerTeamMemberIds(userId));
+    if (!teamMemberIds.size) throw new Error("You do not have a configured sales team.");
     if (!teamMemberIds.has(assigneeId)) {
       throw new Error("You can assign leads only to a member of your sales team.");
     }

@@ -9,7 +9,7 @@ export const LEAD_ACTIVITY_OPTIONS = [
   { value: "online_meeting", label: "Online meeting" },
 ] as const;
 
-export function ActivityColumn({ leadId, assignmentId }: { leadId: string; assignmentId: string }) {
+export function ActivityColumn({ leadId, assignmentId, readOnly = false }: { leadId: string; assignmentId: string; readOnly?: boolean }) {
   const [selected, setSelected] = useState("");
   const [note, setNote] = useState("");
   const [message, setMessage] = useState("");
@@ -42,6 +42,8 @@ export function ActivityColumn({ leadId, assignmentId }: { leadId: string; assig
       }
     });
   }
+
+  if (readOnly) return <span className="text-xs font-semibold text-slate-400">View in task details</span>;
 
   return <>
     <div className="relative min-w-[170px]"><select aria-label="Add lead activity" value={selected} disabled={isPending} onChange={(event) => { setSelected(event.target.value); setNote(""); setMessage(""); }} className="h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50"><option value="">Add activity</option>{LEAD_ACTIVITY_OPTIONS.map((activity) => <option key={activity.value} value={activity.value}>{activity.label}</option>)}</select></div>

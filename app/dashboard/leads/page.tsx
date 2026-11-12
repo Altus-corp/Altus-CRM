@@ -9,6 +9,7 @@ import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import { indiaToday } from "@/app/lib/lead-event-schedule";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 export const instant = false;
 
@@ -18,7 +19,7 @@ const isDoNotCallResolution = (resolution: unknown) => {
   return ["dnd", "not interested", "lost", "i will get back", "wrong number", "old graduate", "abandoned"].includes(name);
 };
 
-export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ page?: string; view?: string; assignee?: string; workspace?: string; team?: string }> }) {
+export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ page?: string; view?: string; assignee?: string; member?: string; workspace?: string; team?: string }> }) {
   await connection();
   const params = await searchParams;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
@@ -28,6 +29,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const supabase = await createClient();
   const isAdmin = user.roles.includes("admin");
   const isSalesManager = user.roles.includes("sales_manager");
+  const teamAdmin = isSalesManager && !isAdmin ? createAdminClient() : null;
+  const managerMemberIds = teamAdmin ? await getSalesManagerTeamMemberIds(user.userId) : [];
+  const requestedManagerMemberId = params.member ?? "";
+  const selectedManagerMemberId = isSalesManager && !isAdmin && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedManagerMemberId) && managerMemberIds.includes(requestedManagerMemberId)
+    ? requestedManagerMemberId
+    : null;
+  const isViewingManagerTeamMember = Boolean(selectedManagerMemberId);
   const showTeamLeads = isAdmin && params.team === "1";
   // Admins can inspect a CRM user's queue without changing that user's own
   // workspace. Keep this in the URL so pagination and a shared link keep the
@@ -44,15 +52,17 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const partnerLinksUnavailable = ambassadorWorkspace && Boolean(partnerLinksResult.error);
   const partnerFocusByLead = new Map((partnerLinksResult.data ?? []).map((link) => [link.lead_id, link.focused_on]));
   const partnerLeadIds = [...partnerFocusByLead.keys()];
-  const assignmentsJoin = selectedAssigneeId ? "!inner" : "";
-  let leadsPromise = supabase.from("leads").select(`id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments${assignmentsJoin}(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))`).order("created_at", { ascending: false }).range(offset, offset + pageSize);
-  if (selectedAssigneeId) {
+  const selectedOwnerId = selectedAssigneeId ?? selectedManagerMemberId;
+  const assignmentsJoin = selectedOwnerId ? "!inner" : "";
+  const leadDataClient = isViewingManagerTeamMember ? teamAdmin! : supabase;
+  let leadsPromise = leadDataClient.from("leads").select(`id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments${assignmentsJoin}(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))`).order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  if (selectedOwnerId) {
     leadsPromise = leadsPromise
-      .eq("assignments.assigned_to", selectedAssigneeId)
+      .eq("assignments.assigned_to", selectedOwnerId)
       .eq("assignments.is_active", true);
     if (selectedWorkspaceView === "ambassador") leadsPromise = leadsPromise.eq("assignments.is_ambassador", true);
     else leadsPromise = leadsPromise.eq("assignments.is_closed", false);
-    if (selectedWorkspaceView === "focused") leadsPromise = leadsPromise.eq("assignments.focused_on", indiaToday());
+    if (selectedWorkspaceView === "focused" || (isViewingManagerTeamMember && params.view !== "master")) leadsPromise = leadsPromise.eq("assignments.focused_on", indiaToday());
   }
   if (ambassadorWorkspace && partnerLeadIds.length)
     leadsPromise = leadsPromise.or(`ambassador_imported_by.eq.${user.userId},id.in.(${partnerLeadIds.join(",")})`);
@@ -72,7 +82,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const { data: tablePreferences } = preferencesResult;
   const leadIds = (leads ?? []).map((lead) => lead.id);
   const { data: callActivities } = leadIds.length
-    ? await supabase.from("lead_activities").select("lead_id, lead_product_assignment_id, created_at").eq("activity_type", "call").in("lead_id", leadIds).order("created_at", { ascending: false }).limit(2000)
+    ? await leadDataClient.from("lead_activities").select("lead_id, lead_product_assignment_id, created_at").eq("activity_type", "call").in("lead_id", leadIds).order("created_at", { ascending: false }).limit(2000)
     : { data: [] as { lead_id: string; lead_product_assignment_id: string | null; created_at: string }[] };
   const lastCalledByAssignment = new Map<string, string>();
   const lastCalledByLead = new Map<string, string>();
@@ -86,17 +96,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const qualifiedLeadsCount = qualifiedResult?.count ?? 0;
   const leadsCount = leadsCountResult?.count ?? 0;
   const assignedUserIds = [...new Set((leads ?? []).flatMap((lead) => (Array.isArray(lead.assignments) ? lead.assignments : []).map((assignment) => assignment.assigned_to)).filter((id): id is string => Boolean(id)))];
-  const teamAdmin = isSalesManager ? createAdminClient() : null;
-  const managerTeamsResult = teamAdmin
-    ? await teamAdmin.from("crm_teams").select("id").eq("manager_id", user.userId)
-    : null;
-  const managerTeamIds = (managerTeamsResult?.data ?? []).map((team) => team.id);
-  const managerMembersResult = teamAdmin && managerTeamIds.length
-    ? await teamAdmin.from("crm_team_members").select("user_id").in("team_id", managerTeamIds)
-    : null;
-  const managerMemberIds = [...new Set((managerMembersResult?.data ?? []).map((member) => member.user_id))];
   const [assignedProfilesResult, managerProfilesResult] = await Promise.all([
-    !isAdmin && assignedUserIds.length ? supabase.from("profiles").select("id, first_name, last_name, full_name").in("id", assignedUserIds) : Promise.resolve(null),
+    !isAdmin && assignedUserIds.length ? leadDataClient.from("profiles").select("id, first_name, last_name, full_name").in("id", assignedUserIds) : Promise.resolve(null),
     teamAdmin && managerMemberIds.length ? teamAdmin.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", managerMemberIds).eq("is_suspended", false) : Promise.resolve(null),
   ]);
   const assignmentProfiles = profilesResult?.data ?? assignedProfilesResult?.data ?? [];
@@ -155,7 +156,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const productResolutions = (resolutionMappings ?? []).map((mapping) => ({ product_id: mapping.product_id, resolution_id: mapping.resolution_id, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
 
   const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [], hidden: tablePreferences?.hidden_column_keys ?? [], layoutVersion: tablePreferences?.layout_version ?? 0 };
-  const pager = <LeadsPager page={page} hasNext={hasNextPage} view={params.view} team={showTeamLeads} assignee={selectedAssigneeId} workspace={selectedAssigneeId ? selectedWorkspaceView : undefined} />;
+  const pager = <LeadsPager page={page} hasNext={hasNextPage} view={params.view} team={showTeamLeads} assignee={selectedAssigneeId} member={selectedManagerMemberId} workspace={selectedAssigneeId ? selectedWorkspaceView : undefined} />;
   if (ambassadorWorkspace) {
     const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === indiaToday()).map((lead) => lead.assignment_id);
     return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} />{partnerLinksUnavailable && <p className="mx-auto mt-3 max-w-7xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Channel Partner leads will appear after the latest Channel Partner migration is run in Supabase.</p>}{pager}</>;
@@ -164,16 +165,17 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date());
   const todayKey = [todayParts.find((part) => part.type === "year")?.value, todayParts.find((part) => part.type === "month")?.value, todayParts.find((part) => part.type === "day")?.value].join("-");
   const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === todayKey).map((lead) => lead.assignment_id);
-  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} isSalesManager={isSalesManager} teamMembers={managerTeamMembers} />{pager}</>;
+  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} isSalesManager={isSalesManager} teamMembers={managerTeamMembers} selectedTeamMemberId={selectedManagerMemberId} />{pager}</>;
   return <><section className="mx-auto max-w-7xl" aria-label="Leads"><LeadsTable columns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} /></section>{pager}</>;
 }
 
-function LeadsPager({ page, hasNext, view, team, assignee, workspace }: { page: number; hasNext: boolean; view?: string; team?: boolean; assignee?: string | null; workspace?: "master" | "focused" | "ambassador" }) {
+function LeadsPager({ page, hasNext, view, team, assignee, member, workspace }: { page: number; hasNext: boolean; view?: string; team?: boolean; assignee?: string | null; member?: string | null; workspace?: "master" | "focused" | "ambassador" }) {
   const href = (nextPage: number) => {
     const query = new URLSearchParams({ page: String(nextPage) });
     if (view) query.set("view", view);
     if (team) query.set("team", "1");
     if (assignee) query.set("assignee", assignee);
+    if (member) query.set("member", member);
     if (workspace) query.set("workspace", workspace);
     return `/dashboard/leads?${query.toString()}`;
   };

@@ -1,13 +1,28 @@
 import { requireUser } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
+import { createAdminClient } from "@/app/lib/supabase/admin";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 export async function GET(request: Request, context: { params: Promise<{ leadId: string }> }) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const { leadId } = await context.params;
     const assignmentId = new URL(request.url).searchParams.get("assignmentId");
     if (!assignmentId) return Response.json({ ok: false, error: "Product assignment is required." }, { status: 400 });
-    const supabase = await createClient();
+    let supabase = await createClient();
+    if (user.roles.includes("sales_manager") && !user.roles.includes("admin")) {
+      const admin = createAdminClient();
+      const allowedOwnerIds = [user.userId, ...(await getSalesManagerTeamMemberIds(user.userId))];
+      const { data: assignment, error: assignmentError } = await admin
+        .from("lead_product_assignments")
+        .select("id")
+        .eq("id", assignmentId)
+        .eq("lead_id", leadId)
+        .in("assigned_to", allowedOwnerIds)
+        .maybeSingle();
+      if (assignmentError || !assignment) return Response.json({ ok: false, error: "This lead is not assigned to you or your team." }, { status: 403 });
+      supabase = admin;
+    }
     const { data, error } = await supabase
       .from("lead_activities")
       .select("id, activity_type, note, follow_up_at, created_at, metadata, created_by")

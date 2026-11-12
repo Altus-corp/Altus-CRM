@@ -87,8 +87,12 @@ function ProductsNavigation({ products, pathname }: { products: DashboardShellPr
   );
 }
 
-function LeadsNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
-  const children = item.children?.filter((child) => child.href !== "/dashboard/leads?team=1" || isAdmin) ?? [];
+function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean; isSalesManager: boolean }) {
+  const children = item.children?.filter((child) => {
+    if (child.href === "/dashboard/leads?team=1") return isAdmin;
+    if (child.href === "/dashboard/team-leads") return isSalesManager;
+    return true;
+  }) ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
   if (!children.length) {
     const isActive = pathname === item.href;
@@ -106,8 +110,12 @@ function LeadsNavigation({ item, pathname, activeHref, isAdmin }: { item: Dashbo
   </div>;
 }
 
-function DoNotCallNavigation({ item, pathname, activeHref, isAdmin }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean }) {
-  const children = item.children?.filter((child) => child.href !== "/dashboard/dnd-master?type=abandoned" || isAdmin) ?? [];
+function DoNotCallNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean; isSalesManager: boolean }) {
+  const children = item.children?.filter((child) => {
+    if (child.href === "/dashboard/dnd-master?type=abandoned") return isAdmin;
+    if (child.href === "/dashboard/team-dnd-master") return isSalesManager;
+    return true;
+  }) ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
   if (!children.length) {
     const isActive = pathname === item.href;
@@ -183,6 +191,7 @@ export function DashboardShell({
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const isConfigurationPage = pathname === "/dashboard/lead-settings";
   const isAdmin = roles.includes("admin");
+  const isSalesManager = roles.includes("sales_manager");
   const canUseTemplates = roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager");
   const ambassadorWhatsappNumber = ambassadorOwnerPhone?.replace(/\D/g, "");
   const ambassadorWhatsappHref = ambassadorWhatsappNumber
@@ -216,8 +225,8 @@ export function DashboardShell({
         <nav className="mt-2.5 min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain pr-1" aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
             if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
-            if (item.href === "/dashboard/leads" && isAdmin) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}`} isAdmin={isAdmin} />;
-            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}`} isAdmin={isAdmin} />;
+            if (item.href === "/dashboard/leads" && (isAdmin || isSalesManager)) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={pathname === "/dashboard/leads" ? `${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}` : pathname} isAdmin={isAdmin} isSalesManager={isSalesManager} />;
+            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={pathname === "/dashboard/dnd-master" ? `${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}` : pathname} isAdmin={isAdmin} isSalesManager={isSalesManager} />;
             if ((item.href === "/dashboard/my-ambassador" && item.label === "Ambassador") || (item.href === "/dashboard/senior-ambassadors" && item.label === "My Ambassador")) return <AmbassadorNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("stage") ? `?stage=${searchParams.get("stage")}` : ""}`} />;
 
             const isActive = pathname === item.href;

@@ -20,6 +20,7 @@ const roleNavigation: DashboardNavItem[] = [
     children: [
       { label: "Leads Master", href: "/dashboard/leads" },
       { label: "Team Leads", href: "/dashboard/leads?team=1" },
+      { label: "Team Leads", href: "/dashboard/team-leads" },
     ],
   },
   {
@@ -28,6 +29,7 @@ const roleNavigation: DashboardNavItem[] = [
     roles: ["admin", "sales_manager", "sales_executive", "consultant"],
     children: [
       { label: "Do Not Call Master", href: "/dashboard/dnd-master" },
+      { label: "Team Do Not Call", href: "/dashboard/team-dnd-master" },
       { label: "Old Graduate", href: "/dashboard/old-graduate-master" },
       { label: "Abandoned", href: "/dashboard/dnd-master?type=abandoned" },
     ],

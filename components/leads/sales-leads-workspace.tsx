@@ -30,6 +30,7 @@ export function SalesLeadsWorkspace({
   productResolutions,
   isSalesManager = false,
   teamMembers = [],
+  selectedTeamMemberId = null,
 }: {
   columns: LeadColumn[];
   leads: LeadRow[];
@@ -46,10 +47,11 @@ export function SalesLeadsWorkspace({
   productResolutions: ProductResolution[];
   isSalesManager?: boolean;
   teamMembers?: TeamMember[];
+  selectedTeamMemberId?: string | null;
 }) {
   // Focused Leads is the sales user's starting workspace; Lead Master is the second view.
-  const urlView =
-    useSearchParams().get("view") === "master" ? "master" : "focused";
+  const searchParams = useSearchParams();
+  const urlView = searchParams.get("view") === "master" ? "master" : "focused";
   const [view, setView] = useState<"master" | "focused">(urlView);
   const [syncedUrlView, setSyncedUrlView] = useState(urlView);
   const [addLeadMode, setAddLeadMode] = useState<
@@ -60,6 +62,7 @@ export function SalesLeadsWorkspace({
   const [assigneeId, setAssigneeId] = useState("");
   const [assignmentMessage, setAssignmentMessage] = useState("");
   const [isAssigning, startAssigning] = useTransition();
+  const selectedTeamMember = teamMembers.find((member) => member.id === selectedTeamMemberId) ?? null;
   if (syncedUrlView !== urlView) {
     setSyncedUrlView(urlView);
     setView(urlView);
@@ -69,6 +72,18 @@ export function SalesLeadsWorkspace({
     view === "focused"
       ? leads.filter((lead) => focusedIds.has(lead.assignment_id))
       : leads;
+  const updateTeamView = (memberId: string, nextView = view) => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("page");
+    next.set("view", nextView);
+    if (memberId) next.set("member", memberId);
+    else next.delete("member");
+    router.push(`/dashboard/leads?${next.toString()}`);
+  };
+  const chooseView = (nextView: "master" | "focused") => {
+    setView(nextView);
+    if (selectedTeamMemberId) updateTeamView(selectedTeamMemberId, nextView);
+  };
   const assignSelected = () => {
     if (!assigneeId || !selectedAssignmentIds.length) return;
     const formData = new FormData();
@@ -97,12 +112,12 @@ export function SalesLeadsWorkspace({
               LEADS
             </p>
             <h1 className="mt-0.5 text-[19px] font-extrabold tracking-[-0.04em] text-slate-900">
-              {view === "focused" ? "Focused leads" : "Lead Master"}
+              {selectedTeamMember ? `${selectedTeamMember.name}'s ${view === "focused" ? "Focused Leads" : "Lead Master"}` : view === "focused" ? "Focused leads" : "Lead Master"}
             </h1>
             <p className="mt-1 text-xs text-slate-500">
-              {view === "focused"
-                ? "Leads assigned to you today. Tomorrow they move to Lead Master."
-                : "All leads assigned to you, including leads from earlier days."}
+              {selectedTeamMember
+                ? view === "focused" ? "Viewing this team member's leads assigned today." : "Viewing this team member's active Lead Master."
+                : view === "focused" ? "Leads assigned to you today. Tomorrow they move to Lead Master." : "All leads assigned to you, including leads from earlier days."}
             </p>
           </div>
           <span className="text-xs font-bold text-slate-500">
@@ -112,7 +127,7 @@ export function SalesLeadsWorkspace({
         <div className="mt-3 grid gap-2 sm:grid-cols-2 [&>button:first-child]:order-2 [&>button:last-child]:order-1">
           <button
             type="button"
-            onClick={() => setView("master")}
+            onClick={() => chooseView("master")}
             className={`rounded border px-3 py-2 text-left transition ${view === "master" ? "border-red-200 border-b-2 border-b-red-600 bg-red-50/60" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
           >
             <p className="text-xs font-extrabold text-slate-800">Lead Master</p>
@@ -122,7 +137,7 @@ export function SalesLeadsWorkspace({
           </button>
           <button
             type="button"
-            onClick={() => setView("focused")}
+            onClick={() => chooseView("focused")}
             className={`rounded border px-3 py-2 text-left transition ${view === "focused" ? "border-red-200 border-b-2 border-b-red-600 bg-red-50/60" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
           >
             <p className="text-xs font-extrabold text-slate-800">
@@ -134,7 +149,7 @@ export function SalesLeadsWorkspace({
           </button>
         </div>
       </header>
-      {isSalesManager && (
+      {isSalesManager && !selectedTeamMemberId && (
         <section className="mt-3 rounded-lg border border-red-100 bg-red-50/50 px-4 py-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div><p className="text-sm font-extrabold text-slate-800">Assign selected leads to your team</p><p className="mt-0.5 text-xs text-slate-500">You can delegate only product work currently assigned to you.</p></div>
@@ -155,11 +170,12 @@ export function SalesLeadsWorkspace({
           leads={displayedLeads}
           assignedNames={assignedNames}
           preferences={preferences}
-          editableConfiguration={{ products, stages, productResolutions }}
+          editableConfiguration={selectedTeamMemberId ? undefined : { products, stages, productResolutions }}
+          readOnly={Boolean(selectedTeamMemberId)}
           showHeader={false}
-          onAddLead={() => setAddLeadMode("choice")}
-          selectedIds={isSalesManager ? selectedAssignmentIds : []}
-          onSelectionChange={isSalesManager ? setSelectedAssignmentIds : undefined}
+          onAddLead={selectedTeamMemberId ? undefined : () => setAddLeadMode("choice")}
+          selectedIds={isSalesManager && !selectedTeamMemberId ? selectedAssignmentIds : []}
+          onSelectionChange={isSalesManager && !selectedTeamMemberId ? setSelectedAssignmentIds : undefined}
         />
       </div>
       {addLeadMode === "choice" && (
