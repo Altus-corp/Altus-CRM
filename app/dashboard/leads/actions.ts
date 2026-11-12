@@ -2158,7 +2158,9 @@ export async function createManualLead(
 
 export async function manuallyAssignLeads(formData: FormData) {
   const user = await requireUser();
-  if (!user.roles.includes("admin") && !user.roles.includes("sales_manager"))
+  const isAdmin = user.roles.includes("admin");
+  const isSalesManager = user.roles.includes("sales_manager");
+  if (!isAdmin && !isSalesManager)
     throw new Error("Only an admin or Sales Manager can reassign leads.");
   const { userId } = user;
   const assigneeId = String(formData.get("assigneeId") ?? "");
@@ -2170,7 +2172,31 @@ export async function manuallyAssignLeads(formData: FormData) {
       "Choose a user and one or more product assignments to assign.",
     );
 
-  const supabase = await createClient();
+  // Managers can update ownership only after this action confirms that both
+  // the destination user and every selected assignment belong to their team.
+  // The service client is intentionally used only after those checks because
+  // the normal row policy lets a user update an assignment only while it
+  // remains assigned to them.
+  const supabase = createAdminClient();
+  let teamMemberIds = new Set<string>();
+  if (!isAdmin) {
+    const { data: teams, error: teamsError } = await supabase
+      .from("crm_teams")
+      .select("id")
+      .eq("manager_id", userId);
+    if (teamsError) throw new Error("Unable to load your sales team.");
+    const teamIds = (teams ?? []).map((team) => team.id);
+    if (!teamIds.length) throw new Error("You do not have a configured sales team.");
+    const { data: memberships, error: membershipsError } = await supabase
+      .from("crm_team_members")
+      .select("user_id")
+      .in("team_id", teamIds);
+    if (membershipsError) throw new Error("Unable to load your sales team.");
+    teamMemberIds = new Set((memberships ?? []).map((membership) => membership.user_id));
+    if (!teamMemberIds.has(assigneeId)) {
+      throw new Error("You can assign leads only to a member of your sales team.");
+    }
+  }
   const [
     { data: profile, error: profileError },
     { data: roles, error: rolesError },
@@ -2198,15 +2224,17 @@ export async function manuallyAssignLeads(formData: FormData) {
   const { data: assignments, error: assignmentsError } = await supabase
     .from("lead_product_assignments")
     .select(
-      "id, lead_id, product_id, is_ambassador, product:lead_products(code), stage:lead_stages(name), lead:leads(first_name, last_name)",
+      "id, lead_id, product_id, assigned_to, is_ambassador, product:lead_products(code), stage:lead_stages(name), lead:leads(first_name, last_name)",
     )
     .in("id", assignmentIds);
-  if (assignmentsError || !assignments?.length)
+  if (assignmentsError || !assignments?.length || assignments.length !== assignmentIds.length)
     throw new Error(
       "The selected product assignments are no longer available.",
     );
-  if (!user.roles.includes("admin") && assignments.some((assignment) => assignment.is_ambassador))
+  if (!isAdmin && assignments.some((assignment) => assignment.is_ambassador))
     throw new Error("Only an admin can reassign an Ambassador.");
+  if (!isAdmin && assignments.some((assignment) => assignment.assigned_to !== userId))
+    throw new Error("You can only assign product work that is currently assigned to you.");
   const assignedAt = new Date().toISOString();
   const focusedOn = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -2214,7 +2242,7 @@ export async function manuallyAssignLeads(formData: FormData) {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
-  const { error } = await supabase
+  let assignmentUpdate = supabase
     .from("lead_product_assignments")
     .update({
       assigned_to: assigneeId,
@@ -2225,8 +2253,12 @@ export async function manuallyAssignLeads(formData: FormData) {
     .in(
       "id",
       assignments.map((assignment) => assignment.id),
-    );
-  if (error) throw new Error(error.message);
+    )
+    .select("id");
+  if (!isAdmin) assignmentUpdate = assignmentUpdate.eq("assigned_to", userId);
+  const { data: updatedAssignments, error } = await assignmentUpdate;
+  if (error || updatedAssignments?.length !== assignments.length)
+    throw new Error(error?.message ?? "One or more leads changed before they could be assigned.");
   const assigneeName =
     profile.full_name ||
     [profile.first_name, profile.last_name].filter(Boolean).join(" ") ||

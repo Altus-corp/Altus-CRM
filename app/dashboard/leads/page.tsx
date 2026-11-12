@@ -6,6 +6,7 @@ import { LeadsTable } from "@/components/leads/leads-table";
 import { AdminLeadsMaster } from "@/components/leads/admin-leads-master";
 import { SalesLeadsWorkspace } from "@/components/leads/sales-leads-workspace";
 import { createClient } from "@/app/lib/supabase/server";
+import { createAdminClient } from "@/app/lib/supabase/admin";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import { indiaToday } from "@/app/lib/lead-event-schedule";
 
@@ -26,6 +27,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const user = await requireUser();
   const supabase = await createClient();
   const isAdmin = user.roles.includes("admin");
+  const isSalesManager = user.roles.includes("sales_manager");
   const showTeamLeads = isAdmin && params.team === "1";
   // Admins can inspect a CRM user's queue without changing that user's own
   // workspace. Keep this in the URL so pagination and a shared link keep the
@@ -83,7 +85,19 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const qualifiedLeadsCount = qualifiedResult?.count ?? 0;
   const leadsCount = leadsCountResult?.count ?? 0;
   const assignedUserIds = [...new Set((leads ?? []).flatMap((lead) => (Array.isArray(lead.assignments) ? lead.assignments : []).map((assignment) => assignment.assigned_to)).filter((id): id is string => Boolean(id)))];
-  const assignedProfilesResult = !isAdmin && assignedUserIds.length ? await supabase.from("profiles").select("id, first_name, last_name, full_name").in("id", assignedUserIds) : null;
+  const teamAdmin = isSalesManager ? createAdminClient() : null;
+  const managerTeamsResult = teamAdmin
+    ? await teamAdmin.from("crm_teams").select("id").eq("manager_id", user.userId)
+    : null;
+  const managerTeamIds = (managerTeamsResult?.data ?? []).map((team) => team.id);
+  const managerMembersResult = teamAdmin && managerTeamIds.length
+    ? await teamAdmin.from("crm_team_members").select("user_id").in("team_id", managerTeamIds)
+    : null;
+  const managerMemberIds = [...new Set((managerMembersResult?.data ?? []).map((member) => member.user_id))];
+  const [assignedProfilesResult, managerProfilesResult] = await Promise.all([
+    !isAdmin && assignedUserIds.length ? supabase.from("profiles").select("id, first_name, last_name, full_name").in("id", assignedUserIds) : Promise.resolve(null),
+    teamAdmin && managerMemberIds.length ? teamAdmin.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", managerMemberIds).eq("is_suspended", false) : Promise.resolve(null),
+  ]);
   const assignmentProfiles = profilesResult?.data ?? assignedProfilesResult?.data ?? [];
   const assignmentRoles = rolesResult?.data ?? [];
 
@@ -133,6 +147,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const assignedNames = Object.fromEntries(assignmentProfiles.map((profile) => [profile.id, [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unassigned user"]));
   const eligibleAssigneeIds = new Set(assignmentRoles.map((role) => role.user_id));
   const assignmentUsers = assignmentProfiles.filter((profile) => eligibleAssigneeIds.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
+  const managerTeamMembers = (managerProfilesResult?.data ?? []).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
   const importUsers = assignmentProfiles.map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
   const resolutionNames = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
   const productResolutions = (resolutionMappings ?? []).map((mapping) => ({ product_id: mapping.product_id, resolution_id: mapping.resolution_id, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
@@ -147,7 +162,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date());
   const todayKey = [todayParts.find((part) => part.type === "year")?.value, todayParts.find((part) => part.type === "month")?.value, todayParts.find((part) => part.type === "day")?.value].join("-");
   const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === todayKey).map((lead) => lead.assignment_id);
-  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} />{pager}</>;
+  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} isSalesManager={isSalesManager} teamMembers={managerTeamMembers} />{pager}</>;
   return <><section className="mx-auto max-w-7xl" aria-label="Leads"><LeadsTable columns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} /></section>{pager}</>;
 }
 

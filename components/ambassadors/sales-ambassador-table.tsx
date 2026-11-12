@@ -20,11 +20,13 @@ export type SalesAmbassadorRow = {
   actualDemo: number | null;
   actualProposals: number | null;
   actualSales: number | null;
+  assignedTo: string | null;
+  canEditActualSales: boolean;
 };
 
 const countValue = (value: number | null) => String(value ?? 0);
 
-export function SalesAmbassadorTable({ rows, columns, assignedNames }: { rows: SalesAmbassadorRow[]; columns: LeadColumn[]; assignedNames: Record<string, string> }) {
+export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPerson = false }: { rows: SalesAmbassadorRow[]; columns: LeadColumn[]; assignedNames: Record<string, string>; showSalesPerson?: boolean }) {
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { actualSales: string }>>({});
   const [message, setMessage] = useState("");
@@ -48,7 +50,7 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames }: { rows: S
   });
   const metricTitle: Record<AmbassadorActualMetric, string> = { leads: "Actual Leads", demo: "Actual Demos", proposals: "Actual Proposals" };
 
-  const headers = ["Contact", "Full Name", "Cell Number", "Agreement Status", "Target Lead", "Actual Lead", "Target Demo", "Actual Demo", "Target Proposal", "Actual Proposal", "Target Sales", "Actual Sales", ""];
+  const headers = ["Contact", "Full Name", ...(showSalesPerson ? ["Sales Person"] : []), "Cell Number", "Agreement Status", "Target Lead", "Actual Lead", "Target Demo", "Actual Demo", "Target Proposal", "Actual Proposal", "Target Sales", "Actual Sales", ""];
   return <>
     <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <table className="min-w-[1500px] w-full text-left text-xs">
@@ -58,14 +60,14 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames }: { rows: S
           const contact = row.lead.phone?.replace(/\D/g, "") ?? "";
           return <tr key={row.assignmentId} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("input,button,a")) setDetailLead(row.lead); }} title="Double-click to open Ambassador detail" className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50">
             <td className="px-3 py-3"><div className="flex items-center gap-2">{contact ? <a href={`tel:${contact}`} onClick={(event) => event.stopPropagation()} title="Call" className="text-red-500 hover:text-red-700"><PhoneCall className="h-4 w-4" /></a> : <PhoneCall className="h-4 w-4 text-slate-300" />}{contact ? <a href={`https://wa.me/91${contact.slice(-10)}`} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="WhatsApp" className="text-emerald-500 hover:text-emerald-700"><MessageCircle className="h-4 w-4" /></a> : null}{row.lead.email ? <a href={`mailto:${row.lead.email}`} onClick={(event) => event.stopPropagation()} title="Email" className="text-slate-500 hover:text-slate-700"><Mail className="h-4 w-4" /></a> : null}</div></td>
-            <td className="px-3 py-3 font-extrabold text-slate-800">{[row.lead.first_name, row.lead.last_name].filter(Boolean).join(" ")}</td><td className="px-3 py-3 font-semibold text-slate-600">{row.lead.phone || "—"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.agreementStatus || "—"}</td>
+            <td className="px-3 py-3 font-extrabold text-slate-800">{[row.lead.first_name, row.lead.last_name].filter(Boolean).join(" ")}</td>{showSalesPerson && <td className="px-3 py-3 font-semibold text-slate-600">{row.assignedTo ? assignedNames[row.assignedTo] || "Unavailable user" : "Unassigned"}</td>}<td className="px-3 py-3 font-semibold text-slate-600">{row.lead.phone || "—"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.agreementStatus || "—"}</td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetLeads)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "leads"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View leads counted for this Ambassador">{countValue(row.actualLeads)}</button></td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetDemo)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "demo"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View demo outcomes counted for this Ambassador">{countValue(row.actualDemo)}</button></td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetProposals)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "proposals"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View proposal outcomes counted for this Ambassador">{countValue(row.actualProposals)}</button></td>
-            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetSales)}</td><td className="px-3 py-3"><input aria-label="Actual Sales" value={draft.actualSales} onChange={(event) => change(row, "actualSales", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /></td>
-            <td className="px-3 py-3"><button type="button" disabled={isPending} onClick={() => save(row)} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:opacity-50">Save</button></td>
+            <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetSales)}</td><td className="px-3 py-3">{row.canEditActualSales ? <input aria-label="Actual Sales" value={draft.actualSales} onChange={(event) => change(row, "actualSales", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /> : <span className="font-bold text-slate-700">{countValue(row.actualSales)}</span>}</td>
+            <td className="px-3 py-3">{row.canEditActualSales ? <button type="button" disabled={isPending} onClick={() => save(row)} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:opacity-50">Save</button> : <span className="text-[10px] font-semibold text-slate-400">Team member</span>}</td>
           </tr>;
-        })}{!rows.length && <tr><td colSpan={13} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">No Ambassadors assigned to you yet.</td></tr>}</tbody>
+        })}{!rows.length && <tr><td colSpan={headers.length} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">No Ambassadors assigned to you yet.</td></tr>}</tbody>
       </table>
     </div>
     {message && <p className={`mt-2 text-xs font-bold ${message === "Actuals saved." ? "text-emerald-700" : "text-red-600"}`}>{message}</p>}

@@ -77,6 +77,23 @@ function AmbassadorForm({ value, salesPeople, submitLabel, onCancel, onSubmit }:
   </div>{message && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{message}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onCancel} className="h-9 rounded-lg border border-slate-200 px-4 text-xs font-bold text-slate-600">Cancel</button><button disabled={pending} className="h-9 rounded-lg bg-[#d90000] px-4 text-xs font-extrabold text-white disabled:opacity-60">{pending ? "Saving…" : submitLabel}</button></div></form>;
 }
 
+function AmbassadorDetailsEditor({ record, salesPeople }: { record: AmbassadorRecord; salesPeople: SalesPerson[] }) {
+  const [editing, setEditing] = useState(false);
+  const router = useRouter();
+
+  return <section className="mt-5 rounded-2xl border border-red-100 bg-white p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><h3 className="text-sm font-extrabold text-slate-900">Ambassador management details</h3><p className="mt-1 text-xs text-slate-500">Commission, agreement, targets, notes, contact details, and Sales Person are managed here.</p></div>
+      <button type="button" onClick={() => setEditing((value) => !value)} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 hover:bg-red-50">{editing ? "Cancel" : "Edit Ambassador details"}</button>
+    </div>
+    {editing && <AmbassadorForm value={record} salesPeople={salesPeople} submitLabel="Save Ambassador details" onCancel={() => setEditing(false)} onSubmit={async (input) => {
+      const result = await updateAmbassadorDetails(record.assignmentId, input);
+      if (result.ok) router.refresh();
+      return result;
+    }} />}
+  </section>;
+}
+
 export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assignedNames }: { rows: AmbassadorRecord[]; salesPeople: SalesPerson[]; detailColumns: LeadColumn[]; assignedNames: Record<string, string> }) {
   const [mode, setMode] = useState<"manual" | "bulk" | null>(null); const [editing, setEditing] = useState<AmbassadorRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<AmbassadorRecord | null>(null);
@@ -237,6 +254,6 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
       { label: "Agreement Status", value: detailRecord.agreementStatus || "—" }, { label: "Signed Agreement Link", value: detailRecord.signedAgreementLink || "—" }, { label: "Last Called On", value: formatDate(detailRecord.lastCalledOn || "") },
       { label: "Last Call Notes", value: detailRecord.lastCallNotes || "—" }, { label: "Remark", value: detailRecord.remark || "—" }, { label: "Manan Sir Notes", value: detailRecord.mananSirNotes || "—" },
       { label: "Target Leads", value: detailRecord.targetLeads || "0" }, { label: "Target Demo", value: detailRecord.targetDemo || "0" }, { label: "Target Proposals", value: detailRecord.targetProposals || "0" }, { label: "Target Sales", value: detailRecord.targetSales || "0" },
-    ]} onClose={() => setDetailRecord(null)} />}
+    ]} detailsExtra={<AmbassadorDetailsEditor record={detailRecord} salesPeople={salesPeople} />} initialTab="details" onClose={() => setDetailRecord(null)} />}
   </>;
 }

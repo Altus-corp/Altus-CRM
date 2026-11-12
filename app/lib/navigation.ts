@@ -88,5 +88,14 @@ export function getDashboardNavigation(roles: AppRole[]) {
     ...roleNavigation.filter((item) =>
       !item.roles || item.roles.some((role) => roles.includes(role)),
     ),
-  ];
+  ].map((item) =>
+    item.href === "/dashboard/my-ambassador" && item.label === "Ambassador" && !roles.includes("admin")
+      ? {
+          ...item,
+          children: item.children?.filter(
+            (child) => child.href !== "/dashboard/senior-ambassadors",
+          ),
+        }
+      : item,
+  );
 }

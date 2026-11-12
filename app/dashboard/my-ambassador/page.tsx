@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
+import { createAdminClient } from "@/app/lib/supabase/admin";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import { DndMasterTable, type DndRow } from "@/components/leads/dnd-master-table";
 import type { LeadRow } from "@/components/leads/leads-table";
@@ -31,12 +32,27 @@ const one = <T,>(value: T | T[] | null): T | null => Array.isArray(value) ? valu
 export default async function MyAmbassadorPage({ searchParams }: { searchParams: Promise<{ page?: string; owner?: string; stage?: string }> }) {
   const { userId, roles } = await requireUser();
   const isAdmin = roles.includes("admin");
+  const isSalesManager = !isAdmin && roles.includes("sales_manager");
   const params = await searchParams;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const ownerFilter = params.owner ?? "";
   const stageFilter = params.stage === "pre-sales" || params.stage === "onboarding-ambassador" ? params.stage : "";
   const pageSize = 50;
   const supabase = await createClient();
+  const managerAdmin = isSalesManager ? createAdminClient() : null;
+  const { data: managedTeams, error: managedTeamsError } = managerAdmin
+    ? await managerAdmin.from("crm_teams").select("id").eq("manager_id", userId)
+    : { data: [], error: null };
+  if (managedTeamsError) throw new Error("Unable to load the Sales Manager's teams.");
+  const managedTeamIds = (managedTeams ?? []).map((team) => team.id);
+  const { data: managedMemberships, error: managedMembershipsError } = managerAdmin && managedTeamIds.length
+    ? await managerAdmin.from("crm_team_members").select("user_id").in("team_id", managedTeamIds)
+    : { data: [], error: null };
+  if (managedMembershipsError) throw new Error("Unable to load the Sales Manager's team members.");
+  const visibleOwnerIds = [...new Set([userId, ...(managedMemberships ?? []).map((membership) => membership.user_id)])];
+  const selectedManagerOwnerId = isSalesManager && visibleOwnerIds.includes(ownerFilter) ? ownerFilter : "";
+  const activeOwnerFilter = isSalesManager ? selectedManagerOwnerId : ownerFilter;
+  const ambassadorDataClient = managerAdmin ?? supabase;
   const stageName = stageFilter === "pre-sales" ? "Pre Sales" : stageFilter === "onboarding-ambassador" ? "Onboarding Ambassador" : "";
   const { data: ambassadorProduct } = stageName ? await supabase
     .from("lead_products")
@@ -55,7 +71,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     .eq("name", "Agreement Sent")
     .eq("is_active", true)
     .maybeSingle() : { data: null };
-  let query = supabase.from("lead_product_assignments")
+  let query = ambassadorDataClient.from("lead_product_assignments")
     .select("id, assigned_to, assigned_at, focused_on, next_follow_up_at, ambassador_commission, ambassador_commission_notes, ambassador_priority, ambassador_agreement_status, ambassador_signed_agreement_link, ambassador_last_called_on, ambassador_last_call_notes, ambassador_remark, ambassador_manan_sir_notes, ambassador_target_leads, ambassador_target_demo, ambassador_target_proposals, ambassador_target_sales, ambassador_actual_leads, ambassador_actual_demo, ambassador_actual_proposals, ambassador_actual_sales, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(id, lead_number, first_name, last_name, email, phone, created_at, custom_data)")
     .eq("is_active", true)
     .order("assigned_at", { ascending: false }).order("id").range((page - 1) * pageSize, page * pageSize);
@@ -72,7 +88,9 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     query = query.eq("is_ambassador", true);
     if (selectedStage?.id) query = query.eq("stage_id", selectedStage.id);
   }
-  if (!isAdmin) query = query.eq("assigned_to", userId);
+  if (!isAdmin) query = isSalesManager
+    ? selectedManagerOwnerId ? query.eq("assigned_to", selectedManagerOwnerId) : query.in("assigned_to", visibleOwnerIds)
+    : query.eq("assigned_to", userId);
   else if (ownerFilter === "unassigned") query = query.is("assigned_to", null);
   else if (/^[0-9a-f-]{36}$/i.test(ownerFilter)) query = query.eq("assigned_to", ownerFilter);
   const [result, config] = await Promise.all([query, getLeadSharedConfig()]);
@@ -82,14 +100,15 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
   const leadIds = [...new Set(assignments.flatMap((assignment) => assignment.lead ? [assignment.lead.id] : []))];
   // Load all product work visible to this user for the detail panel, while the
   // table and admin reassignment selection remain scoped to Ambassador work.
-  const { data: detailWork, error: detailError } = leadIds.length ? await supabase
+  const { data: detailWork, error: detailError } = leadIds.length ? await ambassadorDataClient
     .from("lead_product_assignments")
     .select("id, lead_id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name)")
     .in("lead_id", leadIds).order("created_at") : { data: [], error: null };
   if (detailError) throw new Error("Unable to load complete Ambassador product details.");
   const ownerIds = [...new Set(assignments.map((item) => item.assigned_to).filter((id): id is string => Boolean(id)))];
+  const profileIds = isSalesManager ? visibleOwnerIds : ownerIds;
   const [profilesResult, eligibleResult] = await Promise.all([
-    isAdmin ? supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended") : ownerIds.length ? supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", ownerIds) : Promise.resolve({ data: [], error: null }),
+    isAdmin ? supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended") : profileIds.length ? ambassadorDataClient.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", profileIds) : Promise.resolve({ data: [], error: null }),
     isAdmin ? supabase.from("user_roles").select("user_id, role") : Promise.resolve({ data: [], error: null }),
   ]);
   if (profilesResult.error || eligibleResult.error) throw new Error("Unable to load Ambassador owners.");
@@ -102,6 +121,9 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     .filter((person) => eligibleIds.has(person.id))
     .map((person) => ({ id: person.id, name: nameOf(person) }))
     .sort((left, right) => left.name.localeCompare(right.name));
+  const managerOwnerOptions = isSalesManager
+    ? profiles.filter((person) => visibleOwnerIds.includes(person.id) && !person.is_suspended).map((person) => ({ id: person.id, name: nameOf(person) })).sort((left, right) => left.name.localeCompare(right.name))
+    : [];
   const visibleColumns = config.columns.filter((column) => column.is_visible);
   // An Ambassador page must always show who owns the relationship, even if an
   // admin hid Sales Person in the generic Leads configuration.
@@ -169,23 +191,35 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
       targetProposals: assignment.ambassador_target_proposals, targetSales: assignment.ambassador_target_sales,
       actualLeads: assignment.ambassador_actual_leads, actualDemo: assignment.ambassador_actual_demo,
       actualProposals: assignment.ambassador_actual_proposals, actualSales: assignment.ambassador_actual_sales,
+      assignedTo: assignment.assigned_to,
+      canEditActualSales: assignment.assigned_to === userId,
     }];
   });
 
   return <section className="mx-auto max-w-[1500px]">
-    <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{isAdmin ? "Ambassador" : "My Ambassador"}</h1>
-    <p className="mt-1 text-sm text-slate-500">{stageFilter === "pre-sales" ? "Ambassador-product opportunities marked Agreement Sent." : stageFilter === "onboarding-ambassador" ? "Signed or waived Ambassadors currently in onboarding." : isAdmin ? "Completed Ambassador agreements and their CRM owners. Only admins can reassign them." : "Your Ambassadors remain assigned to you. Contact an admin to request reassignment."}</p>
+    <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{isAdmin ? "Ambassador" : isSalesManager ? "My & Team Ambassadors" : "My Ambassador"}</h1>
+    <p className="mt-1 text-sm text-slate-500">{stageFilter === "pre-sales" ? "Ambassador-product opportunities marked Agreement Sent." : stageFilter === "onboarding-ambassador" ? "Signed or waived Ambassadors currently in onboarding." : isAdmin ? "Completed Ambassador agreements and their CRM owners. Only admins can reassign them." : isSalesManager ? "Ambassadors assigned to you and members of your configured sales teams." : "Your Ambassadors remain assigned to you. Contact an admin to request reassignment."}</p>
     {isAdmin && <AmbassadorExternalSync />}
+    {isSalesManager && <form className="mt-4 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white p-3" aria-label="Filter team Ambassadors by sales person">
+      {stageFilter && <input type="hidden" name="stage" value={stageFilter} />}
+      <label className="grid gap-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Sales Person
+        <select name="owner" defaultValue={selectedManagerOwnerId} className="h-9 min-w-56 rounded border border-slate-200 bg-white px-3 text-xs font-bold normal-case tracking-normal text-slate-700 outline-none focus:border-red-400">
+          <option value="">My & team Ambassadors</option>
+          {managerOwnerOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}{owner.id === userId ? " (Me)" : ""}</option>)}
+        </select>
+      </label>
+      <button className="h-9 rounded bg-[#d90000] px-4 text-xs font-extrabold text-white hover:bg-red-700">Apply filter</button>
+    </form>}
     {isAdmin && <nav aria-label="Filter Ambassadors by CRM user" className="mt-3 flex flex-wrap gap-2">
       <Link href={filterHref("")} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${!ownerFilter ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>All Ambassadors</Link>
       {ownerOptions.map((owner) => <Link key={owner.id} href={filterHref(owner.id)} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${ownerFilter === owner.id ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{owner.name}</Link>)}
       <Link href={filterHref("unassigned")} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${ownerFilter === "unassigned" ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>Unassigned</Link>
     </nav>}
-    {isAdmin ? <AdminAmbassadorManager rows={adminRecords} salesPeople={ownerOptions} detailColumns={config.columns} assignedNames={assignedNames} /> : <SalesAmbassadorTable rows={salesRows} columns={config.columns} assignedNames={assignedNames} />}
+    {isAdmin ? <AdminAmbassadorManager rows={adminRecords} salesPeople={ownerOptions} detailColumns={config.columns} assignedNames={assignedNames} /> : <SalesAmbassadorTable rows={salesRows} columns={config.columns} assignedNames={assignedNames} showSalesPerson={isSalesManager} />}
     <nav aria-label="Ambassador pages" className="mt-4 flex items-center justify-end gap-3 text-sm">
       <span className="mr-auto text-slate-500">Page {page}</span>
-      {page > 1 && <Link href={filterHref(ownerFilter, page - 1)} className="font-bold text-red-700">Previous</Link>}
-      {(result.data?.length ?? 0) > pageSize && <Link href={filterHref(ownerFilter, page + 1)} className="font-bold text-red-700">Next</Link>}
+      {page > 1 && <Link href={filterHref(activeOwnerFilter, page - 1)} className="font-bold text-red-700">Previous</Link>}
+      {(result.data?.length ?? 0) > pageSize && <Link href={filterHref(activeOwnerFilter, page + 1)} className="font-bold text-red-700">Next</Link>}
     </nav>
   </section>;
 }

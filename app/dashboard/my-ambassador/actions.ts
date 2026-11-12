@@ -93,8 +93,14 @@ function ambassadorFormMessage(record: AltusCorpExternalAmbassador) {
   // sales workspace. The source API remains the authoritative KYC record.
   const rows = [
     ["External source", "AltusCorp Ambassador"],
+    ["External record ID", cleanText(record.id, 120)],
+    ["External created at", cleanText(record.createdAt, 120)],
     ["External status", cleanText(record.status, 120)],
     ["External updated at", cleanText(record.updatedAt, 120)],
+    ["Ambassador name", cleanText(record.ambassadorName, 240)],
+    ["Contact number", cleanText(record.contactNumber, 40)],
+    ["Email", cleanText(record.email, 254)],
+    ["Referral fee percent", cleanText(record.referralFeePercent, 40)],
     ["Agreement date", cleanText(record.agreementDate, 120)],
     ["Entity name", cleanText(record.entityName, 240)],
     ["Entity type", cleanText(record.entityType, 120)],
@@ -111,6 +117,7 @@ function ambassadorFormMessage(record: AltusCorpExternalAmbassador) {
     ["Cancelled cheque", String(Boolean(record.kyc?.hasCancelledCheque))],
     ["PAN copy", String(Boolean(record.kyc?.hasPanCopy))],
     ["KYC ID proof", String(Boolean(record.kyc?.hasKycIdProof))],
+    ["Government ID", mask(record.kyc?.aadhaarOrGovId)],
     ["GST certificate", String(Boolean(record.kyc?.hasGstCertificate))],
     ["Altus signatory", cleanText(record.altusSignatory?.name, 240)],
     ["Signatory designation", cleanText(record.altusSignatory?.designation, 160)],
@@ -211,15 +218,15 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
     const phones = [...new Set(unique.map((record) => normalizePhone(record.contactNumber)).filter(Boolean))];
     const [{ data: mappings }, { data: legacy }, { data: byPhone }] = await Promise.all([
       supabase.from("lead_external_sources").select("external_id, lead_id").eq("source", source).in("external_id", ids),
-      supabase.from("leads").select("id, external_id, phone_key, custom_data").eq("external_source", source).in("external_id", ids),
-      phones.length ? supabase.from("leads").select("id, phone_key, custom_data").in("phone_key", phones) : Promise.resolve({ data: [] }),
+      supabase.from("leads").select("id, external_id, phone_key, assigned_to, custom_data").eq("external_source", source).in("external_id", ids),
+      phones.length ? supabase.from("leads").select("id, phone_key, assigned_to, custom_data").in("phone_key", phones) : Promise.resolve({ data: [] }),
     ]);
     const mapped = new Map<string, string>();
     for (const row of mappings ?? []) mapped.set(row.external_id, row.lead_id);
     for (const row of legacy ?? []) if (row.external_id) mapped.set(row.external_id, row.id);
     const mappedLeadIds = [...new Set((mappings ?? []).map((row) => row.lead_id))];
     const { data: mappedLeads } = mappedLeadIds.length
-      ? await supabase.from("leads").select("id, phone_key, custom_data").in("id", mappedLeadIds)
+      ? await supabase.from("leads").select("id, phone_key, assigned_to, custom_data").in("id", mappedLeadIds)
       : { data: [] };
     const found = [...(legacy ?? []), ...(byPhone ?? []), ...(mappedLeads ?? [])];
     const leadById = new Map(found.map((lead) => [lead.id, lead]));
@@ -237,7 +244,12 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       const names = splitName(record.ambassadorName || record.entityName);
       if (!phone || !names.firstName) { skipped += 1; if (skipReasons.length < 3) skipReasons.push("A source record is missing a valid name or 10-digit Cell Number."); continue; }
       const signed = record.hasSignedPdf === true;
-      const priorLead = mapped.get(externalId) ? leadById.get(mapped.get(externalId)!) : leadByPhone.get(phone);
+      // A matching Cell Number is the CRM identity for an Ambassador. Prefer
+      // that record over an old API mapping, so a Pre Sales Ambassador is
+      // promoted in place as soon as AltusCorp reports a signed PDF.
+      const mappedLead = mapped.get(externalId) ? leadById.get(mapped.get(externalId)!) : undefined;
+      const phoneMatchedLead = leadByPhone.get(phone);
+      const priorLead = phoneMatchedLead ?? mappedLead;
       const sourceState = priorLead?.custom_data && typeof priorLead.custom_data.altuscorp_ambassador === "object" && priorLead.custom_data.altuscorp_ambassador !== null
         ? priorLead.custom_data.altuscorp_ambassador as Record<string, unknown>
         : null;
@@ -245,7 +257,7 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       if (sourceState?.locally_deleted_at) { skipped += 1; if (skipReasons.length < 3) skipReasons.push("A previously deleted Ambassador record was intentionally kept suppressed."); continue; }
       const owner = priorLead ? (assignmentsByLead.get(priorLead.id) ?? [])
         .filter((item) => item.assigned_to && item.is_active)
-        .sort((a, b) => Number(b.product_id === product.id) - Number(a.product_id === product.id) || String(b.assigned_at ?? "").localeCompare(String(a.assigned_at ?? "")))[0]?.assigned_to ?? null : null;
+        .sort((a, b) => Number(b.product_id === product.id) - Number(a.product_id === product.id) || String(b.assigned_at ?? "").localeCompare(String(a.assigned_at ?? "")))[0]?.assigned_to ?? priorLead.assigned_to ?? null : null;
       const customData = {
         ...(priorLead?.custom_data ?? {}), form_message: ambassadorFormMessage(record),
         altuscorp_ambassador: { external_id: externalId, updated_at: record.updatedAt ?? null, status: record.status ?? null, referral_fee_percent: record.referralFeePercent ?? null, agreement_date: record.agreementDate ?? null, has_signed_pdf: signed },
@@ -270,7 +282,7 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       if (assignmentError || !assignment) { skipped += 1; if (skipReasons.length < 3) skipReasons.push(assignmentError?.message || "The Ambassador product assignment could not be created."); continue; }
       if (signed) await supabase.from("lead_product_assignments").update({ is_active: false, is_closed: true, focused_on: null, next_follow_up_at: null }).eq("lead_id", leadId).neq("product_id", product.id).eq("is_active", true).eq("is_closed", false);
       await supabase.from("lead_external_sources").upsert({ lead_id: leadId, source, external_id: externalId }, { onConflict: "source,external_id" });
-      await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignment.id, activity_type: "altuscorp_ambassador_synced", note: `Ambassador agreement synced from AltusCorp (${signed ? "Onboarding Ambassador" : "Pre Sales"}).`, metadata: { external_id: externalId, has_signed_pdf: signed, updated_at: record.updatedAt ?? null }, created_by: actor.userId });
+      await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignment.id, activity_type: "altuscorp_ambassador_synced", note: `Ambassador agreement synced from AltusCorp (${signed ? "Agreement Signed / Waived — Onboarding Ambassador" : "Agreement Sent — Pre Sales"}).`, metadata: { external_id: externalId, has_signed_pdf: signed, matched_by_cell_number: Boolean(phoneMatchedLead), updated_at: record.updatedAt ?? null }, created_by: actor.userId });
     }
     revalidatePath("/dashboard/my-ambassador"); revalidatePath("/dashboard/leads"); revalidatePath("/dashboard");
     return { ok: true, message: `AltusCorp Ambassador sync completed. ${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}.${skipReasons.length ? ` ${[...new Set(skipReasons)].join(" ")}` : ""}`, imported, updated, skipped };
@@ -423,7 +435,7 @@ export async function deleteAmbassadorRecords(assignmentIds: string[]) {
   }
 }
 
-export async function updateAmbassadorDetails(assignmentId: string, input: Omit<AmbassadorInput, "firstName" | "lastName" | "cellNumber">) {
+export async function updateAmbassadorDetails(assignmentId: string, input: AmbassadorInput) {
   try {
     const user = await requireAdmin();
     if (!/^[0-9a-f-]{36}$/i.test(assignmentId)) throw new Error("Invalid Ambassador record.");
@@ -432,7 +444,7 @@ export async function updateAmbassadorDetails(assignmentId: string, input: Omit<
     if (!assignment) throw new Error("Ambassador record not found.");
     const { data: product } = await supabase.from("lead_products").select("code").eq("id", assignment.product_id).maybeSingle();
     if (workflowKey(product?.code) !== "ambassador") throw new Error("Ambassador record not found.");
-    const data = parseInput({ ...input, firstName: "Record", lastName: "Update", cellNumber: "9999999999" });
+    const data = parseInput(input);
     const patch: Record<string, unknown> = {
       assigned_to: data.salesPersonId, assigned_at: data.salesPersonId ? new Date().toISOString() : null,
       ambassador_commission: data.commission, ambassador_commission_notes: data.commissionNotes || null,
@@ -476,11 +488,18 @@ export async function updateAmbassadorDetails(assignmentId: string, input: Omit<
       Object.assign(patch, { stage_id: preSales.id, latest_resolution_id: sent.id, is_active: true, is_closed: false });
     }
 
+    const { error: leadError } = await supabase
+      .from("leads")
+      .update({ first_name: data.firstName, last_name: data.lastName || null, phone: data.cellNumber, updated_at: new Date().toISOString() })
+      .eq("id", assignment.lead_id);
+    if (leadError) throw new Error(leadError.message);
+
     const { error } = await supabase.from("lead_product_assignments").update(patch).eq("id", assignmentId);
     if (error) throw new Error(error.message);
     const workflowNote = data.agreementStatus === "Agreement Signed" ? " Moved from Pre Sales to Onboarding Ambassador." : "";
     await supabase.from("lead_activities").insert({ lead_id: assignment.lead_id, lead_product_assignment_id: assignmentId, activity_type: "ambassador_record_updated", note: `Ambassador commercial details updated by an administrator.${workflowNote}`, created_by: user.userId });
     revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/leads");
     revalidatePath("/dashboard/senior-ambassadors");
     return { ok: true, message: "Ambassador details saved." };
   } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to update Ambassador." }; }
@@ -507,8 +526,29 @@ export async function getAmbassadorActualBreakdown(assignmentId: string, metric:
       .select("lead_id, assigned_to, is_ambassador, ambassador_user_id")
       .eq("id", assignmentId)
       .maybeSingle();
-    if (recordError || !ambassadorRecord?.is_ambassador || ambassadorRecord.assigned_to !== user.userId) {
+    if (recordError || !ambassadorRecord?.is_ambassador) {
       throw new Error("This Ambassador record is not available to you.");
+    }
+    if (ambassadorRecord.assigned_to !== user.userId) {
+      if (!user.roles.includes("sales_manager")) {
+        throw new Error("This Ambassador record is not available to you.");
+      }
+      const { data: teams, error: teamsError } = await supabase
+        .from("crm_teams")
+        .select("id")
+        .eq("manager_id", user.userId);
+      if (teamsError) throw new Error("Unable to verify your sales team.");
+      const teamIds = (teams ?? []).map((team) => team.id);
+      const { data: membership, error: membershipError } = teamIds.length
+        ? await supabase
+            .from("crm_team_members")
+            .select("user_id")
+            .in("team_id", teamIds)
+            .eq("user_id", ambassadorRecord.assigned_to ?? "")
+        : { data: [], error: null };
+      if (membershipError || !membership?.length) {
+        throw new Error("This Ambassador record is not available to you.");
+      }
     }
     let ambassadorUserId = ambassadorRecord.ambassador_user_id;
     // Older Ambassador records may predate ambassador_user_id. Repair that

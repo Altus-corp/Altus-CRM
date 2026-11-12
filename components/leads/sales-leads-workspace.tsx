@@ -7,6 +7,7 @@ import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
 import {
   createManualLead,
   importLeadsCsv,
+  manuallyAssignLeads,
 } from "@/app/dashboard/leads/actions";
 
 type Product = { id: string; code: string; name: string };
@@ -16,6 +17,7 @@ type ProductResolution = {
   resolution_id: string;
   resolution_name: string;
 };
+type TeamMember = { id: string; name: string };
 
 export function SalesLeadsWorkspace({
   columns,
@@ -26,6 +28,8 @@ export function SalesLeadsWorkspace({
   products,
   stages,
   productResolutions,
+  isSalesManager = false,
+  teamMembers = [],
 }: {
   columns: LeadColumn[];
   leads: LeadRow[];
@@ -40,6 +44,8 @@ export function SalesLeadsWorkspace({
   products: Product[];
   stages: Stage[];
   productResolutions: ProductResolution[];
+  isSalesManager?: boolean;
+  teamMembers?: TeamMember[];
 }) {
   // Focused Leads is the sales user's starting workspace; Lead Master is the second view.
   const urlView =
@@ -49,6 +55,11 @@ export function SalesLeadsWorkspace({
   const [addLeadMode, setAddLeadMode] = useState<
     "choice" | "manual" | "bulk" | null
   >(null);
+  const router = useRouter();
+  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>([]);
+  const [assigneeId, setAssigneeId] = useState("");
+  const [assignmentMessage, setAssignmentMessage] = useState("");
+  const [isAssigning, startAssigning] = useTransition();
   if (syncedUrlView !== urlView) {
     setSyncedUrlView(urlView);
     setView(urlView);
@@ -58,6 +69,24 @@ export function SalesLeadsWorkspace({
     view === "focused"
       ? leads.filter((lead) => focusedIds.has(lead.assignment_id))
       : leads;
+  const assignSelected = () => {
+    if (!assigneeId || !selectedAssignmentIds.length) return;
+    const formData = new FormData();
+    formData.set("assigneeId", assigneeId);
+    selectedAssignmentIds.forEach((assignmentId) => formData.append("assignmentId", assignmentId));
+    setAssignmentMessage("");
+    startAssigning(async () => {
+      try {
+        await manuallyAssignLeads(formData);
+        setSelectedAssignmentIds([]);
+        setAssigneeId("");
+        setAssignmentMessage("Selected leads were assigned to your team member.");
+        router.refresh();
+      } catch (error) {
+        setAssignmentMessage(error instanceof Error ? error.message : "Unable to assign the selected leads.");
+      }
+    });
+  };
 
   return (
     <section className="mx-auto max-w-7xl" aria-label="Sales leads">
@@ -105,6 +134,21 @@ export function SalesLeadsWorkspace({
           </button>
         </div>
       </header>
+      {isSalesManager && (
+        <section className="mt-3 rounded-lg border border-red-100 bg-red-50/50 px-4 py-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div><p className="text-sm font-extrabold text-slate-800">Assign selected leads to your team</p><p className="mt-0.5 text-xs text-slate-500">You can delegate only product work currently assigned to you.</p></div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} disabled={isAssigning || !teamMembers.length} className="h-9 min-w-52 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:bg-slate-100">
+                <option value="">{teamMembers.length ? "Choose team member" : "No team members configured"}</option>
+                {teamMembers.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+              </select>
+              <button type="button" onClick={assignSelected} disabled={isAssigning || !assigneeId || !selectedAssignmentIds.length} className="h-9 rounded-md bg-[#d90000] px-4 text-xs font-extrabold text-white disabled:cursor-not-allowed disabled:bg-slate-300">{isAssigning ? "Assigning…" : `Assign selected${selectedAssignmentIds.length ? ` (${selectedAssignmentIds.length})` : ""}`}</button>
+            </div>
+          </div>
+          {assignmentMessage && <p className={`mt-2 text-xs font-bold ${assignmentMessage.startsWith("Selected") ? "text-emerald-700" : "text-red-700"}`}>{assignmentMessage}</p>}
+        </section>
+      )}
       <div className="mt-3">
         <LeadsTable
           columns={columns}
@@ -114,6 +158,8 @@ export function SalesLeadsWorkspace({
           editableConfiguration={{ products, stages, productResolutions }}
           showHeader={false}
           onAddLead={() => setAddLeadMode("choice")}
+          selectedIds={isSalesManager ? selectedAssignmentIds : []}
+          onSelectionChange={isSalesManager ? setSelectedAssignmentIds : undefined}
         />
       </div>
       {addLeadMode === "choice" && (
