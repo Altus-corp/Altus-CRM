@@ -18,6 +18,7 @@ const services: { id: Service; label: string; description: string }[] = [
 const formattedDate = (value: string | null) => value ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }).format(new Date(value)) : "Never";
 
 const marketplaceEndpoint = "https://crm.altuscorp.in/api/marketplace/leads";
+const marketplaceConfigEndpoint = "https://crm.altuscorp.in/api/marketplace/leads/config";
 const createLeadExample = JSON.stringify({
   service: "qualified_leads",
   first_name: "Rahul",
@@ -57,6 +58,22 @@ const readLeadsResponseExample = JSON.stringify({
     updated_at: "2026-11-13T10:00:00.000Z",
     product: { code: "BSSO", name: "Business Scaleup Shastra Orientation" },
     stage: { name: "Pre BSSO" },
+  }],
+}, null, 2);
+const configResponseExample = JSON.stringify({
+  ok: true,
+  services: [
+    { id: "qualified_leads", label: "Qualified Leads", read: true, write: true },
+    { id: "reference_leads", label: "Reference Leads", read: true, write: false },
+  ],
+  products: [{
+    code: "BSSO",
+    name: "Business Scaleup Shastra Orientation",
+    stages: [
+      { name: "Pre BSSO", position: 1 },
+      { name: "During BSSO", position: 2 },
+      { name: "Post BSSO", position: 3 },
+    ],
   }],
 }, null, 2);
 
@@ -111,8 +128,11 @@ function ApiDocumentation({ copy }: { copy: (value: string) => Promise<void> }) 
     <div>
       <p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">COPY-READY API GUIDE</p>
       <h3 className="mt-1 text-sm font-extrabold text-slate-900">Request URLs, payloads and responses</h3>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Give this guide and the generated API key to your external developer. The key must never be added to browser code or shared publicly.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">First call the configuration URL to see the services this key can use, plus every active product code and its valid stages. The key must never be added to browser code or shared publicly.</p>
     </div>
+
+    <CodeExample title="GET — services, products and stages" value={marketplaceConfigEndpoint} copy={copy} />
+    <CodeExample title="Configuration success response — HTTP 200" value={configResponseExample} copy={copy} />
 
     <div className="grid gap-3 lg:grid-cols-2">
       <CodeExample title="POST — create a lead" value={marketplaceEndpoint} copy={copy} />
