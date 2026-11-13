@@ -17,6 +17,49 @@ const services: { id: Service; label: string; description: string }[] = [
 
 const formattedDate = (value: string | null) => value ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }).format(new Date(value)) : "Never";
 
+const marketplaceEndpoint = "https://crm.altuscorp.in/api/marketplace/leads";
+const createLeadExample = JSON.stringify({
+  service: "qualified_leads",
+  first_name: "Rahul",
+  last_name: "Sharma",
+  email: "rahul@example.com",
+  phone: "9876543210",
+  product_code: "BSSO",
+  stage_name: "Pre BSSO",
+  external_id: "partner-form-1001",
+  custom_data: { source: "Partner website", city: "Mumbai" },
+}, null, 2);
+const createLeadResponseExample = JSON.stringify({
+  ok: true,
+  message: "Lead created.",
+  lead: {
+    id: "2f4db0ec-7ac0-4ae6-b17a-8cde6cd6f0f1",
+    lead_number: 123,
+    service: "qualified_leads",
+    product_code: "BSSO",
+    stage_name: "Pre BSSO",
+    created_at: "2026-11-13T10:00:00.000Z",
+  },
+}, null, 2);
+const readLeadsResponseExample = JSON.stringify({
+  ok: true,
+  service: "qualified_leads",
+  page: 1,
+  leads: [{
+    id: "2f4db0ec-7ac0-4ae6-b17a-8cde6cd6f0f1",
+    lead_number: 123,
+    first_name: "Rahul",
+    last_name: "Sharma",
+    email: "rahul@example.com",
+    phone: "9876543210",
+    custom_data: { source: "Partner website", city: "Mumbai" },
+    created_at: "2026-11-13T10:00:00.000Z",
+    updated_at: "2026-11-13T10:00:00.000Z",
+    product: { code: "BSSO", name: "Business Scaleup Shastra Orientation" },
+    stage: { name: "Pre BSSO" },
+  }],
+}, null, 2);
+
 export function LeadsManagementApi({ apiKeys, databaseReady }: { apiKeys: ApiKey[]; databaseReady: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
@@ -52,9 +95,51 @@ export function LeadsManagementApi({ apiKeys, databaseReady }: { apiKeys: ApiKey
         <section className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-red-600" /><h3 className="text-sm font-extrabold text-slate-900">Generate API key</h3></div>{!databaseReady && <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Run the CRM Market Place API database migration before creating keys.</p>}<label className="mt-4 block text-xs font-bold text-slate-700">API name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={100} placeholder="Example: Partner website" className="mt-1.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /></label><p className="mt-4 text-xs font-bold text-slate-700">Subscribe services</p><div className="mt-2 overflow-hidden rounded-lg border border-slate-200">{services.map((service) => <div key={service.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-slate-100 px-3 py-2.5 last:border-0"><span><span className="block text-xs font-bold text-slate-700">{service.label}</span><span className="text-[10px] text-slate-400">{service.description}</span></span>{(["read", "write"] as const).map((mode) => <label key={mode} className="flex cursor-pointer items-center gap-1 text-[10px] font-bold text-slate-600"><input type="checkbox" checked={Boolean(subscriptions[service.id]?.[mode])} onChange={(event) => updateAccess(service.id, mode, event.target.checked)} className="h-3.5 w-3.5 accent-red-600" />{mode === "read" ? "Read" : "Write"}</label>)}</div>)}</div><button type="button" disabled={isPending || !databaseReady || !name.trim()} onClick={createKey} className="mt-4 h-9 w-full rounded-lg bg-[#d90000] px-4 text-xs font-extrabold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300">{isPending ? "Generating…" : "Generate key"}</button></section>
         <section className="min-w-0"><div className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="text-sm font-extrabold text-slate-900">Integration endpoint</h3><p className="mt-1 text-xs text-slate-500">Use the key as <code className="rounded bg-slate-100 px-1">Authorization: Bearer YOUR_KEY</code> or <code className="rounded bg-slate-100 px-1">x-api-key</code>.</p><code className="mt-3 block overflow-x-auto rounded-lg bg-slate-950 px-3 py-2 text-xs text-emerald-300">POST /api/marketplace/leads</code><p className="mt-3 text-xs leading-5 text-slate-500">POST requires <code>service</code>, <code>first_name</code>, and <code>product_code</code>. Optional fields: <code>last_name</code>, <code>email</code>, <code>phone</code>, <code>stage_name</code>, <code>external_id</code>, and <code>custom_data</code>. GET reads only the selected <code>service</code>.</p></div>
           <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="border-b border-slate-200 px-4 py-3"><h3 className="text-sm font-extrabold text-slate-900">API keys</h3><p className="mt-0.5 text-[10px] text-slate-500">Full secrets are shown once, immediately after they are generated.</p></div><div className="overflow-x-auto"><table className="min-w-[620px] w-full text-left text-xs"><thead className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2.5">Name</th><th className="px-4 py-2.5">Key</th><th className="px-4 py-2.5">Access</th><th className="px-4 py-2.5">Last used</th><th className="px-4 py-2.5"></th></tr></thead><tbody>{apiKeys.map((key) => <tr key={key.id} className="border-t border-slate-100"><td className="px-4 py-3 font-bold text-slate-800"><span>{key.name}</span><span className={`ml-2 rounded-full px-1.5 py-0.5 text-[9px] ${key.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{key.is_active ? "Active" : "Paused"}</span></td><td className="px-4 py-3 font-mono text-slate-600">{key.key_prefix}••••{key.key_last4}</td><td className="max-w-[210px] px-4 py-3 text-[10px] font-semibold text-slate-600">{services.flatMap((service) => { const access = key.subscriptions[service.id]; return access ? [`${service.label}: ${[access.read && "R", access.write && "W"].filter(Boolean).join("/")}`] : []; }).join(" · ")}</td><td className="px-4 py-3 text-slate-500">{formattedDate(key.last_used_at)}</td><td className="px-4 py-3"><button type="button" disabled={isPending} onClick={() => toggleKey(key)} className="inline-flex h-7 items-center gap-1 rounded border border-slate-200 px-2 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">{key.is_active ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}{key.is_active ? "Pause" : "Enable"}</button></td></tr>)}{!apiKeys.length && <tr><td colSpan={5} className="px-4 py-10 text-center text-sm font-semibold text-slate-400">No API keys have been created.</td></tr>}</tbody></table></div></div>
+          <ApiDocumentation copy={copy} />
         </section>
       </div>{message && <p role="status" className="mx-5 mb-5 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">{message}</p>}
     </div></div>}
     {createdKey && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-label="Your new API key"><div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl"><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">SAVE THIS NOW</p><h2 className="mt-1 text-xl font-extrabold text-slate-900">Your API key</h2><p className="mt-2 text-sm text-slate-500">For security, this full key will not be displayed again after you close this window.</p><div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3"><code className="min-w-0 flex-1 break-all text-xs font-semibold text-slate-800">{createdKey}</code><button type="button" onClick={() => copy(createdKey)} className="grid h-8 w-8 shrink-0 place-items-center rounded border border-slate-200 bg-white text-slate-600 hover:text-red-600" aria-label="Copy API key"><Copy className="h-4 w-4" /></button></div><button type="button" onClick={() => setCreatedKey(null)} className="mt-5 h-9 w-full rounded-lg bg-[#d90000] text-xs font-extrabold text-white hover:bg-red-700">I have saved this key</button></div></div>}
   </>;
+}
+
+function ApiDocumentation({ copy }: { copy: (value: string) => Promise<void> }) {
+  const getUrl = `${marketplaceEndpoint}?service=qualified_leads&limit=50&page=1`;
+  const headers = "Authorization: Bearer YOUR_API_KEY\nContent-Type: application/json";
+
+  return <section className="mt-4 space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+    <div>
+      <p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">COPY-READY API GUIDE</p>
+      <h3 className="mt-1 text-sm font-extrabold text-slate-900">Request URLs, payloads and responses</h3>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Give this guide and the generated API key to your external developer. The key must never be added to browser code or shared publicly.</p>
+    </div>
+
+    <div className="grid gap-3 lg:grid-cols-2">
+      <CodeExample title="POST — create a lead" value={marketplaceEndpoint} copy={copy} />
+      <CodeExample title="GET — read service leads" value={getUrl} copy={copy} />
+    </div>
+
+    <CodeExample title="Required request headers" value={headers} copy={copy} />
+
+    <div className="grid gap-3 xl:grid-cols-2">
+      <CodeExample title="POST request body" value={createLeadExample} copy={copy} />
+      <CodeExample title="POST success response — HTTP 201" value={createLeadResponseExample} copy={copy} />
+    </div>
+
+    <CodeExample title="GET success response — HTTP 200" value={readLeadsResponseExample} copy={copy} />
+
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+      <strong>Access rules:</strong> the API key needs <strong>Write</strong> access for the selected POST service and <strong>Read</strong> access for GET. Missing or invalid keys return <code>401</code>; a key without the required service access returns <code>403</code>.
+    </div>
+  </section>;
+}
+
+function CodeExample({ title, value, copy }: { title: string; value: string; copy: (value: string) => Promise<void> }) {
+  return <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-950">
+    <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-slate-900 px-3 py-2">
+      <p className="text-[10px] font-extrabold text-slate-200">{title}</p>
+      <button type="button" onClick={() => copy(value)} className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-200 hover:border-slate-500 hover:bg-slate-800" aria-label={`Copy ${title}`}><Copy className="h-3 w-3" />Copy</button>
+    </div>
+    <pre className="max-h-80 overflow-auto px-3 py-2 text-[11px] leading-5 text-emerald-300"><code>{value}</code></pre>
+  </div>;
 }
