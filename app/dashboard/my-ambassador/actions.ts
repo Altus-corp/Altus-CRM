@@ -65,6 +65,7 @@ export type AmbassadorInput = {
   firstName: string;
   lastName: string;
   cellNumber: string;
+  email?: string | null;
   salesPersonId: string;
   commission?: string;
   commissionNotes?: string;
@@ -173,6 +174,7 @@ function parseInput(value: AmbassadorInput) {
   const firstName = cleanText(value.firstName, 120);
   const lastName = cleanText(value.lastName, 120);
   const cellNumber = cleanText(value.cellNumber, 30).replace(/\D/g, "").slice(-10);
+  const email = cleanText(value.email, 254).toLowerCase();
   const salesPersonId = cleanText(value.salesPersonId, 36);
   const priorityText = cleanText(value.priority, 1);
   const priority = priorityText ? Number(priorityText) : null;
@@ -189,6 +191,7 @@ function parseInput(value: AmbassadorInput) {
     return number;
   };
   if (!firstName || !lastName || !/^\d{10}$/.test(cellNumber)) throw new Error("First Name, Last Name, and a valid 10-digit Cell Number are required.");
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Email must be a valid email address.");
   if (salesPersonId && !/^[0-9a-f-]{36}$/i.test(salesPersonId)) throw new Error("Choose a valid Sales Person.");
   if (priority !== null && ![1, 2, 3].includes(priority)) throw new Error("Priority must be 1, 2, or 3.");
   if (commission !== null && (!Number.isFinite(commission) || commission < 0)) throw new Error("Commission must be a valid positive amount.");
@@ -199,7 +202,7 @@ function parseInput(value: AmbassadorInput) {
   const parsedDate = lastCalledOn ? new Date(lastCalledOn) : null;
   if (parsedDate && Number.isNaN(parsedDate.getTime())) throw new Error("Last Called On must be a valid date.");
   return {
-    firstName, lastName, cellNumber, salesPersonId: salesPersonId || null, priority, commission, agreementStatus: agreementStatus || null,
+    firstName, lastName, cellNumber, email: email || null, salesPersonId: salesPersonId || null, priority, commission, agreementStatus: agreementStatus || null,
     commissionNotes: cleanText(value.commissionNotes), signedAgreementLink: signedAgreementLink || null,
     lastCalledOn: parsedDate?.toISOString() ?? null, lastCallNotes: cleanText(value.lastCallNotes),
     remark: cleanText(value.remark), mananSirNotes: cleanText(value.mananSirNotes),
@@ -340,7 +343,7 @@ async function saveRecord(input: AmbassadorInput) {
 
   // phone_key is the normalized last ten digits; this safely treats +91,
   // 91, spaces, and a plain Indian mobile number as the same lead.
-  const { data: existing } = await supabase.from("leads").select("id, first_name, last_name").eq("phone_key", data.cellNumber).maybeSingle();
+  const { data: existing } = await supabase.from("leads").select("id, first_name, last_name, email").eq("phone_key", data.cellNumber).maybeSingle();
   let leadId = existing?.id;
   const { data: existingAssignments, error: existingAssignmentsError } = leadId
     ? await supabase
@@ -358,12 +361,18 @@ async function saveRecord(input: AmbassadorInput) {
   const effectiveSalesPersonId = data.salesPersonId ?? existingAssignments?.find((assignment) => assignment.assigned_to)?.assigned_to ?? null;
   if (!leadId) {
     const { data: created, error } = await supabase.from("leads").insert({
-      first_name: data.firstName, last_name: data.lastName, phone: data.cellNumber, product_id: product.id,
+      first_name: data.firstName, last_name: data.lastName, email: data.email, phone: data.cellNumber, product_id: product.id,
       assigned_to: effectiveSalesPersonId, assigned_at: effectiveSalesPersonId ? new Date().toISOString() : null,
       lead_database: "leads", created_by: user.userId,
     }).select("id").single();
     if (error || !created) throw new Error(error?.message || "Unable to create the Ambassador lead.");
     leadId = created.id;
+  } else if (data.email && data.email !== existing?.email) {
+    const { error } = await supabase
+      .from("leads")
+      .update({ email: data.email, updated_at: new Date().toISOString() })
+      .eq("id", leadId);
+    if (error) throw new Error(error.message);
   }
   const { data: assignment, error: assignmentError } = await supabase.from("lead_product_assignments").upsert({
     lead_id: leadId, product_id: product.id, is_ambassador: true, is_active: true, is_closed: true,
