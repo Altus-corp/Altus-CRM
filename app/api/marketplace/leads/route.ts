@@ -3,8 +3,6 @@ import { revalidatePath } from "next/cache";
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 
-export const dynamic = "force-dynamic";
-
 const services = ["database_leads", "reference_leads", "qualified_leads", "leads"] as const;
 type LeadService = (typeof services)[number];
 type ApiKeyRow = { id: string; subscriptions: Record<string, { read?: boolean; write?: boolean }>; created_by: string | null };
