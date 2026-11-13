@@ -16,7 +16,7 @@ export const instant = false;
 const isDoNotCallResolution = (resolution: unknown) => {
   const value = Array.isArray(resolution) ? resolution[0] : resolution;
   const name = value && typeof value === "object" && "name" in value && typeof value.name === "string" ? value.name.trim().toLowerCase().replace(/[,_-]+/g, " ").replace(/\s+/g, " ") : "";
-  return ["dnd", "not interested", "lost", "i will get back", "wrong number", "old graduate", "abandoned"].includes(name);
+  return ["dnd", "not interested", "lost", "i will get back", "wrong number", "junk lead", "old graduate", "abandoned"].includes(name);
 };
 
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ page?: string; view?: string; assignee?: string; member?: string; workspace?: string; team?: string }> }) {

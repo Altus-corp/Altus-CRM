@@ -74,6 +74,71 @@ function stringValue(value: unknown) {
     : "";
 }
 
+function normalizeLeadEmail(value: unknown) {
+  const email = stringValue(value).toLowerCase();
+  return email.includes("@") ? email : null;
+}
+
+type JunkSuppressionCandidate = {
+  phoneKey?: string | null;
+  emailKey?: string | null;
+};
+
+async function filterJunkLeadCandidates<T extends JunkSuppressionCandidate>(
+  supabase: ReturnType<typeof createAdminClient>,
+  candidates: T[],
+) {
+  const phoneKeys = [
+    ...new Set(candidates.map((candidate) => candidate.phoneKey).filter(Boolean)),
+  ];
+  const emailKeys = [
+    ...new Set(candidates.map((candidate) => candidate.emailKey).filter(Boolean)),
+  ];
+  if (!phoneKeys.length && !emailKeys.length) {
+    return { candidates, skipped: 0, error: null };
+  }
+
+  const [phoneResult, emailResult] = await Promise.all([
+    phoneKeys.length
+      ? supabase
+          .from("lead_junk_suppressions")
+          .select("identifier_value")
+          .eq("identifier_type", "phone")
+          .in("identifier_value", phoneKeys)
+      : Promise.resolve({ data: [], error: null }),
+    emailKeys.length
+      ? supabase
+          .from("lead_junk_suppressions")
+          .select("identifier_value")
+          .eq("identifier_type", "email")
+          .in("identifier_value", emailKeys)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  const error = phoneResult.error ?? emailResult.error;
+  if (error) {
+    return {
+      candidates,
+      skipped: 0,
+      error:
+        error.code === "42P01" || error.code === "PGRST205"
+          ? "Junk Lead suppression is not set up yet. Run the Junk Lead database migration first."
+          : error.message,
+    };
+  }
+  const suppressedPhones = new Set(
+    (phoneResult.data ?? []).map((entry) => entry.identifier_value),
+  );
+  const suppressedEmails = new Set(
+    (emailResult.data ?? []).map((entry) => entry.identifier_value),
+  );
+  const filtered = candidates.filter(
+    (candidate) =>
+      !(candidate.phoneKey && suppressedPhones.has(candidate.phoneKey)) &&
+      !(candidate.emailKey && suppressedEmails.has(candidate.emailKey)),
+  );
+  return { candidates: filtered, skipped: candidates.length - filtered.length, error: null };
+}
+
 function productivityShastraRecords(
   payload: unknown,
 ): ProductivityShastraLead[] {
@@ -743,13 +808,17 @@ export async function syncProductivityShastraQualifiedLeads(actorUserId?: string
               record.mobile ??
               record.mobile_number,
           ) || null;
+        const email = normalizeLeadEmail(
+          record.email ?? record.email_address,
+        );
         return {
           externalId,
           first_name: firstName,
           last_name: lastName || null,
-          email: stringValue(record.email ?? record.email_address) || null,
+          email,
           phone,
           phoneKey: normalizePhone(phone),
+          emailKey: email,
         };
       })
       .filter((record) => record.externalId && record.first_name);
@@ -762,8 +831,21 @@ export async function syncProductivityShastraQualifiedLeads(actorUserId?: string
         skipped,
       };
 
+    const junkLeadFilter = await filterJunkLeadCandidates(supabase, candidates);
+    if (junkLeadFilter.error)
+      return { ok: false, message: junkLeadFilter.error, skipped };
+    const eligibleForSync = junkLeadFilter.candidates;
+    if (!eligibleForSync.length)
+      return {
+        ok: true,
+        message: `Productivity Shastra sync completed for ${product.code}. ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.`,
+        imported: 0,
+        updated: 0,
+        skipped: skipped + junkLeadFilter.skipped,
+      };
+
     const externalIds = [
-      ...new Set(candidates.map((record) => record.externalId)),
+      ...new Set(eligibleForSync.map((record) => record.externalId)),
     ];
     const { data: existing, error: existingError } = await supabase
       .from("leads")
@@ -780,7 +862,7 @@ export async function syncProductivityShastraQualifiedLeads(actorUserId?: string
       (existing ?? []).map((lead) => [lead.external_id, lead.id]),
     );
     const phoneKeys = [
-      ...new Set(candidates.map((record) => record.phoneKey).filter(Boolean)),
+      ...new Set(eligibleForSync.map((record) => record.phoneKey).filter(Boolean)),
     ];
     const { data: existingPhones, error: phoneError } = phoneKeys.length
       ? await supabase
@@ -801,7 +883,7 @@ export async function syncProductivityShastraQualifiedLeads(actorUserId?: string
     );
     const seenPhoneKeys = new Set<string>();
     let phoneDuplicates = 0;
-    const eligibleCandidates = candidates.filter((record) => {
+    const eligibleCandidates = eligibleForSync.filter((record) => {
       if (!record.phoneKey) return true;
       const matchingLeadId = existingByPhoneKey.get(record.phoneKey);
       const sourceLeadId = existingByExternalId.get(record.externalId);
@@ -880,10 +962,10 @@ export async function syncProductivityShastraQualifiedLeads(actorUserId?: string
     revalidatePath("/dashboard/leads");
     return {
       ok: true,
-      message: `Productivity Shastra sync completed for ${product.code}.${phoneDuplicates ? ` ${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.` : ""}`,
+      message: `Productivity Shastra sync completed for ${product.code}.${junkLeadFilter.skipped ? ` ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.` : ""}${phoneDuplicates ? ` ${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.` : ""}`,
       imported: newRecords.length,
       updated: updateRecords.length,
-      skipped: skipped + phoneDuplicates,
+      skipped: skipped + junkLeadFilter.skipped + phoneDuplicates,
     };
   } catch (error) {
     return {
@@ -1001,6 +1083,7 @@ async function syncGoogleAppsScriptLeadSource(
           phone,
           email,
           phoneKey: normalizePhone(phone),
+          emailKey: normalizeLeadEmail(email),
           scheduledEventDate: scheduledIndiaDate(scheduleText),
           customData,
         };
@@ -1027,8 +1110,21 @@ async function syncGoogleAppsScriptLeadSource(
         skipped,
       };
 
+    const junkLeadFilter = await filterJunkLeadCandidates(supabase, candidates);
+    if (junkLeadFilter.error)
+      return { ok: false, message: junkLeadFilter.error, skipped: skipped + repeatedSourceRecords };
+    const eligibleForSync = junkLeadFilter.candidates;
+    if (!eligibleForSync.length)
+      return {
+        ok: true,
+        message: `${source.label} sync completed for ${product.code} to ${stage.name}. ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.`,
+        imported: 0,
+        updated: 0,
+        skipped: skipped + repeatedSourceRecords + junkLeadFilter.skipped,
+      };
+
     const externalIds = [
-      ...new Set(candidates.map((record) => record.externalId)),
+      ...new Set(eligibleForSync.map((record) => record.externalId)),
     ];
     const { data: existing, error: existingError } = await supabase
       .from("leads")
@@ -1100,7 +1196,7 @@ async function syncGoogleAppsScriptLeadSource(
       }
     }
     const phoneKeys = [
-      ...new Set(candidates.map((record) => record.phoneKey).filter(Boolean)),
+      ...new Set(eligibleForSync.map((record) => record.phoneKey).filter(Boolean)),
     ];
     const { data: existingPhones, error: phoneError } = phoneKeys.length
       ? await supabase
@@ -1132,7 +1228,7 @@ async function syncGoogleAppsScriptLeadSource(
     );
     const seenPhoneKeys = new Set<string>();
     let phoneDuplicates = 0;
-    const eligible = candidates.flatMap((record) => {
+    const eligible = eligibleForSync.flatMap((record) => {
       const sourceLead = existingByExternalId.get(record.externalId);
       const matchingLead = record.phoneKey
         ? existingByPhoneKey.get(record.phoneKey)
@@ -1409,6 +1505,9 @@ async function syncGoogleAppsScriptLeadSource(
       phoneDuplicates
         ? `${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.`
         : "",
+      junkLeadFilter.skipped
+        ? `${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.`
+        : "",
     ]
       .filter(Boolean)
       .join(" ");
@@ -1417,7 +1516,7 @@ async function syncGoogleAppsScriptLeadSource(
       message: `${source.label} sync completed for ${product.code} to ${stage.name}.${duplicateMessage ? ` ${duplicateMessage}` : ""}`,
       imported: newRecords.length,
       updated: updates.length,
-      skipped: skipped + repeatedSourceRecords + phoneDuplicates,
+      skipped: skipped + repeatedSourceRecords + junkLeadFilter.skipped + phoneDuplicates,
     };
   } catch (error) {
     return {
@@ -1557,20 +1656,19 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
         );
       if (!externalId || !firstName) return [];
       const phone = mananvasaPhone(lead);
+      const email = normalizeLeadEmail(
+        lead.email ?? lead.payload_json?.email ?? lead.payload_json?.Email,
+      );
       return [
         {
           externalId,
           product,
           first_name: firstName,
           last_name: lastName || null,
-          email:
-            stringValue(
-              lead.email ??
-                lead.payload_json?.email ??
-                lead.payload_json?.Email,
-            ) || null,
+          email,
           phone,
           phoneKey: normalizePhone(phone),
+          emailKey: email,
           custom_data: {
             mananvasa_source: source,
             mananvasa_topic: stringValue(lead.topic),
@@ -1589,8 +1687,21 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
         skipped,
       };
 
+    const junkLeadFilter = await filterJunkLeadCandidates(supabase, candidates);
+    if (junkLeadFilter.error)
+      return { ok: false, message: junkLeadFilter.error, skipped };
+    const eligibleForSync = junkLeadFilter.candidates;
+    if (!eligibleForSync.length)
+      return {
+        ok: true,
+        message: `Mananvasa sync completed. ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.`,
+        imported: 0,
+        updated: 0,
+        skipped: skipped + junkLeadFilter.skipped,
+      };
+
     const externalIds = [
-      ...new Set(candidates.map((record) => record.externalId)),
+      ...new Set(eligibleForSync.map((record) => record.externalId)),
     ];
     const { data: existing, error: existingError } = await supabase
       .from("leads")
@@ -1607,7 +1718,7 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
       (existing ?? []).map((lead) => [lead.external_id, lead.id]),
     );
     const phoneKeys = [
-      ...new Set(candidates.map((record) => record.phoneKey).filter(Boolean)),
+      ...new Set(eligibleForSync.map((record) => record.phoneKey).filter(Boolean)),
     ];
     const { data: existingPhones, error: phoneError } = phoneKeys.length
       ? await supabase
@@ -1628,7 +1739,7 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
     );
     const seenPhoneKeys = new Set<string>();
     let phoneDuplicates = 0;
-    const eligibleCandidates = candidates.filter((record) => {
+    const eligibleCandidates = eligibleForSync.filter((record) => {
       if (!record.phoneKey) return true;
       const matchingLeadId = existingByPhoneKey.get(record.phoneKey);
       const sourceLeadId = existingByExternalId.get(record.externalId);
@@ -1717,10 +1828,10 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
     revalidatePath("/dashboard/leads");
     return {
       ok: true,
-      message: `Mananvasa sync completed.${phoneDuplicates ? ` ${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.` : ""}${unsupportedSources ? ` ${unsupportedSources} unsupported source record${unsupportedSources === 1 ? " was" : "s were"} skipped.` : ""}`,
+      message: `Mananvasa sync completed.${junkLeadFilter.skipped ? ` ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.` : ""}${phoneDuplicates ? ` ${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.` : ""}${unsupportedSources ? ` ${unsupportedSources} unsupported source record${unsupportedSources === 1 ? " was" : "s were"} skipped.` : ""}`,
       imported: newRecords.length,
       updated: updateRecords.length,
-      skipped: skipped + phoneDuplicates,
+      skipped: skipped + junkLeadFilter.skipped + phoneDuplicates,
     };
   } catch (error) {
     return {
@@ -1849,7 +1960,7 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
       const productCode = altusCorpProductCode(lead.interest);
       const product = productsByCode.get(productCode);
       const externalId = stringValue(lead.id);
-      const email = stringValue(lead.email) || null;
+      const email = normalizeLeadEmail(lead.email);
       const { firstName: suppliedFirstName, lastName } = splitLeadName(
         lead.name,
       );
@@ -1870,6 +1981,7 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
           email,
           phone,
           phoneKey: normalizePhone(phone),
+          emailKey: email,
           custom_data: {
             altuscorp_interest: stringValue(lead.interest),
             altuscorp_company: stringValue(lead.company),
@@ -1891,8 +2003,21 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
         skipped,
       };
 
+    const junkLeadFilter = await filterJunkLeadCandidates(supabase, candidates);
+    if (junkLeadFilter.error)
+      return { ok: false, message: junkLeadFilter.error, skipped };
+    const eligibleForSync = junkLeadFilter.candidates;
+    if (!eligibleForSync.length)
+      return {
+        ok: true,
+        message: `AltusCorp website sync completed. ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.`,
+        imported: 0,
+        updated: 0,
+        skipped: skipped + junkLeadFilter.skipped,
+      };
+
     const externalIds = [
-      ...new Set(candidates.map((record) => record.externalId)),
+      ...new Set(eligibleForSync.map((record) => record.externalId)),
     ];
     const { data: existing, error: existingError } = await supabase
       .from("leads")
@@ -1909,7 +2034,7 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
       (existing ?? []).map((lead) => [lead.external_id, lead.id]),
     );
     const phoneKeys = [
-      ...new Set(candidates.map((record) => record.phoneKey).filter(Boolean)),
+      ...new Set(eligibleForSync.map((record) => record.phoneKey).filter(Boolean)),
     ];
     const { data: existingPhones, error: phoneError } = phoneKeys.length
       ? await supabase
@@ -1930,7 +2055,7 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
     );
     const seenPhoneKeys = new Set<string>();
     let phoneDuplicates = 0;
-    const eligible = candidates.filter((record) => {
+    const eligible = eligibleForSync.filter((record) => {
       if (!record.phoneKey) return true;
       const sourceLeadId = existingByExternalId.get(record.externalId);
       if (
@@ -2017,10 +2142,10 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
     revalidatePath("/dashboard/leads");
     return {
       ok: true,
-      message: `AltusCorp website sync completed.${phoneDuplicates ? ` ${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.` : ""}${unsupportedInterests ? ` ${unsupportedInterests} lead${unsupportedInterests === 1 ? " had" : "s had"} an unmapped interest and ${unsupportedInterests === 1 ? "was" : "were"} skipped.` : ""}`,
+      message: `AltusCorp website sync completed.${junkLeadFilter.skipped ? ` ${junkLeadFilter.skipped} Junk Lead record${junkLeadFilter.skipped === 1 ? " was" : "s were"} skipped.` : ""}${phoneDuplicates ? ` ${phoneDuplicates} duplicate phone record${phoneDuplicates === 1 ? " was" : "s were"} skipped.` : ""}${unsupportedInterests ? ` ${unsupportedInterests} lead${unsupportedInterests === 1 ? " had" : "s had"} an unmapped interest and ${unsupportedInterests === 1 ? "was" : "were"} skipped.` : ""}`,
       imported: newRecords.length,
       updated: updateRecords.length,
-      skipped: skipped + phoneDuplicates,
+      skipped: skipped + junkLeadFilter.skipped + phoneDuplicates,
     };
   } catch (error) {
     return {
@@ -2615,7 +2740,7 @@ async function getEditableLead(leadId: string, assignmentId: string) {
   const supabase = createAdminClient();
   const [{ data: lead, error }, { data: assignment, error: assignmentError }] =
     await Promise.all([
-      supabase.from("leads").select("id").eq("id", leadId).single(),
+      supabase.from("leads").select("id, phone, email").eq("id", leadId).single(),
       supabase
         .from("lead_product_assignments")
         .select("id, lead_id, product_id, assigned_to")
@@ -2642,7 +2767,7 @@ async function getEditableLead(leadId: string, assignmentId: string) {
   }
   if (!user.roles.includes("admin") && !isDirectAssignee && !isSelectedChannelPartner)
     throw new Error("You can update only product work assigned to you.");
-  return { supabase, lead: assignment, userId: user.userId };
+  return { supabase, lead: assignment, contact: lead, userId: user.userId };
 }
 
 export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok: boolean; message: string }> {
@@ -3304,7 +3429,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
   const followUpDate = followUpAt ? new Date(followUpAt) : null;
   if (followUpAt && (!followUpDate || Number.isNaN(followUpDate.getTime())))
     throw new Error("Choose a valid follow-up date and time.");
-  const { supabase, lead, userId } = await getEditableLead(
+  const { supabase, lead, contact, userId } = await getEditableLead(
     leadId,
     assignmentId,
   );
@@ -3396,9 +3521,11 @@ export async function updateLeadResolutionInline(formData: FormData) {
     "lost",
     "i will get back",
     "wrong number",
+    "junk lead",
   ].includes(
     normalizedResolution,
   );
+  const isJunkLead = normalizedResolution === "junk lead";
   const isOldGraduate = normalizedResolution === "old graduate";
   const isAbandoned = normalizedResolution === "abandoned";
   // Status work remains assigned to its current owner. It is hidden from Lead Master,
@@ -3430,6 +3557,36 @@ export async function updateLeadResolutionInline(formData: FormData) {
           ? "Do Not Call is not set up yet. Run the Do Not Call database migration first."
           : doNotCallError.message,
       );
+  }
+  if (isJunkLead) {
+    const identifiers = [
+      ...(normalizePhone(contact.phone)
+        ? [{ identifier_type: "phone", identifier_value: normalizePhone(contact.phone)! }]
+        : []),
+      ...(normalizeLeadEmail(contact.email)
+        ? [{ identifier_type: "email", identifier_value: normalizeLeadEmail(contact.email)! }]
+        : []),
+    ];
+    if (identifiers.length) {
+      const { error: suppressionError } = await supabase
+        .from("lead_junk_suppressions")
+        .upsert(
+          identifiers.map((identifier) => ({
+            ...identifier,
+            source_lead_id: leadId,
+            marked_by: userId,
+            marked_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })),
+          { onConflict: "identifier_type,identifier_value" },
+        );
+      if (suppressionError)
+        throw new Error(
+          suppressionError.code === "42P01" || suppressionError.code === "PGRST205"
+            ? "Junk Lead suppression is not set up yet. Run the Junk Lead database migration first."
+            : suppressionError.message,
+        );
+    }
   }
   if (isOldGraduate) {
     const { error: oldGraduateError } = await supabase

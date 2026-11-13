@@ -22,6 +22,7 @@ const baseFilters = [
   { key: "lost", label: "Lost" },
   { key: "i will get back", label: "I Will Get Back" },
   { key: "wrong number", label: "Wrong Number" },
+  { key: "junk lead", label: "Junk Lead" },
 ];
 const dateFormat = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -50,7 +51,7 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   else if (!canReviewAll) activitiesQuery = activitiesQuery.eq("created_by", userId);
   const [sharedConfig, { data: resolutions }, { data: activities, error }, { data: allProfiles }, { data: salesRoles }, { data: tablePreferences }] = await Promise.all([
     getLeadSharedConfig(),
-    supabase.from("lead_resolutions").select("id, name").in("name", ["DND", "Not Interested", "Lost", "I will get Back", "I Will Get Back", "Wrong Number", "Abandoned"]),
+    supabase.from("lead_resolutions").select("id, name").in("name", ["DND", "Not Interested", "Lost", "I will get Back", "I Will Get Back", "Wrong Number", "Junk Lead", "Abandoned"]),
     activitiesQuery,
     supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended"),
     supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
@@ -101,7 +102,7 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
 
   return <section className="mx-auto max-w-[1500px]">
     <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-      <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as a Do Not Call status by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, Lost, I Will Get Back, or Wrong Number. Admins can also review Abandoned leads released back to the pool." : "Leads you marked as a Do Not Call status."} Double-click a lead to open its details.</p></div>
+      <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as a Do Not Call status by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, Lost, I Will Get Back, Wrong Number, or Junk Lead. Admins can also review Abandoned leads released back to the pool." : "Leads you marked as a Do Not Call status."} Double-click a lead to open its details.</p></div>
       <div className="flex flex-wrap gap-2">{filters.map((filter) => <Link key={filter.key} href={filter.key === "all" ? "/dashboard/dnd-master" : `/dashboard/dnd-master?type=${encodeURIComponent(filter.key)}`} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label} <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${activeFilter === filter.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{filterCounts.get(filter.key) ?? 0}</span></Link>)}</div>
     </header>
     <DndMasterTable rows={rows} columns={visibleColumns} assignedNames={assignedNames} preferences={preferences} reassignUsers={reassignUsers} />
