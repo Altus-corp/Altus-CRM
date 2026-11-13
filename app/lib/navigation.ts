@@ -48,6 +48,7 @@ const roleNavigation: DashboardNavItem[] = [
     ],
   },
   { label: "Admin overview", href: "/dashboard/admin", roles: ["admin"] },
+  { label: "CRM Market Place", href: "/dashboard/crm-market-place", roles: ["admin"] },
   { label: "Users", href: "/dashboard/users", roles: ["admin"] },
   { label: "Team", href: "/dashboard/team", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },

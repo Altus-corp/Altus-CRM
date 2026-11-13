@@ -44,6 +44,9 @@ function NavigationIcon({ label }: { label: string }) {
   if (label.includes("Campaign") || label.includes("Marketing")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="m3 11 18-5v12L3 13v-2Z" /><path d="M11.6 15.4 10 21H6l1.4-7.1M21 10a3 3 0 0 1 0 4" /></svg>;
   }
+  if (label.includes("Market")) {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M4 9h16l-1 11H5L4 9Z" /><path d="M8 9V7a4 4 0 0 1 8 0v2M3 9h18" /></svg>;
+  }
   if (label.includes("Deal") || label.includes("Sales") || label.includes("Product")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 3v18h18" /><path d="M7 16V9m5 7V5m5 11v-4" /></svg>;
   }
