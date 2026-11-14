@@ -13,7 +13,7 @@ export async function SalesManagerDashboard({ searchParams = Promise.resolve({})
   const connectRate = totals.calls ? Math.round(totals.connected * 100 / totals.calls) : 0;
 
   return <section className="mx-auto max-w-[1500px] space-y-5">
-    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sales overview</h1><p className="mt-1 text-sm text-slate-500">Call performance and lead progress for sales users in your assigned teams.</p></div><Link href="/dashboard/sales-team" className="text-sm font-bold text-red-700 hover:underline">View My Team</Link></header>
+    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sales overview</h1><p className="mt-1 text-sm text-slate-500">Your own call performance and lead progress, together with sales users in your assigned teams.</p></div><Link href="/dashboard/sales-team" className="text-sm font-bold text-red-700 hover:underline">View My Team</Link></header>
     <ActivityResolutionOverview mode="manager" />
     <form className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-100 bg-white p-4">
       <label className="text-xs font-bold text-slate-600">Team<select name="team" defaultValue={report.selectedTeam} className="mt-1 block h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm"><option value="">All my teams</option>{report.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
@@ -24,7 +24,7 @@ export async function SalesManagerDashboard({ searchParams = Promise.resolve({})
     </form>
     <p className="text-xs text-slate-500">Calls: {report.from} to {report.to}, India time. Lead progress shows current assignments. Each salesperson is counted once across teams.</p>
     {callsUnavailable ? <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Call history could not be loaded. Call figures are unavailable; lead progress is still shown.</p> : report.syncFailed && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Showing saved CRM call history. Live call refresh was unavailable for one or more team members.</p>}
-    {!report.teams.length ? <p className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">No teams are assigned to you yet. Ask an admin to assign you as a team’s sales manager.</p> : <>
+    {!report.members.length ? <p className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Your report has no active sales users yet. Ask an admin to configure your team if needed.</p> : <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Team calls" value={callValue(totals.calls)} detail={callsUnavailable ? "CRM call history unavailable" : `${totals.incoming} incoming · ${totals.outgoing} outgoing`} />
         <Metric label="Connected calls" value={callValue(totals.connected)} detail={callsUnavailable ? "Connect rate unavailable" : `${connectRate}% connect rate`} />
@@ -38,7 +38,7 @@ export async function SalesManagerDashboard({ searchParams = Promise.resolve({})
         <div className="overflow-x-auto"><table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs font-bold text-slate-500"><tr>{["Salesperson", "Calls", "Connected", "Connect rate", "Unique leads called", "Current leads", "Lead coverage", "Open / closed work", "Follow-ups due", "Overdue now", "Ambassadors"].map((label) => <th key={label} scope="col" className="whitespace-nowrap px-4 py-3">{label}</th>)}</tr></thead>
           <tbody className="divide-y divide-slate-100">{report.members.map((member) => <tr key={member.id}>
-            <th scope="row" className="px-4 py-4 font-bold text-slate-800">{member.name}{member.suspended && <span className="mt-1 block text-xs font-medium text-red-600">Suspended</span>}</th>
+            <th scope="row" className="px-4 py-4 font-bold text-slate-800">{member.name}{member.isManager && <span className="mt-1 block text-xs font-medium text-red-600">You · Sales Manager</span>}{member.suspended && <span className="mt-1 block text-xs font-medium text-red-600">Suspended</span>}</th>
             <td className="px-4 py-4">{callValue(member.calls)}{!callsUnavailable && <span className="block whitespace-nowrap text-xs text-slate-400">{member.incoming} in · {member.outgoing} out</span>}</td>
             <td className="px-4 py-4">{callValue(member.connected)}</td><td className="px-4 py-4">{callsUnavailable ? "—" : `${member.connectRate}%`}</td>
             <td className="px-4 py-4">{callValue(member.leadsCalled)}</td><td className="px-4 py-4">{member.assignedLeads}</td>

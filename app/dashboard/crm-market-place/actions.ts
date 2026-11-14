@@ -5,25 +5,29 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 
-const leadServices = ["database_leads", "reference_leads", "qualified_leads", "leads"] as const;
+const leadServices = ["database_leads", "reference_leads", "qualified_leads", "leads", "uncategorized_leads"] as const;
 type LeadService = (typeof leadServices)[number];
 type SubscriptionInput = Partial<Record<LeadService, { read?: boolean; write?: boolean }>>;
 
 const isLeadService = (value: string): value is LeadService => leadServices.includes(value as LeadService);
 
-export async function createMarketplaceLeadsApiKey(input: { name: string; subscriptions: SubscriptionInput }) {
-  const admin = await requireAdmin();
-  const name = input.name.trim().replace(/\s+/g, " ");
-  if (!name || name.length > 100) return { ok: false as const, message: "Enter an API name between 1 and 100 characters." };
-
-  const subscriptions = Object.fromEntries(
-    Object.entries(input.subscriptions ?? {}).flatMap(([service, access]) => {
+function normalizeSubscriptions(input: SubscriptionInput) {
+  return Object.fromEntries(
+    Object.entries(input ?? {}).flatMap(([service, access]) => {
       if (!isLeadService(service)) return [];
       const read = Boolean(access?.read);
       const write = Boolean(access?.write);
       return read || write ? [[service, { read, write }]] : [];
     }),
   );
+}
+
+export async function createMarketplaceLeadsApiKey(input: { name: string; subscriptions: SubscriptionInput }) {
+  const admin = await requireAdmin();
+  const name = input.name.trim().replace(/\s+/g, " ");
+  if (!name || name.length > 100) return { ok: false as const, message: "Enter an API name between 1 and 100 characters." };
+
+  const subscriptions = normalizeSubscriptions(input.subscriptions);
   if (!Object.keys(subscriptions).length)
     return { ok: false as const, message: "Choose read or write access for at least one lead service." };
 
@@ -41,6 +45,27 @@ export async function createMarketplaceLeadsApiKey(input: { name: string; subscr
 
   revalidatePath("/dashboard/crm-market-place");
   return { ok: true as const, apiKey, message: "API key created." };
+}
+
+export async function updateMarketplaceLeadsApiKeyPermissions(input: { keyId: string; subscriptions: SubscriptionInput }) {
+  await requireAdmin();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.keyId))
+    return { ok: false as const, message: "Invalid API key." };
+
+  const subscriptions = normalizeSubscriptions(input.subscriptions);
+  if (!Object.keys(subscriptions).length)
+    return { ok: false as const, message: "Keep read or write access enabled for at least one lead service." };
+
+  const { data, error } = await createAdminClient()
+    .from("crm_marketplace_api_keys")
+    .update({ subscriptions, updated_at: new Date().toISOString() })
+    .eq("id", input.keyId)
+    .select("id")
+    .maybeSingle();
+  if (error || !data) return { ok: false as const, message: error?.message ?? "This API key no longer exists." };
+
+  revalidatePath("/dashboard/crm-market-place");
+  return { ok: true as const, message: "API permissions updated." };
 }
 
 export async function setMarketplaceLeadsApiKeyStatus(keyId: string, isActive: boolean) {

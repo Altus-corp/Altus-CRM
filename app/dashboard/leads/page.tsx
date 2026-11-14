@@ -19,6 +19,12 @@ const isDoNotCallResolution = (resolution: unknown) => {
   return ["dnd", "not interested", "lost", "i will get back", "wrong number", "junk lead", "old graduate", "abandoned"].includes(name);
 };
 
+const isUncategorizedProduct = (product: unknown) => {
+  const value = Array.isArray(product) ? product[0] : product;
+  const code = value && typeof value === "object" && "code" in value && typeof value.code === "string" ? value.code.trim().toUpperCase() : "";
+  return code === "UNCATEGORIZED";
+};
+
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ page?: string; view?: string; assignee?: string; member?: string; workspace?: string; team?: string }> }) {
   await connection();
   const params = await searchParams;
@@ -29,7 +35,14 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const supabase = await createClient();
   const isAdmin = user.roles.includes("admin");
   const isSalesManager = user.roles.includes("sales_manager");
+  // `requireUser` has already confirmed the current session and admin role.
+  // Use the server-only client for the Admin Lead Master so a nested
+  // lead_product_assignments select cannot be reduced to an empty list by a
+  // stale or stricter RLS policy after leads are distributed.
+  const adminDataClient = isAdmin ? createAdminClient() : null;
   const teamAdmin = isSalesManager && !isAdmin ? createAdminClient() : null;
+  const canSelectAmbassadorOnManualLead = isAdmin || user.roles.includes("sales_executive") || isSalesManager;
+  const ambassadorDataClient = canSelectAmbassadorOnManualLead ? (adminDataClient ?? createAdminClient()) : null;
   const managerMemberIds = teamAdmin ? await getSalesManagerTeamMemberIds(user.userId) : [];
   const requestedManagerMemberId = params.member ?? "";
   const selectedManagerMemberId = isSalesManager && !isAdmin && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedManagerMemberId) && managerMemberIds.includes(requestedManagerMemberId)
@@ -53,9 +66,17 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const partnerFocusByLead = new Map((partnerLinksResult.data ?? []).map((link) => [link.lead_id, link.focused_on]));
   const partnerLeadIds = [...partnerFocusByLead.keys()];
   const selectedOwnerId = selectedAssigneeId ?? selectedManagerMemberId;
-  const assignmentsJoin = selectedOwnerId ? "!inner" : "";
-  const leadDataClient = isViewingManagerTeamMember ? teamAdmin! : supabase;
-  let leadsPromise = leadDataClient.from("leads").select(`id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments${assignmentsJoin}(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))`).order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  // Keep Ambassador work out of the Admin Lead Master before pagination.
+  // Previously the page fetched the newest parent leads first and then hid
+  // Ambassador rows in `normalizedLeads`. A recent block of Ambassador
+  // records could therefore make the first table page appear empty despite
+  // many normal distributed leads existing below it.
+  const isAdminLeadMaster = isAdmin && !showTeamLeads;
+  const assignmentsJoin = selectedOwnerId || isAdminLeadMaster ? "!inner" : "";
+  const leadDataClient = isAdmin ? adminDataClient! : isViewingManagerTeamMember ? teamAdmin! : supabase;
+  const productJoin = isAdminLeadMaster ? "!inner" : "";
+  let leadsPromise = leadDataClient.from("leads").select(`id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments${assignmentsJoin}(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products${productJoin}(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))`).order("created_at", { ascending: false }).range(offset, offset + pageSize);
+  if (isAdminLeadMaster) leadsPromise = leadsPromise.eq("assignments.is_ambassador", false).neq("assignments.product.code", "UNCATEGORIZED");
   if (selectedOwnerId) {
     leadsPromise = leadsPromise
       .eq("assignments.assigned_to", selectedOwnerId)
@@ -68,15 +89,16 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     leadsPromise = leadsPromise.or(`ambassador_imported_by.eq.${user.userId},id.in.(${partnerLeadIds.join(",")})`);
   const preferencesPromise = supabase.from("lead_table_preferences").select("column_order, column_widths, frozen_column_keys, hidden_column_keys, layout_version").eq("user_id", user.userId).maybeSingle();
   const adminDataPromise = isAdmin ? Promise.all([
-    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "database_leads"),
-    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "reference_leads"),
-    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "qualified_leads"),
-    supabase.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "leads"),
-    supabase.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name"),
-    supabase.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
+    adminDataClient!.from("lead_database_summary_counts").select("lead_database, lead_count"),
+    adminDataClient!.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name"),
+    adminDataClient!.from("user_roles").select("user_id, role").in("role", ["sales_executive", "sales_manager", "consultant"]),
+  ]) : Promise.resolve(null);
+  const ambassadorOptionsPromise = ambassadorDataClient ? Promise.all([
+    ambassadorDataClient.from("user_roles").select("user_id").eq("role", "ambassador"),
+    ambassadorDataClient.from("profiles").select("id, first_name, last_name, full_name").eq("is_suspended", false).order("first_name"),
   ]) : Promise.resolve(null);
   const scopedLeadsPromise = ambassadorWorkspace && !partnerLeadIds.length ? leadsPromise.eq("ambassador_imported_by", user.userId) : leadsPromise;
-  const [sharedConfig, leadsResult, preferencesResult, adminData] = await Promise.all([sharedConfigPromise, scopedLeadsPromise, preferencesPromise, adminDataPromise]);
+  const [sharedConfig, leadsResult, preferencesResult, adminData, ambassadorOptions] = await Promise.all([sharedConfigPromise, scopedLeadsPromise, preferencesPromise, adminDataPromise, ambassadorOptionsPromise]);
   const { columns, columnsError, products, stages, resolutions, resolutionMappings } = sharedConfig;
   const { data: leads, error: leadsError } = leadsResult;
   const { data: tablePreferences } = preferencesResult;
@@ -90,11 +112,22 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     if (!lastCalledByLead.has(activity.lead_id)) lastCalledByLead.set(activity.lead_id, activity.created_at);
     if (activity.lead_product_assignment_id && !lastCalledByAssignment.has(activity.lead_product_assignment_id)) lastCalledByAssignment.set(activity.lead_product_assignment_id, activity.created_at);
   }
-  const [databaseResult, referenceResult, qualifiedResult, leadsCountResult, profilesResult, rolesResult] = adminData ?? [];
-  const databaseLeadsCount = databaseResult?.count ?? 0;
-  const referenceLeadsCount = referenceResult?.count ?? 0;
-  const qualifiedLeadsCount = qualifiedResult?.count ?? 0;
-  const leadsCount = leadsCountResult?.count ?? 0;
+  const [databaseCountsResult, profilesResult, rolesResult] = adminData ?? [];
+  const summaryCounts = new Map((databaseCountsResult?.data ?? []).map((row) => [row.lead_database, Number(row.lead_count) || 0]));
+  // A production deploy can briefly run before its SQL migration is applied.
+  // Fall back to the former exact queries in that case rather than ever
+  // displaying broken admin cards. Once the counter table exists, this branch
+  // is never used.
+  const summaryFallback = isAdmin && databaseCountsResult?.error ? await Promise.all([
+    adminDataClient!.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "database_leads"),
+    adminDataClient!.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "reference_leads"),
+    adminDataClient!.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "qualified_leads"),
+    adminDataClient!.from("leads").select("id", { count: "exact", head: true }).eq("lead_database", "leads"),
+  ]) : null;
+  const databaseLeadsCount = summaryCounts.get("database_leads") ?? summaryFallback?.[0].count ?? 0;
+  const referenceLeadsCount = summaryCounts.get("reference_leads") ?? summaryFallback?.[1].count ?? 0;
+  const qualifiedLeadsCount = summaryCounts.get("qualified_leads") ?? summaryFallback?.[2].count ?? 0;
+  const leadsCount = summaryCounts.get("leads") ?? summaryFallback?.[3].count ?? 0;
   const assignedUserIds = [...new Set((leads ?? []).flatMap((lead) => (Array.isArray(lead.assignments) ? lead.assignments : []).map((assignment) => assignment.assigned_to)).filter((id): id is string => Boolean(id)))];
   const [assignedProfilesResult, managerProfilesResult] = await Promise.all([
     !isAdmin && assignedUserIds.length ? leadDataClient.from("profiles").select("id, first_name, last_name, full_name").in("id", assignedUserIds) : Promise.resolve(null),
@@ -110,7 +143,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     // Do Not Call work is deliberately kept out of normal Lead Master views.
     // A lead can still be visible here through any other active product assignment.
     const includeTeamAmbassadors = showTeamLeads && selectedWorkspaceView === "ambassador";
-    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace ? true : includeTeamAmbassadors ? item.is_ambassador : (!item.is_ambassador && !isDoNotCallResolution(item.resolution)));
+    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace ? true : includeTeamAmbassadors ? item.is_ambassador : (!item.is_ambassador && !isDoNotCallResolution(item.resolution) && !isUncategorizedProduct(item.product)));
     const assignment = assignments[0];
     if (!assignment) return [];
     return [{
@@ -152,6 +185,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const assignmentUsers = assignmentProfiles.filter((profile) => eligibleAssigneeIds.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
   const managerTeamMembers = (managerProfilesResult?.data ?? []).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
   const importUsers = assignmentProfiles.map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" }));
+  const ambassadorIds = new Set((ambassadorOptions?.[0].data ?? []).map((role) => role.user_id));
+  const ambassadors = (ambassadorOptions?.[1].data ?? []).filter((profile) => ambassadorIds.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed Ambassador" }));
   const resolutionNames = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
   const productResolutions = (resolutionMappings ?? []).map((mapping) => ({ product_id: mapping.product_id, resolution_id: mapping.resolution_id, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
 
@@ -161,11 +196,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === indiaToday()).map((lead) => lead.assignment_id);
     return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} />{partnerLinksUnavailable && <p className="mx-auto mt-3 max-w-7xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Channel Partner leads will appear after the latest Channel Partner migration is run in Supabase.</p>}{pager}</>;
   }
-  if (user.roles.includes("admin")) return <><AdminLeadsMaster columns={columns ?? []} sampleColumns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} assignmentUsers={assignmentUsers} importUsers={importUsers} preferences={preferences} showTeamLeads={showTeamLeads} selectedAssigneeId={selectedAssigneeId} selectedWorkspaceView={selectedWorkspaceView} databaseCounts={{ databaseLeads: databaseLeadsCount ?? 0, referenceLeads: referenceLeadsCount ?? 0, qualifiedLeads: qualifiedLeadsCount ?? 0, leads: leadsCount ?? 0 }} products={products ?? []} stages={stages ?? []} resolutions={resolutions ?? []} productResolutions={productResolutions} />{pager}</>;
+  if (user.roles.includes("admin")) return <><AdminLeadsMaster columns={columns ?? []} sampleColumns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} assignmentUsers={assignmentUsers} importUsers={importUsers} ambassadors={ambassadors} preferences={preferences} showTeamLeads={showTeamLeads} selectedAssigneeId={selectedAssigneeId} selectedWorkspaceView={selectedWorkspaceView} databaseCounts={{ databaseLeads: databaseLeadsCount ?? 0, referenceLeads: referenceLeadsCount ?? 0, qualifiedLeads: qualifiedLeadsCount ?? 0, leads: leadsCount ?? 0 }} products={products ?? []} stages={stages ?? []} resolutions={resolutions ?? []} productResolutions={productResolutions} />{pager}</>;
   const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date());
   const todayKey = [todayParts.find((part) => part.type === "year")?.value, todayParts.find((part) => part.type === "month")?.value, todayParts.find((part) => part.type === "day")?.value].join("-");
   const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === todayKey).map((lead) => lead.assignment_id);
-  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} isSalesManager={isSalesManager} teamMembers={managerTeamMembers} selectedTeamMemberId={selectedManagerMemberId} />{pager}</>;
+  if (user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} ambassadors={ambassadors} isSalesManager={isSalesManager} teamMembers={managerTeamMembers} selectedTeamMemberId={selectedManagerMemberId} />{pager}</>;
   return <><section className="mx-auto max-w-7xl" aria-label="Leads"><LeadsTable columns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} /></section>{pager}</>;
 }
 

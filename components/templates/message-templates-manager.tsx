@@ -3,6 +3,7 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { deleteMessageTemplate, saveMessageTemplate } from "@/app/dashboard/message-templates/actions";
 import { templateVariables, type MessageTemplate } from "@/app/lib/message-templates";
+import { displayProductLabel } from "@/app/lib/product-display";
 
 type Product = { id: string; code: string; name: string };
 type Stage = { id: string; product_id: string; name: string };
@@ -37,7 +38,7 @@ export function MessageTemplatesManager({ products, stages, templates, userId, i
   return <section className="mx-auto max-w-4xl">
     <header><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">SALES</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Message templates</h1><p className="mt-1 text-xs text-slate-500">Create the email and WhatsApp templates for each product, optionally for a specific stage. They appear when you email or WhatsApp a lead on that product.</p></header>
     <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md bg-white p-2 shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
-      <select value={productId} onChange={(event) => { setProductId(event.target.value); setEditing(null); }} aria-label="Product" className="h-8 rounded border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700">{products.map((product) => <option key={product.id} value={product.id}>{product.code} - {product.name}</option>)}</select>
+      <select value={productId} onChange={(event) => { setProductId(event.target.value); setEditing(null); }} aria-label="Product" className="h-8 rounded border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700">{products.map((product) => <option key={product.id} value={product.id}>{displayProductLabel(product)}</option>)}</select>
       <div className="flex overflow-hidden rounded border border-slate-200" role="group" aria-label="Channel">{(["email", "whatsapp"] as Channel[]).map((item) => <button key={item} type="button" onClick={() => { setChannel(item); setEditing(null); }} className={`h-8 px-3 text-[11px] font-extrabold ${channel === item ? "bg-[#d90000] text-white" : "text-slate-600 hover:bg-slate-50"}`}>{item === "email" ? "Email" : "WhatsApp"}</button>)}</div>
       <button type="button" onClick={() => { setEditing("new"); setMessage(null); }} disabled={!productId} className="ml-auto h-8 rounded border border-red-200 bg-red-50 px-3 text-[11px] font-extrabold text-red-600 hover:bg-red-100 disabled:opacity-50">+ New template</button>
     </div>

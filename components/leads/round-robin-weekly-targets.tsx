@@ -6,6 +6,7 @@ import {
   updateRoundRobinSchedule,
   updateRoundRobinWeeklyTargets,
 } from "@/app/dashboard/lead-settings/actions";
+import { displayProductCode } from "@/app/lib/product-display";
 
 type Product = { id: string; code: string; name: string };
 type TeamMember = { id: string; name: string; roles: string[]; attendance: { status: "present" | "absent" | "unavailable"; punchInTime: string | null } };
@@ -262,7 +263,7 @@ export function RoundRobinWeeklyTargets({
                       >
                         <td className="px-3 py-1.5 text-left">
                           <span className="font-extrabold text-slate-700">
-                            {product.code}
+                            {displayProductCode(product.code)}
                           </span>
                           <span className="ml-1.5 text-[10px] text-slate-400">
                             {product.name}
@@ -273,7 +274,7 @@ export function RoundRobinWeeklyTargets({
                             {days.map((day, index) => (
                               <input
                                 key={day}
-                                aria-label={`${member.name} ${product.code} ${day} target`}
+                                aria-label={`${member.name} ${displayProductCode(product.code)} ${day} target`}
                                 name={`day${index + 1}`}
                                 type="number"
                                 min="0"

@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 
-const services = ["database_leads", "reference_leads", "qualified_leads", "leads"] as const;
+const services = ["database_leads", "reference_leads", "qualified_leads", "leads", "uncategorized_leads"] as const;
 type LeadService = (typeof services)[number];
 type ApiKeyRow = {
   id: string;
@@ -15,6 +15,7 @@ const serviceLabels: Record<LeadService, string> = {
   reference_leads: "Reference Leads",
   qualified_leads: "Qualified Leads",
   leads: "Leads",
+  uncategorized_leads: "Uncategorized Leads",
 };
 
 function json(body: Record<string, unknown>, status = 200) {

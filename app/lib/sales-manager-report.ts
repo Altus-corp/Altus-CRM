@@ -5,6 +5,7 @@ import { createAdminClient } from "@/app/lib/supabase/admin";
 import { DATE_KEY, istDayRange, istTodayKey } from "@/app/lib/altus-call-utils";
 import { makeCompanyOf, syncLeadCallLog, type AssignmentRow } from "@/app/lib/lead-call-log";
 import { summarizeTeamPerformance } from "@/app/lib/team-performance";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 async function readAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const rows: T[] = [];
@@ -31,11 +32,17 @@ export async function getSalesManagerReport(params: { from?: string; to?: string
   const selectedTeam = teams.find((team) => team.id === params.team)?.id ?? "";
   const ids = selectedTeam ? [selectedTeam] : teams.map((team) => team.id);
   const memberships = ids.length ? await readAll((lo, hi) => admin.from("crm_team_members").select("team_id, user_id").in("team_id", ids).order("team_id").order("user_id").range(lo, hi)) : [];
-  const memberIds = [...new Set(memberships.map((member) => member.user_id))];
-  const salesRoles = memberIds.length ? await readAll((lo, hi) => admin.from("user_roles").select("user_id, role").in("user_id", memberIds).in("role", ["sales_executive", "sales_manager", "consultant"]).order("user_id").order("role").range(lo, hi)) : [];
-  const salesIds = [...new Set(salesRoles.map((role) => role.user_id))];
+  // Direct manager-to-member links participate in the combined report. A
+  // selected named team remains limited to members of that team.
+  const directMemberIds = selectedTeam ? [] : await getSalesManagerTeamMemberIds(userId);
+  const memberIds = [...new Set([...memberships.map((member) => member.user_id), ...directMemberIds])];
+  // Include the logged-in manager even when they are not a member of their
+  // own team, so the report and its totals include their personal work.
+  const reportUserIds = [...new Set([...memberIds, userId])];
+  const salesRoles = reportUserIds.length ? await readAll((lo, hi) => admin.from("user_roles").select("user_id, role").in("user_id", reportUserIds).in("role", ["sales_executive", "sales_manager", "consultant"]).order("user_id").order("role").range(lo, hi)) : [];
+  const salesIds = [...new Set([...salesRoles.map((role) => role.user_id), userId])];
   const profiles = salesIds.length ? await readAll((lo, hi) => admin.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", salesIds).order("id").range(lo, hi)) : [];
-  const people = profiles.map((person) => ({ id: person.id, name: [person.first_name, person.last_name].filter(Boolean).join(" ") || person.full_name || "Unnamed user", suspended: person.is_suspended ?? false }));
+  const people = profiles.map((person) => ({ id: person.id, name: [person.first_name, person.last_name].filter(Boolean).join(" ") || person.full_name || "Unnamed user", suspended: person.is_suspended ?? false, isManager: person.id === userId }));
   const rawWork = salesIds.length ? await readAll((lo, hi) => admin.from("lead_product_assignments")
     .select("id, lead_id, assigned_to, is_closed, is_ambassador, next_follow_up_at, product:lead_products(code), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(first_name, last_name, phone, email, custom_data)")
     .in("assigned_to", salesIds).eq("is_active", true).order("id").range(lo, hi)) : [];

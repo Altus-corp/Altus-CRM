@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createStageDropdown, createStageDropdownOption, deleteStageDropdown, deleteStageDropdownOption, renameStageDropdown } from "@/app/dashboard/lead-settings/actions";
+import { displayProductCode, displayProductLabel } from "@/app/lib/product-display";
 
 type Product = { id: string; code: string; name: string };
 type Stage = { id: string; product_id: string; name: string; position: number };
@@ -34,14 +35,14 @@ export function DropdownManagement({ products, stages, dropdowns }: { products: 
       <div className="flex items-start gap-3">
         <span className="grid h-11 w-11 place-items-center rounded-[14px] bg-red-50 text-xl text-red-600">▾</span>
         <div>
-          <p className="text-xs font-extrabold tracking-[0.08em] text-red-600">{product.code}</p>
+          <p className="text-xs font-extrabold tracking-[0.08em] text-red-600">{displayProductCode(product.code)}</p>
           <h2 className="mt-0.5 text-[21px] font-extrabold tracking-[-0.04em] text-slate-900">Dropdown management</h2>
           <p className="mt-0.5 text-xs font-medium text-slate-500">Create dropdowns for a product stage and add the options users can pick. They appear as columns on that stage.</p>
         </div>
       </div>
       <div className="flex gap-2">
         <select value={productId} onChange={(event) => { setProductId(event.target.value); setStageChoice(""); }} aria-label="Product" className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-red-400">
-          {products.map((item) => <option key={item.id} value={item.id}>{item.code} — {item.name}</option>)}
+          {products.map((item) => <option key={item.id} value={item.id}>{displayProductLabel(item)}</option>)}
         </select>
         <select value={stage?.id ?? ""} onChange={(event) => setStageChoice(event.target.value)} disabled={!productStages.length} aria-label="Stage" className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50">
           {productStages.length ? productStages.map((item) => <option key={item.id} value={item.id}>{item.name}</option>) : <option value="">No stages</option>}
@@ -51,7 +52,7 @@ export function DropdownManagement({ products, stages, dropdowns }: { products: 
 
     {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" role="alert">{error}</p>}
 
-    {!stage ? <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">{product.code} has no stages yet. Add stages under Product management first.</p> : <>
+    {!stage ? <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">{displayProductCode(product.code)} has no stages yet. Add stages under Product management first.</p> : <>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         {stageDropdowns.map((dropdown) => <article key={dropdown.id} className="rounded-xl border border-slate-100 bg-white p-3.5">
           <div className="flex items-center justify-between gap-2 rounded-lg bg-red-50 px-3 py-2.5">
@@ -66,7 +67,7 @@ export function DropdownManagement({ products, stages, dropdowns }: { products: 
           </div>
           <form key={`${dropdown.id}:${dropdown.options.length}`} action={run(createStageDropdownOption)} className="mt-3 flex gap-2 border-t border-slate-100 pt-3"><input type="hidden" name="dropdownId" value={dropdown.id} /><input name="label" required maxLength={100} placeholder="Enter new option" className={inputClass} /><button className={addButtonClass}>＋ Add option</button></form>
         </article>)}
-        {!stageDropdowns.length && <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-xs font-semibold text-slate-400 lg:col-span-2">No dropdowns for {product.code} › {stage.name} yet.</p>}
+        {!stageDropdowns.length && <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-xs font-semibold text-slate-400 lg:col-span-2">No dropdowns for {displayProductCode(product.code)} › {stage.name} yet.</p>}
       </div>
 
       <form key={`${stage.id}:${stageDropdowns.length}`} action={run(createStageDropdown)} className="mt-4 flex gap-2 border-t border-slate-100 pt-4"><input type="hidden" name="stageId" value={stage.id} /><input name="label" required maxLength={80} placeholder={`New dropdown for ${stage.name} (e.g. Confirmation Call Status)`} className={inputClass} /><button className={addButtonClass}>＋ Add dropdown</button></form>

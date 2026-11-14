@@ -1,4 +1,6 @@
-export type PerformancePerson = { id: string; name: string; suspended: boolean };
+import { displayProductCode } from "@/app/lib/product-display";
+
+export type PerformancePerson = { id: string; name: string; suspended: boolean; isManager?: boolean };
 export type PerformanceCall = { user_id: string; lead_id: string | null; direction: string; is_connected: boolean; duration_seconds: number | null; called_at: string };
 export type PerformanceAssignment = {
   id: string; lead_id: string; assigned_to: string; is_closed: boolean; is_ambassador: boolean;
@@ -32,7 +34,7 @@ export function summarizeTeamPerformance(people: PerformancePerson[], calls: Per
   const stages = new Map<string, { product: string; stage: string; count: number }>();
   const resolutions = new Map<string, number>();
   for (const assignment of assignments) {
-    const product = assignment.product?.code ?? "Unknown product";
+    const product = displayProductCode(assignment.product?.code, "Unknown product");
     const stage = assignment.stage?.name ?? "No stage";
     const key = JSON.stringify([product, stage]);
     const group = stages.get(key) ?? { product, stage, count: 0 };

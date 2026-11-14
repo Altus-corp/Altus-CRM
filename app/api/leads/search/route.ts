@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireUser } from "@/app/lib/auth";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { displayProductCode } from "@/app/lib/product-display";
 
 const text = (value: unknown) => typeof value === "string" || typeof value === "number" ? String(value) : "";
 
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     if (["dnd", "not interested", "wrong number", "old graduate"].includes(resolutionName)) return [];
     const haystack = [lead.first_name, lead.last_name, lead.email, lead.phone, lead.lead_number ? `L-${lead.lead_number}` : "", product?.code, product?.name, stage?.name, resolution?.name, JSON.stringify(lead.custom_data ?? {})].map(text).join(" ").toLowerCase();
     if (!haystack.includes(query)) return [];
-    return [{ assignmentId: row.id, leadId: row.lead_id, name: [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unnamed lead", phone: lead.phone ?? null, email: lead.email ?? null, product: product?.code ?? null, stage: stage?.name ?? null }];
+    return [{ assignmentId: row.id, leadId: row.lead_id, name: [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unnamed lead", phone: lead.phone ?? null, email: lead.email ?? null, product: product?.code ? displayProductCode(product.code) : null, stage: stage?.name ?? null }];
   }).slice(0, 20);
   return Response.json({ ok: true, results });
 }

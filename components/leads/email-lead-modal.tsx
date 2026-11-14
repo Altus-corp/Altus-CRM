@@ -7,10 +7,12 @@ import { Mail, X } from "lucide-react";
 import { sendEmailToLead } from "@/app/dashboard/leads/actions";
 import { TemplatePicker } from "./template-picker";
 import { renderTemplate } from "@/app/lib/message-templates";
+import { displayProductCode } from "@/app/lib/product-display";
 
 export function EmailLeadModal({ leadId, assignments, initialAssignmentId, leadName, firstName, lastName, email, onClose, onSent }: { leadId: string; assignments: { id: string; code: string }[]; initialAssignmentId: string; leadName: string; firstName: string; lastName: string | null; email: string; onClose: () => void; onSent: () => void }) {
   const [assignmentId, setAssignmentId] = useState(initialAssignmentId);
-  const product = assignments.find((assignment) => assignment.id === assignmentId)?.code ?? null;
+  const productCode = assignments.find((assignment) => assignment.id === assignmentId)?.code ?? null;
+  const product = productCode ? displayProductCode(productCode) : null;
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -31,7 +33,7 @@ export function EmailLeadModal({ leadId, assignments, initialAssignmentId, leadN
   return createPortal(<div className="fixed inset-0 z-[110] grid place-items-center bg-slate-950/35 p-4" role="dialog" aria-modal="true" aria-label={`Email ${leadName}`}>
     <form onSubmit={submit} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
       <div className="flex items-start justify-between gap-3"><div><h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900"><Mail className="h-4 w-4 text-red-600" />Email {leadName}</h3><p className="mt-1 text-xs text-slate-500">To: {email}. Sent from your own mailbox.</p></div><button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><X className="h-4 w-4" /></button></div>
-      {assignments.length > 1 && <label className="mt-3 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Product<select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-red-400">{assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.code}</option>)}</select></label>}
+      {assignments.length > 1 && <label className="mt-3 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Product<select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-red-400">{assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{displayProductCode(assignment.code)}</option>)}</select></label>}
       <TemplatePicker key={assignmentId} assignmentId={assignmentId} channel="email" values={{ firstName, lastName, product }} onPick={(templateSubject, templateBody) => { setSubject(templateSubject); setBody(templateBody); }} />
       <input value={subject} onChange={(event) => setSubject(event.target.value)} required maxLength={200} placeholder="Subject" className="mt-3 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" />
       <textarea value={body} onChange={(event) => setBody(event.target.value)} required maxLength={10000} placeholder="Write your message..." className="mt-3 min-h-40 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-red-400" />

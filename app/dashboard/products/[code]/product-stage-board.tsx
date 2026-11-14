@@ -6,6 +6,7 @@ import { Pin, PinOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createLeadNote, manuallyAssignLeads, savePreConfirmation, saveStageDropdownValue, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import { formatCrmDate } from "@/app/lib/date";
+import { displayProductCode } from "@/app/lib/product-display";
 import { FollowUpActions } from "@/components/dashboard/follow-up-actions";
 import { FollowUpDateModal, type LeadColumn, type LeadRow } from "@/components/leads/leads-table";
 
@@ -51,6 +52,7 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
   const active = stages.find((stage) => stage.id === activeId) ?? stages[0];
   const visible = active ? leads.filter((lead) => lead.stageId === active.id) : [];
   const orientationCode = product.code.toUpperCase();
+  const productLabel = displayProductCode(product.code);
   const isOrientation = orientationCode === "PSO" || orientationCode === "BSSO";
   const stageName = active?.name.toLowerCase() ?? "";
   const isPreOrientation = isOrientation && stageName === `pre ${orientationCode.toLowerCase()}`;
@@ -158,18 +160,18 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
     }
   }
 
-  return <section className="mx-auto max-w-[1500px] space-y-4" aria-label={`${product.code} leads`}>
+  return <section className="mx-auto max-w-[1500px] space-y-4" aria-label={`${productLabel} leads`}>
     <header className="rounded-2xl bg-white p-4 shadow-sm">
       <p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">PRODUCT</p>
-      <h1 className="mt-0.5 text-xl font-extrabold tracking-[-0.03em] text-slate-900">{product.code}</h1>
+      <h1 className="mt-0.5 text-xl font-extrabold tracking-[-0.03em] text-slate-900">{productLabel}</h1>
       <p className="mt-1 text-xs text-slate-500">{product.name} · leads assigned to you, grouped by stage.</p>
 
-      {stages.length ? <div className="mt-4 grid gap-2 sm:grid-cols-3" role="tablist" aria-label={`${product.code} stages`}>
+      {stages.length ? <div className="mt-4 grid gap-2 sm:grid-cols-3" role="tablist" aria-label={`${productLabel} stages`}>
         {stages.map((stage) => <button key={stage.id} type="button" role="tab" aria-selected={stage.id === active?.id} onClick={() => setActiveId(stage.id)} className={`rounded-xl border px-4 py-3 text-left transition ${stage.id === active?.id ? "border-red-300 border-b-2 border-b-red-600 bg-red-50/60" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}>
           <p className="text-xs font-extrabold text-slate-800">{stage.name}</p>
           <p className="mt-0.5 text-2xl font-extrabold leading-tight text-slate-900">{countFor(stage.id)}</p>
         </button>)}
-      </div> : <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">No stages are configured for {product.code} yet. Ask an admin to add them in Lead configuration.</p>}
+      </div> : <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">No stages are configured for {productLabel} yet. Ask an admin to add them in Lead configuration.</p>}
     </header>
 
     {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" role="alert">{error}</p>}
@@ -199,7 +201,7 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
             {orderedColumns.map((column) => <td key={column.key} style={{ width: widthOf(column), minWidth: widthOf(column), ...stickyStyle(column.key) }} className={`relative z-0 bg-white px-4 py-2.5 ${column.key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""}`}>{renderCell(column.key, lead)}</td>)}
           </tr>)}</tbody>
         </table>
-        {!visible.length && <p className="px-3 py-8 text-center text-xs font-semibold text-slate-400">No leads in {active.name} yet. A lead appears here once its product is {product.code} and its stage is {active.name}.</p>}
+        {!visible.length && <p className="px-3 py-8 text-center text-xs font-semibold text-slate-400">No leads in {active.name} yet. A lead appears here once its product is {productLabel} and its stage is {active.name}.</p>}
       </div>
     </div>}
     {detailLead && <LeadDetailPanel lead={detailLead} columns={detailColumns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}

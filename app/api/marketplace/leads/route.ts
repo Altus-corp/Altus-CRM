@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 
-const services = ["database_leads", "reference_leads", "qualified_leads", "leads"] as const;
+const services = ["database_leads", "reference_leads", "qualified_leads", "leads", "uncategorized_leads"] as const;
 type LeadService = (typeof services)[number];
 type ApiKeyRow = { id: string; name: string; subscriptions: Record<string, { read?: boolean; write?: boolean }>; created_by: string | null };
 
@@ -49,7 +49,7 @@ async function authorize(request: NextRequest, service: LeadService, mode: "read
 
 export async function GET(request: NextRequest) {
   const service = request.nextUrl.searchParams.get("service");
-  if (!isService(service)) return json({ ok: false, error: "service must be database_leads, reference_leads, qualified_leads, or leads." }, 400);
+  if (!isService(service)) return json({ ok: false, error: "service must be database_leads, reference_leads, qualified_leads, leads, or uncategorized_leads." }, 400);
   const access = await authorize(request, service, "read");
   if (access.error) return access.error;
   const limit = Math.min(100, Math.max(1, Number(request.nextUrl.searchParams.get("limit")) || 50));
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
   let body: Record<string, unknown>;
   try { body = await request.json() as Record<string, unknown>; } catch { return json({ ok: false, error: "Request body must be valid JSON." }, 400); }
   const service = body.service;
-  if (!isService(service)) return json({ ok: false, error: "service must be database_leads, reference_leads, qualified_leads, or leads." }, 400);
+  if (!isService(service)) return json({ ok: false, error: "service must be database_leads, reference_leads, qualified_leads, leads, or uncategorized_leads." }, 400);
   const access = await authorize(request, service, "write");
   if (access.error) return access.error;
   if (!access.key.created_by) return json({ ok: false, error: "This API key no longer has an owning CRM admin. Generate a replacement key." }, 409);
@@ -75,13 +75,17 @@ export async function POST(request: NextRequest) {
   const lastName = text(body.last_name ?? body.lastName, 120);
   const email = text(body.email, 254) || null;
   const phone = text(body.phone, 40) || null;
-  const productCode = text(body.product_code ?? body.productCode, 80).toUpperCase();
+  // Product is optional. A missing product is retained in Uncategorized
+  // instead of rejecting an otherwise valid external lead.
+  const submittedProductCode = text(body.product_code ?? body.productCode, 80).toUpperCase();
+  const productCode = submittedProductCode || "UNCATEGORIZED";
+  const leadDatabase: LeadService = productCode === "UNCATEGORIZED" ? "uncategorized_leads" : service;
   const stageName = text(body.stage_name ?? body.stageName, 120);
   const externalId = text(body.external_id ?? body.externalId, 180);
   const customData = body.custom_data ?? body.customData;
-  if (!firstName || !productCode) {
-    await recordApiActivity(access.supabase, access.key, { method: "POST", action: "create_lead", service, success: false, statusCode: 400, details: { error: "first_name and product_code are required." } });
-    return json({ ok: false, error: "first_name and product_code are required." }, 400);
+  if (!firstName) {
+    await recordApiActivity(access.supabase, access.key, { method: "POST", action: "create_lead", service, success: false, statusCode: 400, details: { error: "first_name is required." } });
+    return json({ ok: false, error: "first_name is required." }, 400);
   }
   if (customData !== undefined && (!customData || typeof customData !== "object" || Array.isArray(customData))) {
     await recordApiActivity(access.supabase, access.key, { method: "POST", action: "create_lead", service, success: false, statusCode: 400, details: { error: "custom_data must be a JSON object.", product_code: productCode, external_id: externalId || null } });
@@ -113,7 +117,7 @@ export async function POST(request: NextRequest) {
       return json({ ok: false, error: "A lead with this external_id was already submitted using this API key.", lead_id: existing.id }, 409);
     }
   }
-  const { data: lead, error: insertError } = await access.supabase.from("leads").insert({ first_name: firstName, last_name: lastName || null, email, phone, product_id: product.id, stage_id: stageId, custom_data: customData ?? {}, created_by: access.key.created_by, lead_database: service, external_source: externalSource, external_id: externalId || null }).select("id, lead_number, created_at").single();
+  const { data: lead, error: insertError } = await access.supabase.from("leads").insert({ first_name: firstName, last_name: lastName || null, email, phone, product_id: product.id, stage_id: stageId, custom_data: customData ?? {}, created_by: access.key.created_by, lead_database: leadDatabase, external_source: externalSource, external_id: externalId || null }).select("id, lead_number, created_at").single();
   if (insertError) {
     const statusCode = insertError.code === "23505" ? 409 : 500;
     const errorMessage = insertError.code === "23505" ? "A lead with this phone number already exists." : insertError.message;
@@ -121,9 +125,10 @@ export async function POST(request: NextRequest) {
     return json({ ok: false, error: errorMessage }, statusCode);
   }
   const { data: assignment } = await access.supabase.from("lead_product_assignments").select("id").eq("lead_id", lead.id).eq("product_id", product.id).maybeSingle();
-  await access.supabase.from("lead_activities").insert({ lead_id: lead.id, lead_product_assignment_id: assignment?.id ?? null, activity_type: "marketplace_api_lead_created", note: `Lead created through CRM Market Place API for ${service}.`, metadata: { marketplace_api_key_id: access.key.id, lead_database: service, product_code: product.code, external_id: externalId || null }, created_by: access.key.created_by });
-  await recordApiActivity(access.supabase, access.key, { method: "POST", action: "create_lead", service, success: true, statusCode: 201, leadId: lead.id, externalId: externalId || undefined, details: { lead_number: lead.lead_number, product_code: product.code, stage_name: stageName || null } });
+  await access.supabase.from("lead_activities").insert({ lead_id: lead.id, lead_product_assignment_id: assignment?.id ?? null, activity_type: "marketplace_api_lead_created", note: `Lead created through CRM Market Place API for ${leadDatabase}.`, metadata: { marketplace_api_key_id: access.key.id, requested_service: service, lead_database: leadDatabase, product_code: product.code, external_id: externalId || null }, created_by: access.key.created_by });
+  await recordApiActivity(access.supabase, access.key, { method: "POST", action: "create_lead", service: leadDatabase, success: true, statusCode: 201, leadId: lead.id, externalId: externalId || undefined, details: { requested_service: service, lead_number: lead.lead_number, product_code: product.code, stage_name: stageName || null } });
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/uncategorized-leads");
   revalidatePath("/dashboard");
-  return json({ ok: true, message: "Lead created.", lead: { id: lead.id, lead_number: lead.lead_number, service, product_code: product.code, stage_name: stageName || null, created_at: lead.created_at } }, 201);
+  return json({ ok: true, message: "Lead created.", lead: { id: lead.id, lead_number: lead.lead_number, service: leadDatabase, product_code: product.code, stage_name: stageName || null, created_at: lead.created_at } }, 201);
 }

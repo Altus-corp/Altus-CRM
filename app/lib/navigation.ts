@@ -21,6 +21,7 @@ const roleNavigation: DashboardNavItem[] = [
       { label: "Leads Master", href: "/dashboard/leads" },
       { label: "Team Leads", href: "/dashboard/leads?team=1" },
       { label: "Team Leads", href: "/dashboard/team-leads" },
+      { label: "Uncategorized Leads", href: "/dashboard/uncategorized-leads" },
     ],
   },
   {

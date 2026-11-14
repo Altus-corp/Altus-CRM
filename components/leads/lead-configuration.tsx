@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { displayProductCode, displayProductLabel } from "@/app/lib/product-display";
 import {
   createLeadProduct,
   createLeadResolution,
@@ -25,8 +26,6 @@ type ProductResolution = {
   follow_up_after_hours: number | null;
   closes_lead: boolean;
 };
-const displayProductCode = (code: string) => code.replace(/_/g, " ");
-
 export function LeadConfiguration({
   products,
   stages,
@@ -112,7 +111,7 @@ export function LeadConfiguration({
         >
           {products.map((product) => (
             <option key={product.id} value={product.id}>
-              {product.code} — {product.name}
+              {displayProductLabel(product)}
             </option>
           ))}
         </select>

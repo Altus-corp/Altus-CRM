@@ -25,15 +25,22 @@ export default async function DashboardLayout({
   const indiaDate = [indiaDateParts.find((part) => part.type === "year")?.value, indiaDateParts.find((part) => part.type === "month")?.value, indiaDateParts.find((part) => part.type === "day")?.value].join("-");
   // The Products submenu is available to Admin, Sales Executives, and Sales
   // Managers, so each needs the shared active-product configuration.
-  const sharedConfig = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager")
-    ? await getLeadSharedConfig()
-    : null;
-  const { count: todayAssignedLeads } = hasSalesWorkspace
+  const sharedConfigPromise = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager")
+    ? getLeadSharedConfig()
+    : Promise.resolve(null);
+  // This single-row counter is maintained by a database trigger. Retain the
+  // exact-count fallback only until the accompanying migration is applied.
+  const focusedCountPromise = hasSalesWorkspace
+    ? supabase.from("lead_focused_assignment_counts").select("assignment_count").eq("user_id", userId).eq("focused_on", indiaDate).maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+  const [sharedConfig, focusedCountResult] = await Promise.all([sharedConfigPromise, focusedCountPromise]);
+  const focusedCountFallback = hasSalesWorkspace && focusedCountResult.error
     ? await supabase.from("lead_product_assignments").select("id", { count: "exact", head: true }).eq("assigned_to", userId).eq("focused_on", indiaDate).eq("is_active", true)
-    : { count: 0 };
+    : null;
+  const todayAssignedLeads = Number(focusedCountResult.data?.assignment_count ?? focusedCountFallback?.count ?? 0);
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} email={email} roleLabel={roleLabel} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads ?? 0} products={sharedConfig?.products ?? []}>
+    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} email={email} roleLabel={roleLabel} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads} products={sharedConfig?.products ?? []}>
       {children}
     </DashboardShell>
   );

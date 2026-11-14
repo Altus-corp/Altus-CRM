@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { isAmbassadorWorkspace, type AppRole } from "@/app/lib/roles";
+import { displayProductCode } from "@/app/lib/product-display";
 import type { DashboardNavItem } from "@/app/lib/navigation";
 import { signOut } from "./actions";
 import { TodaysCallTarget } from "@/components/dashboard/todays-call-target";
@@ -82,7 +83,7 @@ function ProductsNavigation({ products, pathname }: { products: DashboardShellPr
         <div id="products-navigation" className="ml-3 mt-1.5 border-l-2 border-red-200 pl-3">
           {products.length ? products.map((product) => {
             const href = `/dashboard/products/${product.code.toLowerCase()}`;
-            return <Link key={product.id} href={href} title={product.name} className={`block py-0.5 text-[11px] font-semibold ${pathname === href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>{product.code}</Link>;
+            return <Link key={product.id} href={href} title={product.name} className={`block py-0.5 text-[11px] font-semibold ${pathname === href ? "text-red-600" : "text-slate-500 hover:text-red-600"}`}>{displayProductCode(product.code)}</Link>;
           }) : <p className="py-0.5 text-[10px] font-semibold text-slate-400">No products yet</p>}
         </div>
       )}
@@ -94,6 +95,7 @@ function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }
   const children = item.children?.filter((child) => {
     if (child.href === "/dashboard/leads?team=1") return isAdmin;
     if (child.href === "/dashboard/team-leads") return isSalesManager;
+    if (child.href === "/dashboard/uncategorized-leads") return isAdmin;
     return true;
   }) ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
@@ -102,7 +104,7 @@ function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}><span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Leads" /></span>{item.label}</Link>;
   }
 
-  const isCurrentSection = pathname === item.href;
+  const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
   const open = isOpen ?? isCurrentSection;
   return <div>
     <div className={`flex min-h-9 items-center rounded-[12px] transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>

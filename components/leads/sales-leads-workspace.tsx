@@ -18,6 +18,23 @@ type ProductResolution = {
   resolution_name: string;
 };
 type TeamMember = { id: string; name: string };
+type Ambassador = { id: string; name: string };
+
+function manualLeadProductLabel(product: Product) {
+  const code = product.code.trim().toUpperCase();
+  const shortLabels: Record<string, string> = {
+    ALTUS_OS: "OS",
+    AMBASSADOR: "Ambassador",
+    BSS: "BSS",
+    BSSO: "BSSO",
+    PS: "PS",
+    PSO: "PSO",
+    RETAINER: "Retainer",
+    KEYNOTE: "Keynote",
+  };
+  if (shortLabels[code]) return shortLabels[code];
+  return `${product.code} - ${product.name}`;
+}
 
 export function SalesLeadsWorkspace({
   columns,
@@ -28,6 +45,7 @@ export function SalesLeadsWorkspace({
   products,
   stages,
   productResolutions,
+  ambassadors = [],
   isSalesManager = false,
   teamMembers = [],
   selectedTeamMemberId = null,
@@ -45,6 +63,7 @@ export function SalesLeadsWorkspace({
   products: Product[];
   stages: Stage[];
   productResolutions: ProductResolution[];
+  ambassadors?: Ambassador[];
   isSalesManager?: boolean;
   teamMembers?: TeamMember[];
   selectedTeamMemberId?: string | null;
@@ -188,6 +207,7 @@ export function SalesLeadsWorkspace({
       {addLeadMode === "manual" && (
         <ManualLeadModal
           products={products}
+          ambassadors={ambassadors}
           onClose={() => setAddLeadMode(null)}
         />
       )}
@@ -203,21 +223,26 @@ export function SalesLeadsWorkspace({
 
 export function ManualLeadModal({
   products,
+  ambassadors = [],
   onClose,
   outsideRoundRobin = false,
 }: {
   products: Product[];
+  ambassadors?: Ambassador[];
   onClose: () => void;
   outsideRoundRobin?: boolean;
 }) {
   const router = useRouter();
-  const [productId, setProductId] = useState("");
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [ambassadorId, setAmbassadorId] = useState("");
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    formData.set("productId", productId);
+    formData.delete("productId");
+    productIds.forEach((productId) => formData.append("productId", productId));
+    if (ambassadorId) formData.set("ambassadorId", ambassadorId);
     startTransition(async () => {
       try {
         const result = await createManualLead(formData);
@@ -305,22 +330,20 @@ export function ManualLeadModal({
               className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400"
             />
           </label>
-          <label className="text-xs font-bold text-slate-700">
-            Product *
-            <select
-              required
-              value={productId}
-              onChange={(event) => setProductId(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-red-400"
-            >
-              <option value="">Choose product</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.code} - {product.name}
-                </option>
-              ))}
+          <fieldset className="sm:col-span-2">
+            <legend className="text-xs font-bold text-slate-700">Products *</legend>
+            <p className="mt-1 text-[11px] text-slate-500">Select one or more products for this lead.</p>
+            <div className="mt-2 grid max-h-40 grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-2 sm:grid-cols-3">
+              {products.map((product) => <label key={product.id} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-red-50"><input type="checkbox" checked={productIds.includes(product.id)} onChange={(event) => setProductIds((ids) => event.target.checked ? [...ids, product.id] : ids.filter((id) => id !== product.id))} className="h-4 w-4 accent-red-600" /> <span className="truncate">{manualLeadProductLabel(product)}</span></label>)}
+            </div>
+          </fieldset>
+          {ambassadors.length > 0 && <label className="sm:col-span-2 text-xs font-bold text-slate-700">
+            Select Ambassador <span className="font-medium text-slate-400">(optional)</span>
+            <select value={ambassadorId} onChange={(event) => setAmbassadorId(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-red-400">
+              <option value="">No Ambassador selected</option>
+              {ambassadors.map((ambassador) => <option key={ambassador.id} value={ambassador.id}>{ambassador.name}</option>)}
             </select>
-          </label>
+          </label>}
         </div>
         {message && (
           <p
@@ -340,7 +363,7 @@ export function ManualLeadModal({
           </button>
           <button
             type="submit"
-            disabled={isPending || !productId}
+            disabled={isPending || !productIds.length}
             className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white disabled:opacity-50"
           >
             {isPending ? "Adding..." : "Add lead"}

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/app/lib/auth";
 import { isAmbassadorWorkspace } from "@/app/lib/roles";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { displayProductCode } from "@/app/lib/product-display";
 
 export const instant = false;
 
@@ -101,7 +102,7 @@ export default async function AmbassadorLeadsPage({ searchParams }: { searchPara
             <td className="px-4 py-3 font-semibold text-slate-600">{lead.phone || "—"}</td>
             <td className="px-4 py-3"><p className="font-bold text-slate-700">{submittedBy === userId ? "You" : profileName(profiles.get(submittedBy))}</p>{submittedBy !== userId && <p className="mt-0.5 text-[10px] font-semibold text-red-600">Junior Ambassador</p>}</td>
             <td className="px-4 py-3 font-semibold text-slate-600">{assignment?.assigned_to ? profileName(profiles.get(assignment.assigned_to)) : "Unassigned"}</td>
-            <td className="px-4 py-3 font-semibold text-slate-600">{product?.code ?? product?.name ?? "—"}</td>
+            <td className="px-4 py-3 font-semibold text-slate-600">{product?.code ? displayProductCode(product.code) : product?.name ?? "—"}</td>
             <td className="px-4 py-3 font-semibold text-slate-600">{stage?.name ?? "—"}</td>
             <td className="px-4 py-3 font-semibold text-slate-600">{resolution?.name ?? "—"}</td>
             <td className="px-4 py-3 font-semibold text-slate-600">{formatDate(lead.created_at)}</td>

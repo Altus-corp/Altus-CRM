@@ -368,6 +368,8 @@ function leadDatabaseFromValue(value: string) {
     qualified: "qualified_leads",
     reference_leads: "reference_leads",
     reference: "reference_leads",
+    uncategorized_leads: "uncategorized_leads",
+    uncategorized: "uncategorized_leads",
     leads: "leads",
     lead: "leads",
   };
@@ -570,7 +572,7 @@ export async function importLeadsCsv(
       ) ?? fallbackLeadDatabase;
 
     const primaryProduct =
-      fieldAt(record, "product", "product code", "product_code") || "PSO";
+      fieldAt(record, "product", "product code", "product_code") || "UNCATEGORIZED";
     const additionalProducts = headers
       .reduce<string[]>((values, header, index) => {
         if (
@@ -627,7 +629,7 @@ export async function importLeadsCsv(
     records.push({
       productIds: productsForLead.map((selected) => selected.id),
       productCodes: productsForLead.map((selected) => selected.code),
-      leadDatabase: rowLeadDatabase,
+      leadDatabase: product.code.toUpperCase() === "UNCATEGORIZED" ? "uncategorized_leads" : rowLeadDatabase,
       assigneeId,
       lead: {
         product_id: product.id,
@@ -644,7 +646,7 @@ export async function importLeadsCsv(
         assigned_to: assigneeId,
         assigned_at: assigneeId ? new Date().toISOString() : null,
         created_by: userId,
-        lead_database: rowLeadDatabase,
+        lead_database: product.code.toUpperCase() === "UNCATEGORIZED" ? "uncategorized_leads" : rowLeadDatabase,
       },
     });
   }
@@ -652,7 +654,7 @@ export async function importLeadsCsv(
     return {
       ok: false,
       message:
-        "No valid rows found. Each row needs First Name, Last Name, a valid 10-digit Cell Number, an optional valid Sales Person, and valid Product codes. Product defaults to PSO when blank.",
+        "No valid rows found. Each row needs First Name, Last Name, a valid 10-digit Cell Number, an optional valid Sales Person, and valid Product codes. Blank Product values go to Uncategorized Leads.",
       skipped,
     };
   for (let index = 0; index < records.length; index += 200) {
@@ -725,6 +727,7 @@ export async function importLeadsCsv(
     }
   }
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/uncategorized-leads");
   if (ambassadorImport) revalidatePath("/dashboard");
   return {
     ok: true,
@@ -2176,31 +2179,49 @@ export async function createManualLead(
     .trim()
     .toLowerCase();
   const phone = String(formData.get("phone") ?? "").trim();
-  const productId = String(formData.get("productId") ?? "");
+  const productIds = [...new Set(formData.getAll("productId").map(String).map((value) => value.trim()).filter(Boolean))];
+  const productId = productIds[0] ?? "";
   const stageId = String(formData.get("stageId") ?? "");
+  const ambassadorId = String(formData.get("ambassadorId") ?? "").trim();
   if (
     !firstName ||
     firstName.length > 120 ||
     lastName.length > 120 ||
     email.length > 254 ||
     phone.length > 30 ||
-    !productId
+    !productId ||
+    productIds.length > 10
   )
     return {
       ok: false,
       message:
-        "Enter a first name and choose a product. Check the field lengths.",
+        "Enter a first name and choose up to ten products. Check the field lengths.",
     };
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     return { ok: false, message: "Enter a valid email address." };
   const supabase = createAdminClient();
-  const { data: product } = await supabase
+  const { data: selectedProducts, error: productsError } = await supabase
     .from("lead_products")
     .select("id, code")
-    .eq("id", productId)
+    .in("id", productIds)
     .eq("is_active", true)
-    .maybeSingle();
-  if (!product) return { ok: false, message: "Choose an active product." };
+    .order("code");
+  const productsById = new Map((selectedProducts ?? []).map((product) => [product.id, product]));
+  const product = productsById.get(productId);
+  if (productsError || !product || productsById.size !== productIds.length)
+    return { ok: false, message: "Choose active products." };
+  if (ambassadorId) {
+    if (!user.roles.some((role) => ["admin", "sales_executive", "sales_manager"].includes(role)))
+      return { ok: false, message: "Only an admin, Sales Executive, or Sales Manager can select an Ambassador for a new lead." };
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ambassadorId))
+      return { ok: false, message: "Choose a valid Ambassador." };
+    const [roleResult, profileResult] = await Promise.all([
+      supabase.from("user_roles").select("user_id").eq("user_id", ambassadorId).eq("role", "ambassador").maybeSingle(),
+      supabase.from("profiles").select("id").eq("id", ambassadorId).eq("is_suspended", false).maybeSingle(),
+    ]);
+    if (roleResult.error || profileResult.error || !roleResult.data || !profileResult.data)
+      return { ok: false, message: "Choose an active Ambassador." };
+  }
   if (stageId) {
     const { data: stage } = await supabase
       .from("lead_stages")
@@ -2229,6 +2250,7 @@ export async function createManualLead(
       assigned_at: assignedAt,
       created_by: user.userId,
       lead_database: "leads",
+      channel_partner_ids: ambassadorId ? [ambassadorId] : [],
     })
     .select("id, assigned_to")
     .single();
@@ -2243,17 +2265,35 @@ export async function createManualLead(
     .eq("lead_id", lead.id)
     .eq("product_id", productId)
     .maybeSingle();
+  const today = indiaToday();
   if (assignment) {
-    const today = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Kolkata",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
     await supabase
       .from("lead_product_assignments")
       .update({ focused_on: today, assignment_origin: "manual" })
       .eq("id", assignment.id);
+  }
+  const additionalProductIds = productIds.slice(1);
+  if (additionalProductIds.length) {
+    const { error: additionalError } = await supabase
+      .from("lead_product_assignments")
+      .insert(additionalProductIds.map((additionalProductId) => ({
+        lead_id: lead.id,
+        product_id: additionalProductId,
+        assigned_to: assignment?.assigned_to ?? lead.assigned_to ?? user.userId,
+        assigned_at: assignedAt,
+        focused_on: today,
+        assignment_origin: "manual",
+        created_by: user.userId,
+      })));
+    if (additionalError)
+      return { ok: false, message: `Lead was created, but the remaining product work could not be added: ${additionalError.message}` };
+  }
+  if (ambassadorId) {
+    const { error: ambassadorError } = await supabase
+      .from("lead_channel_partners")
+      .insert({ lead_id: lead.id, ambassador_id: ambassadorId, assigned_by: user.userId, focused_on: today });
+    if (ambassadorError)
+      return { ok: false, message: `Lead was created, but the Ambassador could not be linked: ${ambassadorError.message}` };
   }
   const { error: activityError } = await supabase
     .from("lead_activities")
@@ -2262,17 +2302,20 @@ export async function createManualLead(
       lead_product_assignment_id: assignment?.id ?? null,
       activity_type: "lead_created",
       note: isAmbassadorWorkspace(user.roles)
-        ? `Lead manually added by an Ambassador and routed to the Relationship Manager for ${product.code}.`
-        : `Lead manually added and assigned to the creating CRM user for ${product.code}.`,
+        ? `Lead manually added by an Ambassador and routed to the Relationship Manager for ${[...productsById.values()].map((item) => item.code).join(", ")}.`
+        : `Lead manually added and assigned to the creating CRM user for ${[...productsById.values()].map((item) => item.code).join(", ")}.`,
       metadata: {
         source: "manual_lead_creation",
         assigned_to: assignment?.assigned_to ?? user.userId,
-        product_id: productId,
+        product_ids: productIds,
+        ambassador_id: ambassadorId || null,
       },
       created_by: user.userId,
     });
   if (activityError) return { ok: false, message: activityError.message };
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/uncategorized-leads");
+  if (ambassadorId) revalidatePath("/dashboard/my-ambassador");
   if (isAmbassadorWorkspace(user.roles)) revalidatePath("/dashboard");
   return {
     ok: true,
@@ -2430,6 +2473,7 @@ export async function manuallyAssignLeads(formData: FormData) {
   revalidatePath("/dashboard/dnd-master");
   revalidatePath("/dashboard/old-graduate-master");
   revalidatePath("/dashboard/my-ambassador");
+  revalidatePath("/dashboard/uncategorized-leads");
 }
 
 export async function deleteLeads(
@@ -2458,6 +2502,7 @@ export async function deleteLeads(
   const { error } = await supabase.from("leads").delete().in("id", leadIds);
   if (error) return { ok: false, message: error.message };
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/uncategorized-leads");
   return {
     ok: true,
     message: `${leadIds.length} lead${leadIds.length === 1 ? "" : "s"} deleted.`,
@@ -3367,6 +3412,20 @@ export async function updateLeadProductInline(formData: FormData) {
     })
     .eq("id", assignmentId);
   if (error) throw new Error(error.message);
+  // Keep the legacy lead product/database fields aligned when this product
+  // assignment is intentionally moved into the Uncategorized holding pool.
+  if (product.code.trim().toUpperCase() === "UNCATEGORIZED") {
+    const { error: leadError } = await supabase
+      .from("leads")
+      .update({
+        product_id: product.id,
+        stage_id: null,
+        latest_resolution_id: null,
+        lead_database: "uncategorized_leads",
+      })
+      .eq("id", leadId);
+    if (leadError) throw new Error(leadError.message);
+  }
   const { error: activityError } = await supabase
     .from("lead_activities")
     .insert({
@@ -3379,6 +3438,7 @@ export async function updateLeadProductInline(formData: FormData) {
     });
   if (activityError) throw new Error(activityError.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/uncategorized-leads");
 }
 
 export async function updateLeadStageInline(formData: FormData) {
