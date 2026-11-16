@@ -815,6 +815,7 @@ export async function editLeadTableColumn(formData: FormData) {
     "dropdown",
     "checkbox",
     "textarea",
+    "link",
   ];
   if (!id || !label || !allowedTypes.includes(fieldType))
     throw new Error("A column name and valid field type are required.");
@@ -958,6 +959,7 @@ export async function createLeadTableColumn(formData: FormData) {
     "dropdown",
     "checkbox",
     "textarea",
+    "link",
   ];
   if (!label || !allowedTypes.includes(fieldType))
     throw new Error("A column name and valid field type are required.");

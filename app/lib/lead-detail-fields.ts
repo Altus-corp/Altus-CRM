@@ -3,8 +3,12 @@ import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
 export function completeLeadDetailColumns(lead: LeadRow, columns: LeadColumn[]): LeadColumn[] {
   const result = [...columns];
   const keys = new Set(result.map((column) => column.field_key));
+  const normalizedLabel = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const hasSystemColumn = (key: "lead_number" | "lead_acquisition_date") => result.some((column) => key === "lead_number"
+    ? column.field_key === key || ["leadno", "leadnumber"].includes(normalizedLabel(column.label))
+    : column.field_key === key || normalizedLabel(column.label) === "leadacquisitiondate");
   const add = (key: string, label: string) => {
-    if (keys.has(key)) return;
+    if (keys.has(key) || (key === "lead_number" || key === "lead_acquisition_date") && hasSystemColumn(key)) return;
     keys.add(key);
     result.push({ id: `__detail_${key}`, field_key: key, label, field_type: "text", read_only: true });
   };

@@ -9,6 +9,7 @@ import { QualifiedLeadDistribution } from "@/components/leads/qualified-lead-dis
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { attendanceAvailability, attendanceForEmail, getWmsAttendance } from "@/app/lib/wms-attendance";
+import { withoutDuplicateSystemColumns } from "@/app/lib/lead-shared-config";
 
 export const instant = false;
 
@@ -69,7 +70,7 @@ export default async function LeadSettingsPage({ searchParams }: { searchParams:
     <section className="mx-auto max-w-7xl">
 
       {tab === "columns" ? (
-        columnsError ? <p className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Columns management is not available. Run the lead-table-columns database migration first.</p> : <ColumnsManagement columns={columns ?? []} />
+        columnsError ? <p className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Columns management is not available. Run the lead-table-columns database migration first.</p> : <ColumnsManagement columns={withoutDuplicateSystemColumns(columns ?? [])} />
       ) : tab === "stages" ? (
         dropdownsError ? <p className="rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">Dropdown management is not set up yet. Run 20261026_create_stage_dropdowns.sql in the Supabase SQL Editor.</p> : <DropdownManagement products={products ?? []} stages={stages ?? []} dropdowns={dropdowns} />
       ) : tab === "products" ? <>

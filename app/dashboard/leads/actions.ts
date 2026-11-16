@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import ExcelJS from "exceljs";
 import { requireAdmin, requireUser } from "@/app/lib/auth";
 import { isAmbassadorWorkspace } from "@/app/lib/roles";
@@ -434,7 +434,7 @@ export async function importLeadsCsv(
       .select("product_id, resolution_id"),
     supabase
       .from("lead_table_columns")
-      .select("field_key, label, source, computed_from"),
+      .select("field_key, label, source, field_type, computed_from"),
     createAdminClient()
       .from("profiles")
       .select("id, first_name, last_name, full_name")
@@ -481,7 +481,7 @@ export async function importLeadsCsv(
   const customColumnsByHeader = new Map(
     importableColumns
       .filter((column) => column.source === "custom")
-      .map((column) => [normalizeHeader(column.label), column.field_key]),
+      .map((column) => [normalizeHeader(column.label), column]),
   );
   const headerFields = headers.map(
     (header) => configuredFieldsByHeader.get(header) ?? header,
@@ -616,16 +616,26 @@ export async function importLeadsCsv(
     ).toLowerCase();
     const resolutionId = resolutionByName.get(resolutionName) ?? null;
     const customData: Record<string, string> = {};
+    let hasInvalidLink = false;
     headers.forEach((header, index) => {
-      const key = customColumnsByHeader.get(header);
+      const column = customColumnsByHeader.get(header);
+      const value = record[index]?.trim() ?? "";
       if (
-        key &&
+        column &&
         !knownHeaders.has(headerFields[index]) &&
         !knownHeaders.has(header) &&
-        record[index]?.trim()
+        value
       )
-        customData[key] = record[index].trim();
+        if (column.field_type === "link" && !isValidLeadLink(value)) {
+          hasInvalidLink = true;
+        } else {
+          customData[column.field_key] = value;
+        }
     });
+    if (hasInvalidLink) {
+      skipped += 1;
+      continue;
+    }
     records.push({
       productIds: productsForLead.map((selected) => selected.id),
       productCodes: productsForLead.map((selected) => selected.code),
@@ -2936,6 +2946,256 @@ export async function createLeadNote(formData: FormData) {
   revalidatePath("/dashboard/leads");
 }
 
+export async function createLeadNoteWithAttachment(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const note = String(formData.get("note") ?? "").trim();
+    const attachmentUrl = String(formData.get("attachmentUrl") ?? "").trim();
+    const attachmentName = String(formData.get("attachmentName") ?? "").trim().slice(0, 180);
+    const attachmentMime = String(formData.get("attachmentMime") ?? "").trim().slice(0, 120);
+    const attachmentSize = Number(formData.get("attachmentSize") ?? 0);
+    if (!leadId || !assignmentId || (!note && !attachmentUrl)) throw new Error("Add a note or attachment.");
+    if (note.length > 2000) throw new Error("Write a note of up to 2,000 characters.");
+
+    let attachment: { url: string; name: string; mime: string; size: number } | null = null;
+    if (attachmentUrl) {
+      const base = process.env.CDN_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+      if (!base) throw new Error("CDN attachments are not configured yet.");
+      const baseUrl = new URL(base);
+      const uploadedUrl = new URL(attachmentUrl);
+      if (uploadedUrl.origin !== baseUrl.origin || !uploadedUrl.pathname.startsWith(`${baseUrl.pathname}/`)) {
+        throw new Error("The attachment must be uploaded through the approved CDN.");
+      }
+      if (!attachmentName || !attachmentMime || !Number.isFinite(attachmentSize) || attachmentSize < 1 || attachmentSize > 100 * 1024 * 1024) {
+        throw new Error("The attachment information is invalid.");
+      }
+      attachment = { url: uploadedUrl.toString(), name: attachmentName, mime: attachmentMime, size: Math.floor(attachmentSize) };
+    }
+
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const { error } = await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "note",
+      note: note || null,
+      metadata: attachment ? { attachments: [attachment] } : {},
+      created_by: userId,
+    });
+    if (error) throw new Error(error.message);
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: attachment ? "Note and attachment saved." : "Note saved." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to save the note." };
+  }
+}
+
+function normalizedLeadContactField(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+export async function createLeadContact(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const firstName = String(formData.get("firstName") ?? "").trim().slice(0, 120);
+    const lastName = String(formData.get("lastName") ?? "").trim().slice(0, 120);
+    const email = String(formData.get("email") ?? "").trim().toLowerCase().slice(0, 254);
+    const designation = String(formData.get("designation") ?? "").trim().slice(0, 160);
+    const departmentFunction = String(formData.get("departmentFunction") ?? "").trim().slice(0, 160);
+    const contactType = String(formData.get("contactType") ?? "secondary");
+    if (!leadId || !assignmentId || !firstName) throw new Error("First name is required.");
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
+    if (!["primary", "secondary"].includes(contactType)) throw new Error("Choose Primary or Secondary contact.");
+
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const { data: fields, error: fieldsError } = await supabase
+      .from("lead_table_columns")
+      .select("field_key, label, source, field_type, options")
+      .eq("source", "custom")
+      .eq("field_type", "dropdown");
+    if (fieldsError) throw new Error("Contact dropdown configuration could not be loaded.");
+    const validateDropdown = (label: string, value: string) => {
+      if (!value) return;
+      const column = (fields ?? []).find((field) => normalizedLeadContactField(field.label) === label);
+      if (!column || !Array.isArray(column.options) || !column.options.includes(value)) {
+        throw new Error(`Choose a valid ${label === "designation" ? "Designation" : "Department/Function"}.`);
+      }
+    };
+    validateDropdown("designation", designation);
+    validateDropdown("departmentfunction", departmentFunction);
+
+    if (contactType === "primary") {
+      const { data: currentLead, error: currentLeadError } = await supabase
+        .from("leads")
+        .select("first_name, last_name, email, custom_data")
+        .eq("id", leadId)
+        .single();
+      if (currentLeadError || !currentLead) throw new Error("This lead is no longer available.");
+      const designationField = (fields ?? []).find((field) => normalizedLeadContactField(field.label) === "designation");
+      const departmentField = (fields ?? []).find((field) => normalizedLeadContactField(field.label) === "departmentfunction");
+      const currentCustomData = currentLead.custom_data && typeof currentLead.custom_data === "object" && !Array.isArray(currentLead.custom_data)
+        ? currentLead.custom_data as Record<string, unknown>
+        : {};
+      const { error: oldContactError } = await supabase.from("lead_contacts").insert({
+        lead_id: leadId,
+        first_name: currentLead.first_name,
+        last_name: currentLead.last_name || null,
+        email: currentLead.email || null,
+        designation: designationField ? String(currentCustomData[designationField.field_key] ?? "") || null : null,
+        department_function: departmentField ? String(currentCustomData[departmentField.field_key] ?? "") || null : null,
+        contact_type: "secondary",
+        created_by: userId,
+      });
+      if (oldContactError) throw new Error(oldContactError.message);
+      const nextCustomData: Record<string, unknown> = { ...currentCustomData };
+      if (designationField) nextCustomData[designationField.field_key] = designation;
+      if (departmentField) nextCustomData[departmentField.field_key] = departmentFunction;
+      const { error: promoteError } = await supabase
+        .from("leads")
+        .update({
+          first_name: firstName,
+          last_name: lastName || null,
+          email: email || null,
+          custom_data: nextCustomData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", leadId);
+      if (promoteError) throw new Error(promoteError.message);
+      // Primary contacts created by the first version of this feature are
+      // legacy child rows. Keep them as history, but no longer display them as
+      // a competing primary once the canonical lead contact is promoted.
+      const { error: demoteError } = await supabase
+        .from("lead_contacts")
+        .update({ contact_type: "secondary", updated_at: new Date().toISOString() })
+        .eq("lead_id", leadId)
+        .eq("contact_type", "primary");
+      if (demoteError) throw new Error(demoteError.message);
+    } else {
+      const { error } = await supabase.from("lead_contacts").insert({
+        lead_id: leadId,
+        first_name: firstName,
+        last_name: lastName || null,
+        email: email || null,
+        designation: designation || null,
+        department_function: departmentFunction || null,
+        contact_type: "secondary",
+        created_by: userId,
+      });
+      if (error) throw new Error(error.message);
+    }
+    const name = [firstName, lastName].filter(Boolean).join(" ");
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "contact_added",
+      note: contactType === "primary" ? `${name} promoted to the lead's Primary contact; the previous lead contact was saved as Secondary.` : `${name} added as Secondary contact.`,
+      metadata: { contact_type: contactType, designation: designation || null, department_function: departmentFunction || null },
+      created_by: userId,
+    });
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: contactType === "primary" ? "Primary contact updated; previous lead contact moved to Secondary." : "Secondary contact added." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to add the contact." };
+  }
+}
+
+// The primary contact lives on the canonical leads row. Promoting a saved
+// secondary swaps its data into that row, keeps the former primary as another
+// secondary, and removes the promoted child row to avoid duplicates.
+export async function makeLeadContactPrimary(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const contactId = String(formData.get("contactId") ?? "");
+    if (!leadId || !assignmentId || !contactId) throw new Error("Choose a Secondary contact.");
+
+    const { userId } = await getEditableLead(leadId, assignmentId);
+    const admin = createAdminClient();
+    const [contactResult, leadResult, fieldsResult] = await Promise.all([
+      admin
+        .from("lead_contacts")
+        .select("id, first_name, last_name, email, designation, department_function")
+        .eq("id", contactId)
+        .eq("lead_id", leadId)
+        .maybeSingle(),
+      admin
+        .from("leads")
+        .select("first_name, last_name, email, custom_data")
+        .eq("id", leadId)
+        .single(),
+      admin
+        .from("lead_table_columns")
+        .select("field_key, label")
+        .eq("source", "custom")
+        .eq("field_type", "dropdown"),
+    ]);
+    if (contactResult.error || !contactResult.data) throw new Error("That Secondary contact is no longer available.");
+    if (leadResult.error || !leadResult.data) throw new Error("This lead is no longer available.");
+    if (fieldsResult.error) throw new Error("Contact field configuration could not be loaded.");
+
+    const contact = contactResult.data;
+    const currentLead = leadResult.data;
+    const fields = fieldsResult.data ?? [];
+    const designationField = fields.find((field) => normalizedLeadContactField(field.label) === "designation");
+    const departmentField = fields.find((field) => normalizedLeadContactField(field.label) === "departmentfunction");
+    const currentCustomData = currentLead.custom_data && typeof currentLead.custom_data === "object" && !Array.isArray(currentLead.custom_data)
+      ? currentLead.custom_data as Record<string, unknown>
+      : {};
+
+    const { error: preserveError } = await admin.from("lead_contacts").insert({
+      lead_id: leadId,
+      first_name: currentLead.first_name,
+      last_name: currentLead.last_name || null,
+      email: currentLead.email || null,
+      designation: designationField ? String(currentCustomData[designationField.field_key] ?? "") || null : null,
+      department_function: departmentField ? String(currentCustomData[departmentField.field_key] ?? "") || null : null,
+      contact_type: "secondary",
+      created_by: userId,
+    });
+    if (preserveError) throw new Error(preserveError.message);
+
+    const nextCustomData: Record<string, unknown> = { ...currentCustomData };
+    if (designationField) nextCustomData[designationField.field_key] = contact.designation || "";
+    if (departmentField) nextCustomData[departmentField.field_key] = contact.department_function || "";
+    const { error: promoteError } = await admin
+      .from("leads")
+      .update({
+        first_name: contact.first_name,
+        last_name: contact.last_name || null,
+        email: contact.email || null,
+        custom_data: nextCustomData,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", leadId);
+    if (promoteError) throw new Error(promoteError.message);
+
+    const { error: removeError } = await admin
+      .from("lead_contacts")
+      .delete()
+      .eq("id", contactId)
+      .eq("lead_id", leadId);
+    if (removeError) throw new Error(removeError.message);
+
+    const previousName = [currentLead.first_name, currentLead.last_name].filter(Boolean).join(" ");
+    const primaryName = [contact.first_name, contact.last_name].filter(Boolean).join(" ");
+    const { error: activityError } = await admin.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "contact_promoted",
+      note: `${primaryName} made Primary contact. ${previousName || "Previous lead contact"} moved to Secondary.`,
+      metadata: { promoted_contact_id: contactId, previous_primary_name: previousName || null },
+      created_by: userId,
+    });
+    if (activityError) throw new Error(activityError.message);
+
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: `${primaryName} is now the Primary contact. The previous Primary is kept as Secondary.` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to make this contact Primary." };
+  }
+}
+
 export async function syncLeadCallTranscripts(
   formData: FormData,
 ): Promise<{ ok: boolean; message: string; synced?: number }> {
@@ -3321,7 +3581,7 @@ export async function updateLeadDetails(formData: FormData) {
       .single(),
     supabase
       .from("lead_table_columns")
-      .select("field_key, label, source, computed_from"),
+      .select("field_key, label, source, field_type, options, computed_from"),
     createAdminClient()
       .from("profiles")
       .select("id, first_name, last_name, full_name")
@@ -3333,7 +3593,7 @@ export async function updateLeadDetails(formData: FormData) {
   const configured = new Map(
     columns.map((column) => [column.field_key, column]),
   );
-  const customData = { ...(lead.custom_data ?? {}) } as Record<string, string>;
+  const customData = { ...(lead.custom_data ?? {}) } as Record<string, unknown>;
   const update: Record<string, unknown> = { custom_data: customData };
   const updatedFields: string[] = [];
   for (const input of values) {
@@ -3362,7 +3622,25 @@ export async function updateLeadDetails(formData: FormData) {
       update.phone = value || null;
       updatedFields.push(column.label);
     } else if (column.source === "custom") {
-      customData[key] = value;
+      const options = Array.isArray(column.options)
+        ? column.options.filter((option): option is string => typeof option === "string")
+        : [];
+      if (column.field_type === "dropdown" && value && !options.includes(value)) {
+        throw new Error(`${column.label} must be selected from the configured dropdown options.`);
+      }
+      if (column.field_type === "number" && value && !Number.isFinite(Number(value))) {
+        throw new Error(`${column.label} must be a valid number.`);
+      }
+      if (column.field_type === "date" && value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new Error(`${column.label} must be a valid date.`);
+      }
+      if (column.field_type === "link" && value && !isValidLeadLink(value)) {
+        throw new Error(`${column.label} must start with https:// or www.`);
+      }
+      if (column.field_type === "checkbox" && !["", "true", "false"].includes(value)) {
+        throw new Error(`${column.label} must be a valid checkbox value.`);
+      }
+      customData[key] = column.field_type === "checkbox" ? value === "true" : value;
       updatedFields.push(column.label);
     }
   }
@@ -3387,6 +3665,92 @@ export async function updateLeadDetails(formData: FormData) {
     if (activityError) throw new Error(activityError.message);
   }
   revalidatePath("/dashboard/leads");
+}
+
+function normalizedCustomOption(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isValidLeadLink(value: string) {
+  if (!/^(https:\/\/|www\.)/i.test(value)) return false;
+  try {
+    const url = new URL(value.startsWith("www.") ? `https://${value}` : value);
+    return url.protocol === "https:" && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+// "Nature of Business" is intentionally the only shared dropdown that a
+// sales user may extend. The lead still has to be assigned to that user, and
+// the field must already expose an Other/Others option.
+export async function addNatureOfBusinessOption(formData: FormData): Promise<{ ok: boolean; message: string; value?: string }> {
+  try {
+    const actor = await requireUser();
+    if (!actor.roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager")) {
+      throw new Error("Only CRM sales users can add a Nature of Business option.");
+    }
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const fieldKey = String(formData.get("fieldKey") ?? "");
+    const requestedValue = String(formData.get("value") ?? "").trim().slice(0, 120);
+    if (!leadId || !assignmentId || !fieldKey || !requestedValue) throw new Error("Enter a Nature of Business value.");
+
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const { data: column, error: columnError } = await supabase
+      .from("lead_table_columns")
+      .select("id, label, source, field_type, options")
+      .eq("field_key", fieldKey)
+      .maybeSingle();
+    if (columnError || !column) throw new Error("Nature of Business field is not available.");
+    if (column.source !== "custom" || column.field_type !== "dropdown" || normalizedCustomOption(column.label) !== "natureofbusiness") {
+      throw new Error("Only the Nature of Business dropdown can be extended this way.");
+    }
+    const options = Array.isArray(column.options)
+      ? column.options.filter((option): option is string => typeof option === "string" && Boolean(option.trim()))
+      : [];
+    if (!options.some((option) => ["other", "others"].includes(normalizedCustomOption(option)))) {
+      throw new Error("Add an Other or Others option to Nature of Business before entering a custom value.");
+    }
+    const existingOption = options.find((option) => normalizedCustomOption(option) === normalizedCustomOption(requestedValue));
+    const value = existingOption ?? requestedValue;
+    if (!existingOption && options.length >= 200) throw new Error("Nature of Business already has the maximum of 200 options.");
+
+    if (!existingOption) {
+      const { error: optionsError } = await supabase
+        .from("lead_table_columns")
+        .update({ options: [...options, value] })
+        .eq("id", column.id);
+      if (optionsError) throw new Error(optionsError.message);
+    }
+    const { data: lead, error: leadError } = await supabase
+      .from("leads")
+      .select("custom_data")
+      .eq("id", leadId)
+      .single();
+    if (leadError || !lead) throw new Error("This lead is no longer available.");
+    const customData = { ...(lead.custom_data ?? {}), [fieldKey]: value };
+    const { error: updateError } = await supabase
+      .from("leads")
+      .update({ custom_data: customData, updated_at: new Date().toISOString() })
+      .eq("id", leadId);
+    if (updateError) throw new Error(updateError.message);
+    const { error: activityError } = await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "nature_of_business_added",
+      note: `Nature of Business set to ${value}${existingOption ? "." : " and added to the dropdown."}`,
+      metadata: { field_key: fieldKey, value, added_option: !existingOption },
+      created_by: userId,
+    });
+    if (activityError) throw new Error(activityError.message);
+    updateTag("lead-shared-config");
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/lead-settings");
+    return { ok: true, message: existingOption ? "Nature of Business saved." : "Nature of Business added and saved.", value };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to add Nature of Business." };
+  }
 }
 
 export async function updateLeadProductInline(formData: FormData) {

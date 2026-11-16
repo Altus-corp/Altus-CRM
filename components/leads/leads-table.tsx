@@ -13,11 +13,11 @@ import { ChannelPartnerSelect } from "./channel-partner-select";
 import { SeniorAmbassadorSelect } from "./senior-ambassador-select";
 import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { ActivityColumn } from "./activity-column";
-import { addProductToMyLead, manuallyAssignLeads, saveLeadTablePreferences, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
+import { addNatureOfBusinessOption, addProductToMyLead, manuallyAssignLeads, saveLeadTablePreferences, updateLeadDetails, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 
 const LeadDetailPanel = dynamic(() => import("./lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
-export type LeadColumn = { id: string; field_key: string; label: string; field_type: string; options?: string[]; computed_from?: string[]; is_visible?: boolean; read_only?: boolean };
+export type LeadColumn = { id: string; field_key: string; label: string; source?: string; field_type: string; options?: string[]; computed_from?: string[]; is_visible?: boolean; read_only?: boolean };
 export type LeadRow = { id: string; lead_number: number | null; assignment_id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; last_called_at?: string | null; is_new_inbound?: boolean; created_at: string; custom_data: Record<string, unknown>; channel_partner_name?: string | null; channel_partner_ids?: string[]; channel_partner_options?: { id: string; name: string }[]; channel_partner_editable?: boolean; senior_ambassador?: { id: string; name: string } | null; senior_ambassador_options?: { id: string; name: string }[]; senior_ambassador_editable?: boolean; detail_product_assignments?: LeadRow["product_assignments"]; product: { id: string; code: string; name: string }[] | null; stage: { name: string }[] | null; resolution: { name: string }[] | null; product_assignments: { id: string; assigned_to: string | null; assigned_at: string | null; focused_on: string | null; next_follow_up_at: string | null; last_called_at?: string | null; is_new_inbound?: boolean; product: { id: string; code: string; name: string } | null; stage: { name: string } | null; resolution: { name: string } | null }[] };
 type EditableConfiguration = { products: { id: string; code: string; name: string }[]; stages: { id: string; product_id: string; name: string }[]; productResolutions: { product_id: string; resolution_id: string; resolution_name: string }[] };
 type Preferences = { order: string[]; widths: Record<string, number>; frozen: string[]; hidden: string[]; layoutVersion?: number };
@@ -135,7 +135,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
       </tr></thead>
       <tbody className="divide-y divide-slate-200">
         <tr className="bg-white"><th style={{ position: "sticky", left: 0, zIndex: 12, width: 170, minWidth: 170 }} className="box-border border-r border-slate-200 bg-white px-4 py-2 text-[11px] font-extrabold text-slate-600">Contact</th>{leads.map((lead) => <td key={lead.assignment_id} onDoubleClick={() => setDetailLead(lead)} className="cursor-pointer bg-white px-4 py-2"><LeadQuickActions lead={lead} /></td>)}</tr>
-        {orderedColumns.map((column) => <tr key={column.id} className="bg-white text-[13px] text-slate-700"><th style={{ position: "sticky", left: 0, zIndex: 12, width: 170, minWidth: 170 }} className="box-border whitespace-nowrap border-r border-slate-200 bg-white px-4 py-2 text-left text-[11px] font-extrabold text-slate-600">{displayColumnLabel(column)}</th>{leads.map((lead) => <td key={lead.assignment_id} onDoubleClick={() => setDetailLead(lead)} style={{ width: 220, minWidth: 220 }} className="max-w-[260px] cursor-pointer truncate bg-white px-4 py-2 font-semibold"><InlineLeadField key={`${lead.id}:${column.id}:${lead.product?.[0]?.id ?? ""}:${lead.stage?.[0]?.name ?? ""}:${lead.resolution?.[0]?.name ?? ""}:${lead.assigned_to ?? ""}`} lead={lead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} /></td>)}</tr>)}
+        {orderedColumns.map((column) => <tr key={column.id} className="bg-white text-[13px] text-slate-700"><th style={{ position: "sticky", left: 0, zIndex: 12, width: 170, minWidth: 170 }} className="box-border whitespace-nowrap border-r border-slate-200 bg-white px-4 py-2 text-left text-[11px] font-extrabold text-slate-600">{displayColumnLabel(column)}</th>{leads.map((lead) => <td key={lead.assignment_id} onDoubleClick={() => setDetailLead(lead)} style={{ width: 220, minWidth: 220 }} className="max-w-[260px] cursor-pointer truncate bg-white px-4 py-2 font-semibold"><InlineLeadField key={`${lead.id}:${column.id}:${lead.product?.[0]?.id ?? ""}:${lead.stage?.[0]?.name ?? ""}:${lead.resolution?.[0]?.name ?? ""}:${lead.assigned_to ?? ""}`} lead={lead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} readOnly={readOnly} /></td>)}</tr>)}
         {!orderedColumns.some(isActivityColumn) && <tr className="bg-white"><th style={{ position: "sticky", left: 0, zIndex: 12, width: 170, minWidth: 170 }} className="box-border border-r border-slate-200 bg-white px-4 py-2 text-[11px] font-extrabold text-slate-600">Activity</th>{leads.map((lead) => <td key={lead.assignment_id} className="bg-white px-3 py-2"><ActivityColumn leadId={lead.id} assignmentId={lead.assignment_id} readOnly={readOnly} /></td>)}</tr>}
       </tbody></table>{!leads.length && <div className="px-4 py-12 text-center"><p className="text-sm font-bold text-slate-700">No leads yet</p></div>}</div> : <div style={{ zoom }} className="max-h-[calc(100vh-205px)] overflow-auto"><table className="isolate min-w-[1160px] w-full border-separate border-spacing-0 text-left"><colgroup><col style={{ width: 48 }} /><col style={{ width: 106 }} />{orderedColumns.map((column) => <col key={column.id} style={{ width: widths[column.field_key] ?? 160 }} />)}<col style={{ width: 180 }} /></colgroup>
       <thead className="sticky top-0 z-[30] bg-[#f7f8fa] text-[11px] font-extrabold tracking-[0.06em] text-slate-600 shadow-[0_1px_0_#dfe4ec]"><tr>
@@ -152,14 +152,14 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
         return <Fragment key={lead.assignment_id}><tr onDoubleClick={() => setDetailLead(lead)} className="group h-[50px] cursor-pointer bg-white text-[13px] text-slate-700 transition hover:bg-slate-50">
         <td style={{ position: "sticky", left: 0, zIndex: 12, width: 48, minWidth: 48, maxWidth: 48 }} className="box-border bg-white px-4"><input type="checkbox" aria-label={`Select ${lead.first_name}`} checked={selectionEnabled ? selected.has(lead.assignment_id) : false} onChange={() => toggleLead(lead.assignment_id)} disabled={!selectionEnabled} className="h-4 w-4 rounded border-slate-300 accent-red-600 disabled:cursor-default" /></td>
         <td style={{ position: "sticky", left: 48, zIndex: 12, width: 106, minWidth: 106, maxWidth: 106 }} className={`box-border bg-white px-2 ${frozenBoundaryKey ? "" : "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]"}`}><LeadQuickActions lead={lead} /></td>
-        {orderedColumns.map((column) => <td key={column.id} style={{ width: widths[column.field_key] ?? 160, minWidth: widths[column.field_key] ?? 160, ...stickyColumnStyle(column.field_key) }} className={`relative z-0 max-w-[260px] truncate bg-white px-4 py-2 font-semibold ${column.field_key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""}`}>{column.field_key === "product" && stacked ? <div className="flex items-center gap-1.5"><InlineLeadField key={`${lead.id}:${column.id}:products:${lead.product_assignments.map((item) => item.product?.id).join(",")}`} lead={lead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} /><button type="button" onClick={(event) => { event.stopPropagation(); toggleExpanded(lead.id); }} aria-expanded={isExpanded} title={isExpanded ? "Hide the other products" : "Show the other products"} className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${isExpanded ? "bg-red-600 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"}`}>+{extras.length}</button></div> : <InlineLeadField key={`${rowLead.id}:${column.id}:${rowLead.product?.[0]?.id ?? ""}:${rowLead.stage?.[0]?.name ?? ""}:${rowLead.resolution?.[0]?.name ?? ""}:${rowLead.assigned_to ?? ""}`} lead={rowLead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} />}</td>)}
+        {orderedColumns.map((column) => <td key={column.id} style={{ width: widths[column.field_key] ?? 160, minWidth: widths[column.field_key] ?? 160, ...stickyColumnStyle(column.field_key) }} className={`relative z-0 max-w-[260px] truncate bg-white px-4 py-2 font-semibold ${column.field_key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""}`}>{column.field_key === "product" && stacked ? <div className="flex items-center gap-1.5"><InlineLeadField key={`${lead.id}:${column.id}:products:${lead.product_assignments.map((item) => item.product?.id).join(",")}`} lead={lead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} readOnly={readOnly} /><button type="button" onClick={(event) => { event.stopPropagation(); toggleExpanded(lead.id); }} aria-expanded={isExpanded} title={isExpanded ? "Hide the other products" : "Show the other products"} className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${isExpanded ? "bg-red-600 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"}`}>+{extras.length}</button></div> : <InlineLeadField key={`${rowLead.id}:${column.id}:${rowLead.product?.[0]?.id ?? ""}:${rowLead.stage?.[0]?.name ?? ""}:${rowLead.resolution?.[0]?.name ?? ""}:${rowLead.assigned_to ?? ""}`} lead={rowLead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} readOnly={readOnly} />}</td>)}
         {!orderedColumns.some(isActivityColumn) && <td className="bg-white px-3 py-2"><ActivityColumn leadId={lead.id} assignmentId={lead.assignment_id} readOnly={readOnly} /></td>}
       </tr>{isExpanded && extras.map((assignment) => {
         const subLead = scopeLead(lead, assignment);
         return <tr key={assignment.id} onDoubleClick={() => setDetailLead({ ...lead, assignment_id: assignment.id })} className="h-[50px] cursor-pointer bg-slate-50 text-[13px] text-slate-700 hover:bg-slate-100">
           <td style={{ position: "sticky", left: 0, zIndex: 12, width: 48, minWidth: 48, maxWidth: 48 }} className="box-border bg-slate-50 px-4" />
           <td style={{ position: "sticky", left: 48, zIndex: 12, width: 106, minWidth: 106, maxWidth: 106 }} className={`box-border bg-slate-50 px-2 text-right text-[10px] font-extrabold text-slate-400 ${frozenBoundaryKey ? "" : "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]"}`}>↳</td>
-          {orderedColumns.map((column) => <td key={column.id} style={{ width: widths[column.field_key] ?? 160, minWidth: widths[column.field_key] ?? 160, ...stickyColumnStyle(column.field_key) }} className={`relative z-0 max-w-[260px] truncate bg-slate-50 px-4 py-2 font-semibold ${column.field_key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""}`}>{column.field_key === "product" ? <span className="text-xs font-extrabold text-slate-700">{displayProductCode(assignment.product?.code)}</span> : ["stage", "call_resolution", "next_follow_up", "assigned_to"].includes(column.field_key) ? <InlineLeadField key={`${assignment.id}:${column.id}:${assignment.stage?.name ?? ""}:${assignment.resolution?.name ?? ""}:${assignment.assigned_to ?? ""}`} lead={subLead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} /> : null}</td>)}
+          {orderedColumns.map((column) => <td key={column.id} style={{ width: widths[column.field_key] ?? 160, minWidth: widths[column.field_key] ?? 160, ...stickyColumnStyle(column.field_key) }} className={`relative z-0 max-w-[260px] truncate bg-slate-50 px-4 py-2 font-semibold ${column.field_key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""}`}>{column.field_key === "product" ? <span className="text-xs font-extrabold text-slate-700">{displayProductCode(assignment.product?.code)}</span> : ["stage", "call_resolution", "next_follow_up", "assigned_to"].includes(column.field_key) || column.source === "custom" ? <InlineLeadField key={`${assignment.id}:${column.id}:${assignment.stage?.name ?? ""}:${assignment.resolution?.name ?? ""}:${assignment.assigned_to ?? ""}`} lead={subLead} column={column} assignedNames={assignedNames} configuration={editableConfiguration} salesPersonOptions={salesPersonOptions} readOnly={readOnly} /> : null}</td>)}
           {!orderedColumns.some(isActivityColumn) && <td className="bg-slate-50 px-3 py-2" />}
         </tr>;
       })}</Fragment>;
@@ -169,7 +169,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
   </section>;
 }
 
-function InlineLeadField({ lead, column, assignedNames, configuration, salesPersonOptions }: { lead: LeadRow; column: LeadColumn; assignedNames: Record<string, string>; configuration?: EditableConfiguration; salesPersonOptions?: { id: string; name: string }[] }) {
+function InlineLeadField({ lead, column, assignedNames, configuration, salesPersonOptions, readOnly = false }: { lead: LeadRow; column: LeadColumn; assignedNames: Record<string, string>; configuration?: EditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; readOnly?: boolean }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const productId = lead.product?.[0]?.id ?? "";
@@ -186,6 +186,10 @@ function InlineLeadField({ lead, column, assignedNames, configuration, salesPers
   if (isChannelPartnerColumn(column) && lead.channel_partner_editable) return <ChannelPartnerSelect leadId={lead.id} assignmentId={lead.assignment_id} names={lead.channel_partner_name} options={lead.channel_partner_options ?? []} selectedIds={lead.channel_partner_ids ?? []} onSaved={() => router.refresh()} />;
   if (isSeniorAmbassadorColumn(column) && lead.senior_ambassador_editable) return <SeniorAmbassadorSelect leadId={lead.id} assignmentId={lead.assignment_id} selected={lead.senior_ambassador} options={lead.senior_ambassador_options ?? []} onSaved={() => router.refresh()} />;
   if (column.field_key === "assigned_to" && salesPersonOptions?.length) return <SalesPersonSelect lead={lead} options={salesPersonOptions} />;
+  // Keep normal text columns readable in the compact lead grid. Only custom
+  // dropdowns are edited inline; all other fields remain visible as text and
+  // are still editable from the Details panel.
+  if (column.source === "custom" && column.field_type === "dropdown" && configuration && !readOnly) return <InlineCustomLeadField lead={lead} column={column} />;
   if (!configuration) return <LeadFieldValue lead={lead} column={column} assignedNames={assignedNames} />;
   if (column.field_key === "product") return <><ProductAssignmentsMenu lead={lead} products={configuration.products} onAdd={() => setAddingProduct(true)} />{addingProduct && <AddProductModal lead={lead} products={configuration.products} onClose={() => setAddingProduct(false)} />}</>;
   if ((column.field_key === "stage" || column.field_key === "call_resolution") && lead.product_assignments.length > 1) return <ProductScopedMenu key={lead.product_assignments.map((item) => `${item.id}:${item.stage?.name ?? ""}:${item.resolution?.name ?? ""}`).join("|")} lead={lead} kind={column.field_key === "stage" ? "stage" : "resolution"} configuration={configuration} />;
@@ -196,6 +200,80 @@ function InlineLeadField({ lead, column, assignedNames, configuration, salesPers
 
 function FieldSelect({ value, disabled, onChange, placeholder, options, error, wide }: { value: string; disabled: boolean; onChange: (value: string) => void; placeholder: string; options: { value: string; label: string }[]; error: string; wide?: boolean }) {
   return <div><select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className={`h-8 ${wide ? "min-w-[160px]" : "min-w-[145px]"} rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50`}><option value="" disabled>{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{error && <p className="mt-1 max-w-[180px] whitespace-normal text-[9px] font-bold text-red-600">{error}</p>}</div>;
+}
+
+function customFieldInputValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function InlineCustomLeadField({ lead, column }: { lead: LeadRow; column: LeadColumn }) {
+  const router = useRouter();
+  const serverValue = customFieldInputValue(lead.custom_data?.[column.field_key]);
+  const [value, setValue] = useState(serverValue);
+  const [customOption, setCustomOption] = useState("");
+  const [isAddingCustomOption, setIsAddingCustomOption] = useState(false);
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => setValue(serverValue), [serverValue]);
+
+  const save = (nextValue: string) => {
+    if (nextValue === serverValue) return;
+    setValue(nextValue);
+    setError("");
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("leadId", lead.id);
+      formData.set("assignmentId", lead.assignment_id);
+      formData.set("values", JSON.stringify([{ key: column.field_key, value: nextValue }]));
+      try {
+        await updateLeadDetails(formData);
+        router.refresh();
+      } catch (saveError) {
+        setValue(serverValue);
+        setError(saveError instanceof Error ? saveError.message : "Unable to save this field.");
+      }
+    });
+  };
+  const stopDoubleClick = (event: React.MouseEvent<HTMLElement>) => event.stopPropagation();
+  const inputClass = "h-8 w-full min-w-[130px] rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:cursor-wait disabled:bg-slate-50";
+  const normalizedLabel = column.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const isNatureOfBusiness = normalizedLabel === "natureofbusiness";
+  const isOtherOption = (option: string) => ["other", "others"].includes(option.trim().toLowerCase().replace(/[^a-z0-9]+/g, ""));
+  const canAddCustomOption = isNatureOfBusiness && (column.options ?? []).some(isOtherOption);
+  const saveCustomOption = () => {
+    const nextValue = customOption.trim();
+    if (!nextValue) { setError("Enter a Nature of Business value."); return; }
+    setError("");
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("leadId", lead.id);
+      formData.set("assignmentId", lead.assignment_id);
+      formData.set("fieldKey", column.field_key);
+      formData.set("value", nextValue);
+      const result = await addNatureOfBusinessOption(formData);
+      if (!result.ok || !result.value) { setError(result.message); return; }
+      setValue(result.value);
+      setCustomOption("");
+      setIsAddingCustomOption(false);
+      router.refresh();
+    });
+  };
+
+  let control: React.ReactNode;
+  if (column.field_type === "dropdown") {
+    control = <><select aria-label={column.label} value={value} disabled={isPending} onClick={(event) => event.stopPropagation()} onDoubleClick={stopDoubleClick} onChange={(event) => { const nextValue = event.target.value; if (canAddCustomOption && isOtherOption(nextValue)) { setValue(nextValue); setIsAddingCustomOption(true); setCustomOption(""); } else { setIsAddingCustomOption(false); save(nextValue); } }} className={inputClass}><option value="">Select {column.label}</option>{(column.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}</select>{isAddingCustomOption && <div className="mt-1 flex min-w-[220px] gap-1"><input aria-label="Custom Nature of Business" value={customOption} disabled={isPending} onClick={(event) => event.stopPropagation()} onDoubleClick={stopDoubleClick} onChange={(event) => setCustomOption(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); saveCustomOption(); } }} placeholder="Enter nature of business" className="h-8 min-w-0 flex-1 rounded border border-slate-200 px-2 text-xs font-semibold outline-none focus:border-red-400" /><button type="button" disabled={isPending || !customOption.trim()} onClick={saveCustomOption} className="h-8 rounded bg-[#d90000] px-2 text-[10px] font-extrabold text-white disabled:opacity-50">Add</button></div>}</>;
+  } else if (column.field_type === "checkbox") {
+    control = <label className="inline-flex h-8 items-center gap-2 whitespace-nowrap text-xs font-semibold text-slate-700" onClick={(event) => event.stopPropagation()} onDoubleClick={stopDoubleClick}><input aria-label={column.label} type="checkbox" checked={value === "true"} disabled={isPending} onChange={(event) => save(event.target.checked ? "true" : "false")} className="h-4 w-4 rounded border-slate-300 accent-red-600 disabled:cursor-wait" />Yes</label>;
+  } else if (column.field_type === "textarea") {
+    control = <textarea aria-label={column.label} value={value} disabled={isPending} onClick={(event) => event.stopPropagation()} onDoubleClick={stopDoubleClick} onChange={(event) => setValue(event.target.value)} onBlur={(event) => save(event.target.value)} className="min-h-8 w-full min-w-[130px] resize-y rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:cursor-wait disabled:bg-slate-50" rows={1} />;
+  } else {
+    const type = column.field_type === "date" ? "date" : column.field_type === "number" ? "number" : "text";
+    control = <input aria-label={column.label} type={type} value={value} disabled={isPending} onClick={(event) => event.stopPropagation()} onDoubleClick={stopDoubleClick} onChange={(event) => setValue(event.target.value)} onBlur={(event) => save(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} className={inputClass} />;
+  }
+  return <div className="min-w-[130px]" onDoubleClick={stopDoubleClick}>{control}{error && <p className="mt-1 max-w-[220px] whitespace-normal text-[9px] font-bold text-red-600">{error}</p>}</div>;
 }
 
 function SalesPersonSelect({ lead, options }: { lead: LeadRow; options: { id: string; name: string }[] }) {
@@ -374,6 +452,10 @@ function NewInboundBadge() {
 
 function LeadFieldValue({ lead, column, assignedNames }: { lead: LeadRow; column: LeadColumn; assignedNames: Record<string, string> }) {
   const value = valueFor(lead, column, assignedNames);
+  if (column.field_type === "link" && typeof value === "string" && value) {
+    const href = value.startsWith("www.") ? `https://${value}` : value;
+    return <a href={href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} className="inline-block max-w-full truncate text-blue-700 underline underline-offset-2 hover:text-blue-900" title={value}>{value}</a>;
+  }
   if (!lead.is_new_inbound || !isLeadNameColumn(column)) return value;
   return <span className="inline-flex max-w-full items-center whitespace-nowrap">{value}<NewInboundBadge /></span>;
 }
