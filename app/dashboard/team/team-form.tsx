@@ -1,20 +1,22 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { saveTeam } from "./actions";
+import { deleteTeam, saveTeam } from "./actions";
 
 export type TeamPerson = { id: string; name: string; roles: string[]; suspended: boolean };
 export type Team = { id: string; name: string; managerId: string; memberIds: string[] };
 
 export function TeamForm({ people, team }: { people: TeamPerson[]; team?: Team }) {
   const [state, action, pending] = useActionState(saveTeam, {});
+  const [deleteState, deleteAction, deleting] = useActionState(deleteTeam, {});
   const [managerId, setManagerId] = useState(team?.managerId ?? "");
   const [selected, setSelected] = useState(team?.memberIds ?? []);
   const managers = people.filter((person) => (!person.suspended && person.roles.includes("sales_manager")) || person.id === team?.managerId);
   const members = people.filter((person) => person.id !== managerId && ((!person.suspended && person.roles.length > 0) || team?.memberIds.includes(person.id)));
 
   return (
-    <form action={action} className="space-y-4">
+    <>
+      <form action={action} className="space-y-4">
       <input type="hidden" name="teamId" value={team?.id ?? ""} />
       <fieldset disabled={pending} className="space-y-4">
         <legend className="sr-only">{team ? `Edit ${team.name}` : "Create team"}</legend>
@@ -39,6 +41,22 @@ export function TeamForm({ people, team }: { people: TeamPerson[]; team?: Team }
       </fieldset>
       {state.error && <p role="alert" className="text-sm font-semibold text-red-700">{state.error}</p>}
       {state.success && <p role="status" className="text-sm font-semibold text-emerald-700">{state.success}</p>}
-    </form>
+      </form>
+      {team && <form
+        action={deleteAction}
+        onSubmit={(event) => {
+          if (!window.confirm(`Delete “${team.name}”? This removes the team and its member links only. CRM users and leads will remain unchanged.`)) event.preventDefault();
+        }}
+        className="mt-5 border-t border-slate-100 pt-4"
+      >
+        <input type="hidden" name="teamId" value={team.id} />
+        <button type="submit" disabled={deleting} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60">
+          {deleting ? "Deleting..." : "Delete team"}
+        </button>
+        <p className="mt-2 text-xs text-slate-500">This only removes the team and its membership links. Users and lead assignments are kept.</p>
+        {deleteState.error && <p role="alert" className="mt-2 text-sm font-semibold text-red-700">{deleteState.error}</p>}
+        {deleteState.success && <p role="status" className="mt-2 text-sm font-semibold text-emerald-700">{deleteState.success}</p>}
+      </form>}
+    </>
   );
 }

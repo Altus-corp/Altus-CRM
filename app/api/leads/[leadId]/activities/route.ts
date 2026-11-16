@@ -25,7 +25,7 @@ export async function GET(request: Request, context: { params: Promise<{ leadId:
     }
     const { data, error } = await supabase
       .from("lead_activities")
-      .select("id, activity_type, note, follow_up_at, created_at, metadata, created_by")
+      .select("id, activity_type, note, follow_up_at, created_at, metadata, created_by, created_by_name, created_by_email")
       .eq("lead_id", leadId)
       .eq("lead_product_assignment_id", assignmentId)
       .order("created_at", { ascending: false })
@@ -36,7 +36,16 @@ export async function GET(request: Request, context: { params: Promise<{ leadId:
       ? await supabase.from("profiles").select("id, first_name, last_name, full_name").in("id", actorIds)
       : { data: [] as { id: string; first_name: string | null; last_name: string | null; full_name: string | null }[] };
     const actors = new Map((profiles ?? []).map((profile) => [profile.id, profile.full_name || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "CRM user"]));
-    return Response.json({ ok: true, activities: (data ?? []).map((activity) => ({ ...activity, actor: activity.created_by ? actors.get(activity.created_by) ?? "CRM user" : null })) });
+    return Response.json({
+      ok: true,
+      activities: (data ?? []).map((activity) => ({
+        ...activity,
+        // The snapshot remains available even after the former employee's
+        // auth account is deleted and created_by has been set to null.
+        actor: activity.created_by_name?.trim()
+          || (activity.created_by ? actors.get(activity.created_by) ?? "CRM user" : "Former CRM user"),
+      })),
+    });
   } catch {
     return Response.json({ ok: false, error: "Unable to load lead activity." }, { status: 401 });
   }

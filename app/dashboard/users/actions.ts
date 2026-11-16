@@ -440,7 +440,11 @@ export async function deleteUserAccount(
 
   const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
   if (deleteError) {
-    return { error: "The lead transfer completed, but this account could not be deleted. Check remaining team or meeting records and try again." };
+    // This action is available only to admins. Preserve Supabase's constraint
+    // message so an outstanding dependency can be identified instead of
+    // leaving the admin with an unhelpful generic deletion failure.
+    const databaseReason = deleteError.message.replace(/\s+/g, " ").trim();
+    return { error: `The lead transfer completed, but this account could not be deleted. Supabase reported: ${databaseReason}` };
   }
 
   revalidatePath("/dashboard", "layout");

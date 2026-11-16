@@ -21,3 +21,29 @@ export async function saveTeam(_state: TeamState, form: FormData): Promise<TeamS
   revalidatePath("/dashboard/team");
   return { success: teamId ? "Team updated." : "Team created. You can now edit it below." };
 }
+
+export async function deleteTeam(_state: TeamState, form: FormData): Promise<TeamState> {
+  await requireAdmin();
+  const teamId = String(form.get("teamId") ?? "");
+  if (!uuid.test(teamId)) return { error: "Invalid team." };
+
+  const admin = createAdminClient();
+  const { data: team, error: readError } = await admin
+    .from("crm_teams")
+    .select("id, name")
+    .eq("id", teamId)
+    .maybeSingle();
+  if (readError || !team) return { error: "This team could not be found." };
+
+  // crm_team_members.team_id uses ON DELETE CASCADE. Deleting a team removes
+  // only those membership links; people and lead assignments remain intact.
+  const { error: deleteError } = await admin.from("crm_teams").delete().eq("id", teamId);
+  if (deleteError) return { error: "Unable to delete this team. Please try again." };
+
+  revalidatePath("/dashboard", "layout");
+  revalidatePath("/dashboard/team");
+  revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/sales-manager");
+  revalidatePath("/dashboard/sales-team");
+  return { success: `${team.name} was deleted. CRM users and leads were not changed.` };
+}
