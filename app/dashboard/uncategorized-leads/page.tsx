@@ -100,6 +100,16 @@ export default async function UncategorizedLeadsPage() {
     hidden: tablePreferences?.hidden_column_keys ?? [],
     layoutVersion: tablePreferences?.layout_version ?? 0,
   };
+  const resolutionNames = new Map(sharedConfig.resolutions.map((resolution) => [resolution.id, resolution.name]));
+  const editableConfiguration = {
+    products: sharedConfig.products,
+    stages: sharedConfig.stages,
+    productResolutions: sharedConfig.resolutionMappings.map((mapping) => ({
+      product_id: mapping.product_id,
+      resolution_id: mapping.resolution_id,
+      resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution",
+    })),
+  };
 
   return <section className="mx-auto max-w-[1500px]">
     <header>
@@ -111,6 +121,8 @@ export default async function UncategorizedLeadsPage() {
       rows={rows}
       columns={sharedConfig.columns.filter((column) => column.is_visible)}
       assignedNames={assignedNames}
+      editableConfiguration={editableConfiguration}
+      salesPersonOptions={reassignUsers}
       preferences={preferences}
       emptyLabel="No Uncategorized Leads yet."
       reassignUsers={reassignUsers}

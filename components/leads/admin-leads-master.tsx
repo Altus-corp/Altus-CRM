@@ -18,6 +18,9 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
   const searchParams = useSearchParams();
   const urlSearch = searchParams.get("q") ?? "";
   const [search, setSearch] = useState(urlSearch);
+  const teamSearchScope = `${selectedAssigneeId ?? ""}:${selectedWorkspaceView}`;
+  const [teamSearch, setTeamSearch] = useState({ scope: teamSearchScope, value: "" });
+  const localTeamSearch = teamSearch.scope === teamSearchScope ? teamSearch.value : "";
   const [productId, setProductId] = useState("");
   const [stageId, setStageId] = useState("");
   const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>([]);
@@ -28,7 +31,7 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
     setSearch(urlSearch);
   }, [urlSearch]);
   useEffect(() => {
-    if (search === urlSearch) return;
+    if (showTeamLeads || search === urlSearch) return;
     const timer = window.setTimeout(() => {
       const next = new URLSearchParams(searchParams.toString());
       next.delete("page");
@@ -39,16 +42,24 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
       router.replace(`/dashboard/leads${query ? `?${query}` : ""}`);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [router, search, searchParams, urlSearch]);
+  }, [router, search, searchParams, showTeamLeads, urlSearch]);
   const selectedUser = assignmentUsers.find((user) => user.id === selectedAssigneeId);
   const selectableStages = productId ? stages.filter((stage) => stage.product_id === productId) : stages;
+  const searchTerm = (showTeamLeads ? localTeamSearch : search).trim().toLowerCase();
   const filteredLeads = leads.filter((lead) => {
     const productCode = lead.product?.[0]?.code ?? "";
     const stageName = lead.stage?.[0]?.name ?? "";
-    const term = search.trim().toLowerCase();
-    const searchMatch = !term || [lead.first_name, lead.last_name, lead.email, lead.phone, productCode, stageName].filter(Boolean).join(" ").toLowerCase().includes(term);
-    const productMatch = !productId || products.find((product) => product.id === productId)?.code === productCode;
-    const stageMatch = !stageId || stages.find((stage) => stage.id === stageId)?.name === stageName;
+    const searchValues = [lead.first_name, lead.last_name, lead.email, lead.phone, productCode, stageName];
+    if (showTeamLeads) {
+      searchValues.push(
+        lead.lead_number ? `L-${lead.lead_number}` : "",
+        ...lead.product_assignments.flatMap((assignment) => [assignment.product?.code, assignment.product?.name, assignment.stage?.name, assignment.resolution?.name]).filter((value): value is string => Boolean(value)),
+        ...Object.values(lead.custom_data ?? {}).filter((value): value is string | number => typeof value === "string" || typeof value === "number").map(String),
+      );
+    }
+    const searchMatch = !searchTerm || searchValues.filter(Boolean).join(" ").toLowerCase().includes(searchTerm);
+    const productMatch = showTeamLeads || !productId || products.find((product) => product.id === productId)?.code === productCode;
+    const stageMatch = showTeamLeads || !stageId || stages.find((stage) => stage.id === stageId)?.name === stageName;
     return searchMatch && productMatch && stageMatch;
   });
   useEffect(() => {
@@ -61,6 +72,7 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
 
   function updateWorkspace(assigneeId: string, workspace = selectedWorkspaceView) {
     setSelectedAssignmentIds([]);
+    setTeamSearch({ scope: `${assigneeId}:${workspace}`, value: "" });
     const next = new URLSearchParams(searchParams.toString());
     next.delete("page");
     if (assigneeId) {
@@ -131,7 +143,14 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
     {!showTeamLeads && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-white p-2 shadow-[0_3px_10px_rgba(42,55,80,0.05)]"><label className="flex h-8 min-w-[210px] flex-1 items-center gap-2 rounded border border-slate-200 px-2.5 text-[10px] text-slate-400">Search <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone..." className="w-full outline-none" /></label><select value={productId} onChange={(event) => { setProductId(event.target.value); setStageId(""); }} className="h-8 max-w-[210px] rounded border border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-600"><option value="">All products</option>{products.map((product) => <option key={product.id} value={product.id}>{displayProductLabel(product)}</option>)}</select><select value={stageId} onChange={(event) => setStageId(event.target.value)} className="h-8 max-w-[180px] rounded border border-slate-200 bg-white px-2.5 text-[10px] font-semibold text-slate-600"><option value="">All stages</option>{selectableStages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select><button type="button" onClick={() => { setSearch(""); setProductId(""); setStageId(""); }} className="h-8 rounded border border-slate-200 px-2.5 text-[10px] font-semibold text-slate-600">Reset</button></div>}
     {!showTeamLeads && <form action={async (formData) => { await manuallyAssignLeads(formData); setSelectedAssignmentIds([]); }} className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-100 bg-red-50/60 px-3 py-2"><div><p className="text-xs font-extrabold text-slate-800">Manual assignment for today</p><p className="text-[10px] text-slate-500">{selectedAssignmentIds.length ? `${selectedAssignmentIds.length} product assignment${selectedAssignmentIds.length === 1 ? "" : "s"} selected` : "Select product assignments from the table, then choose a sales user."}</p></div>{selectedAssignmentIds.map((assignmentId) => <input key={assignmentId} type="hidden" name="assignmentId" value={assignmentId} />)}<div className="flex items-center gap-2"><select name="assigneeId" required defaultValue="" className="h-8 min-w-[180px] rounded border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700"><option value="" disabled>Choose sales user</option>{assignmentUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select><button disabled={!selectedAssignmentIds.length || !assignmentUsers.length} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300">Assign selected</button></div></form>}
     {!showTeamLeads && selectedAssignmentIds.length > 0 && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-white px-3 py-2"><p className="text-xs font-extrabold text-slate-800">{selectedAssignmentIds.length} lead{selectedAssignmentIds.length === 1 ? "" : "s"} selected</p><button type="button" onClick={removeSelectedLeads} disabled={isSyncing} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white hover:bg-red-700 disabled:opacity-50">Delete selected</button></div>}
-    <div className="mt-3"><LeadsTable columns={columns} leads={filteredLeads} assignedNames={assignedNames} preferences={preferences} editableConfiguration={showTeamLeads ? undefined : { products, stages, productResolutions }} salesPersonOptions={showTeamLeads ? undefined : assignmentUsers} selectedIds={selectedAssignmentIds} onSelectionChange={setSelectedAssignmentIds} showHeader={false} /></div>
+    {showTeamLeads && selectedAssigneeId && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex w-full items-center gap-2 sm:w-auto sm:flex-1 sm:max-w-lg">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded border border-slate-200 px-3 text-xs font-semibold text-slate-500 focus-within:border-red-400">Search<input type="search" aria-label="Search team member leads" value={localTeamSearch} onChange={(event) => setTeamSearch({ scope: teamSearchScope, value: event.target.value })} placeholder="Name, email, phone or lead number..." className="h-9 min-w-0 w-full bg-transparent text-xs text-slate-700 outline-none" /></label>
+        {localTeamSearch && <button type="button" onClick={() => setTeamSearch({ scope: teamSearchScope, value: "" })} className="h-9 shrink-0 rounded border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50">Clear</button>}
+      </div>
+      <p role="status" className="text-xs font-medium text-slate-500">Showing {filteredLeads.length} of {leads.length} leads on this page</p>
+    </div>}
+    <div className="mt-3"><LeadsTable columns={columns} leads={filteredLeads} assignedNames={assignedNames} preferences={preferences} editableConfiguration={{ products, stages, productResolutions }} salesPersonOptions={assignmentUsers} selectedIds={selectedAssignmentIds} onSelectionChange={setSelectedAssignmentIds} showHeader={false} /></div>
   </section>;
 }
 

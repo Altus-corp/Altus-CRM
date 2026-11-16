@@ -26,7 +26,7 @@ const baseFilters = [
 ];
 const dateFormat = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
-export default async function DndMasterPage({ searchParams }: { searchParams: Promise<{ type?: string }> }) {
+export default async function DndMasterPage({ searchParams }: { searchParams: Promise<{ type?: string; view?: string }> }) {
   await connection();
   const { roles, userId } = await requireUser();
   const isAmbassador = isAmbassadorWorkspace(roles);
@@ -36,7 +36,8 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   if (!canUseDoNotCall) return <section className="mx-auto max-w-3xl rounded-xl bg-red-50 p-5 text-sm font-bold text-red-700">You do not have access to Do Not Call.</section>;
 
   const filters = isAdmin ? [...baseFilters, { key: "abandoned", label: "Abandoned" }] : baseFilters;
-  const { type } = await searchParams;
+  const { type, view } = await searchParams;
+  const showArchived = isAdmin && view === "archived";
   const activeFilter = filters.find((filter) => filter.key === type)?.key ?? "all";
   const supabase = await createClient();
   const { data: channelPartnerLinks, error: channelPartnerError } = isAmbassador
@@ -47,6 +48,9 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   let activitiesQuery = supabase.from("lead_activities")
     .select("id, created_by, created_at, metadata, assignment:lead_product_assignments(id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(id, lead_number, first_name, last_name, email, phone, created_at, custom_data))")
     .eq("activity_type", "resolution_updated").order("created_at", { ascending: false }).limit(2000);
+  activitiesQuery = showArchived
+    ? activitiesQuery.not("metadata->>dnd_archived_at", "is", null)
+    : activitiesQuery.is("metadata->>dnd_archived_at", null);
   if (isAmbassador) activitiesQuery = activitiesQuery.in("lead_id", ambassadorLeadIds);
   else if (!canReviewAll) activitiesQuery = activitiesQuery.eq("created_by", userId);
   const [sharedConfig, { data: resolutions }, { data: activities, error }, { data: allProfiles }, { data: salesRoles }, { data: tablePreferences }] = await Promise.all([
@@ -67,11 +71,14 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   const reassignUsers = canReviewAll ? (allProfiles ?? []).filter((profile) => !profile.is_suspended && eligibleAssignees.has(profile.id)).map((profile) => ({ id: profile.id, name: [profile.first_name, profile.last_name].filter(Boolean).join(" ") || profile.full_name || "Unnamed user" })) : [];
   const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [], hidden: tablePreferences?.hidden_column_keys ?? [], layoutVersion: tablePreferences?.layout_version ?? 0 };
   const resolutionNames = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
+  const seenAssignmentIds = new Set<string>();
   const allRows: DndRow[] = ((activities ?? []) as unknown as Row[]).flatMap((row) => {
     const status = row.metadata?.resolution_id ? resolutionNames.get(row.metadata.resolution_id) : undefined;
     const assignment = one(row.assignment);
     const lead = assignment ? one(assignment.lead) : null;
     if (!status || !assignment || !lead || (!isAdmin && status.toLowerCase() === "abandoned")) return [];
+    if (seenAssignmentIds.has(assignment.id)) return [];
+    seenAssignmentIds.add(assignment.id);
     const product = one(assignment.product);
     const stage = one(assignment.stage);
     const resolution = one(assignment.resolution);
@@ -99,12 +106,23 @@ export default async function DndMasterPage({ searchParams }: { searchParams: Pr
   const filterCounts = new Map<string, number>([["all", allRows.length]]);
   for (const filter of filters.slice(1)) filterCounts.set(filter.key, allRows.filter((row) => row.status.toLowerCase() === filter.key).length);
   const visibleColumns = list(sharedConfig.columns).filter((column) => column.is_visible);
+  const workspaceHref = (archived: boolean, filter = activeFilter) => {
+    const query = new URLSearchParams();
+    if (archived) query.set("view", "archived");
+    if (filter !== "all") query.set("type", filter);
+    return `/dashboard/dnd-master${query.size ? `?${query.toString()}` : ""}`;
+  };
 
   return <section className="mx-auto max-w-[1500px]">
     <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
       <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">Do Not Call</h1><p className="mt-1 text-xs text-slate-500">{isAmbassador ? "Your Channel Partner leads marked as a Do Not Call status by their Sales Person." : canReviewAll ? "Team leads marked as DND, Not Interested, Lost, I Will Get Back, Wrong Number, or Junk Lead. Admins can also review Abandoned leads released back to the pool." : "Leads you marked as a Do Not Call status."} Double-click a lead to open its details.</p></div>
-      <div className="flex flex-wrap gap-2">{filters.map((filter) => <Link key={filter.key} href={filter.key === "all" ? "/dashboard/dnd-master" : `/dashboard/dnd-master?type=${encodeURIComponent(filter.key)}`} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label} <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${activeFilter === filter.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{filterCounts.get(filter.key) ?? 0}</span></Link>)}</div>
+      <div className="flex flex-wrap gap-2">{filters.map((filter) => <Link key={filter.key} href={workspaceHref(showArchived, filter.key)} className={`h-8 rounded border px-3 text-[11px] font-extrabold leading-8 ${activeFilter === filter.key ? "border-[#d90000] bg-[#d90000] text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{filter.label} <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${activeFilter === filter.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{filterCounts.get(filter.key) ?? 0}</span></Link>)}</div>
     </header>
-    <DndMasterTable rows={rows} columns={visibleColumns} assignedNames={assignedNames} preferences={preferences} reassignUsers={reassignUsers} />
+    {isAdmin && <nav aria-label="Do Not Call archive" className="mt-3 flex gap-2">
+      <Link href={workspaceHref(false)} aria-current={!showArchived ? "page" : undefined} className={`rounded-md border px-3 py-2 text-xs font-bold ${!showArchived ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-600"}`}>Active records</Link>
+      <Link href={workspaceHref(true)} aria-current={showArchived ? "page" : undefined} className={`rounded-md border px-3 py-2 text-xs font-bold ${showArchived ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-600"}`}>Archived</Link>
+    </nav>}
+    {showArchived && <p className="mt-2 text-xs text-slate-500">Archived Do Not Call records. Select records to restore them or permanently delete their leads.</p>}
+    <DndMasterTable key={`${activeFilter}:${showArchived}`} rows={rows} columns={visibleColumns} assignedNames={assignedNames} preferences={preferences} reassignUsers={showArchived ? [] : reassignUsers} canManageLeads={isAdmin} archived={showArchived} />
   </section>;
 }

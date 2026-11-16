@@ -2,34 +2,71 @@
 
 import dynamic from "next/dynamic";
 import { useState, useTransition } from "react";
-import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
-import { manuallyAssignLeads } from "@/app/dashboard/leads/actions";
+import { useRouter } from "next/navigation";
+import { LeadsTable, type EditableConfiguration, type LeadColumn, type LeadRow } from "./leads-table";
+import { deleteLeads, manuallyAssignLeads } from "@/app/dashboard/leads/actions";
+import { setDndArchiveStatus } from "@/app/dashboard/dnd-master/actions";
 
 const LeadDetailPanel = dynamic(() => import("./lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
 export type DndRow = { id: string; lead: LeadRow; status: string; markedBy: string; markedOn: string };
 type Preferences = { order: string[]; widths: Record<string, number>; frozen: string[]; hidden: string[]; layoutVersion?: number };
 
-export function DndMasterTable({ rows, columns, detailColumns, assignedNames, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, emptyLabel = "No Do Not Call leads yet.", reassignUsers = [], reassignDescription = "The original CRM user remains visible until an Admin or Sales Manager selects a new user.", readOnly = false }: { rows: DndRow[]; columns: LeadColumn[]; detailColumns?: LeadColumn[]; assignedNames: Record<string, string>; preferences?: Preferences; emptyLabel?: string; reassignUsers?: { id: string; name: string }[]; reassignDescription?: string; readOnly?: boolean }) {
+export function DndMasterTable({ rows, columns, detailColumns, assignedNames, editableConfiguration, salesPersonOptions, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, emptyLabel = "No Do Not Call leads yet.", reassignUsers = [], reassignDescription = "The original CRM user remains visible until an Admin or Sales Manager selects a new user.", readOnly = false, canManageLeads = false, archived = false }: { rows: DndRow[]; columns: LeadColumn[]; detailColumns?: LeadColumn[]; assignedNames: Record<string, string>; editableConfiguration?: EditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; preferences?: Preferences; emptyLabel?: string; reassignUsers?: { id: string; name: string }[]; reassignDescription?: string; readOnly?: boolean; canManageLeads?: boolean; archived?: boolean }) {
+  const router = useRouter();
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selection, setSelectedIds] = useState<string[]>([]);
+  const visibleIds = new Set(rows.map((row) => row.lead.assignment_id));
+  const selectedIds = selection.filter((id) => visibleIds.has(id));
   const [isPending, startTransition] = useTransition();
-  const [assignmentMessage, setAssignmentMessage] = useState("");
+  const [actionResult, setActionResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const reassign = (formData: FormData) => startTransition(async () => {
-    setAssignmentMessage("");
+    setActionResult(null);
     try {
       await manuallyAssignLeads(formData);
       setSelectedIds([]);
-      setAssignmentMessage("Lead reassigned.");
+      setActionResult({ ok: true, message: "Lead reassigned." });
     } catch (error) {
-      setAssignmentMessage(error instanceof Error ? error.message : "Unable to reassign this lead.");
+      setActionResult({ ok: false, message: error instanceof Error ? error.message : "Unable to reassign this lead." });
     }
   });
 
+  const manageSelected = (action: "archive" | "restore" | "delete") => {
+    if (!canManageLeads || readOnly || !selectedIds.length) return;
+    if (selectedIds.length > 100) { setActionResult({ ok: false, message: "Select no more than 100 lead work records at a time." }); return; }
+    const confirmation = action === "delete"
+      ? "Permanently delete the selected leads? This removes each entire lead, all its product assignments, notes and history, including work outside DND Master. This cannot be undone."
+      : action === "archive"
+        ? "Archive the selected Do Not Call records? They will move to Archived. Lead data and history will be kept."
+        : "Restore the selected Do Not Call records to the active DND Master list?";
+    if (!window.confirm(confirmation)) return;
+    const formData = new FormData();
+    selectedIds.forEach((id) => formData.append("assignmentId", id));
+    if (action !== "delete") formData.set("archive", String(action === "archive"));
+    setActionResult(null);
+    startTransition(async () => {
+      try {
+        const result = action === "delete" ? await deleteLeads(formData) : await setDndArchiveStatus(formData);
+        setActionResult(result);
+        if (result.ok) { setSelectedIds([]); setDetailLead(null); }
+        router.refresh();
+      } catch (error) {
+        setActionResult({ ok: false, message: error instanceof Error ? error.message : "Unable to update the selected leads." });
+      }
+    });
+  };
+
   return <>
     {reassignUsers.length > 0 && <form action={reassign} className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-100 bg-red-50/60 px-3 py-2"><div><p className="text-xs font-extrabold text-slate-800">Reassign selected lead work</p><p className="text-[10px] text-slate-500">{reassignDescription}</p></div>{selectedIds.map((assignmentId) => <input key={assignmentId} type="hidden" name="assignmentId" value={assignmentId} />)}<div className="flex items-center gap-2"><select name="assigneeId" required defaultValue="" disabled={isPending} className="h-8 min-w-[180px] rounded border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700"><option value="" disabled>Choose sales user</option>{reassignUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select><button disabled={isPending || !selectedIds.length} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:bg-slate-300">Assign selected</button></div></form>}
-    <div className="mt-3"><LeadsTable columns={columns} detailColumns={detailColumns} leads={rows.map((row) => row.lead)} assignedNames={assignedNames} preferences={preferences} selectedIds={selectedIds} onSelectionChange={reassignUsers.length ? setSelectedIds : undefined} showHeader={false} readOnly={readOnly} /></div>
+    {canManageLeads && !readOnly && <div aria-label="Selected lead actions" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+      <p role="status" className="text-xs font-extrabold text-slate-800">{selectedIds.length ? `${selectedIds.length} lead work record${selectedIds.length === 1 ? "" : "s"} selected` : "Select leads below to enable these actions"}</p>
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={isPending || !selectedIds.length} onClick={() => manageSelected(archived ? "restore" : "archive")} className="h-8 rounded border border-slate-300 px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">{archived ? "Unarchive selected" : "Archive selected"}</button>
+        <button type="button" disabled={isPending || !selectedIds.length} onClick={() => manageSelected("delete")} className="h-8 rounded bg-[#d90000] px-3 text-xs font-extrabold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">Delete selected</button>
+      </div>
+    </div>}
+    <div className="mt-3"><LeadsTable columns={columns} detailColumns={detailColumns} leads={rows.map((row) => row.lead)} assignedNames={assignedNames} editableConfiguration={editableConfiguration} salesPersonOptions={salesPersonOptions} preferences={preferences} selectedIds={selectedIds} onSelectionChange={!readOnly && (reassignUsers.length > 0 || canManageLeads) ? setSelectedIds : undefined} showHeader={false} readOnly={readOnly} /></div>
     <div className="hidden mt-3 overflow-x-auto rounded-md bg-white shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
       <table className="w-full min-w-[900px] text-left text-xs">
         <thead className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wider text-slate-500"><tr>{["Lead No", "Name", "Phone", "Email", "Product", "Marked as", "Marked by", "Marked on", ...(reassignUsers.length ? ["Reassign"] : [])].map((heading) => <th key={heading} className="px-3 py-2.5">{heading}</th>)}</tr></thead>
@@ -49,7 +86,7 @@ export function DndMasterTable({ rows, columns, detailColumns, assignedNames, pr
         </tbody>
       </table>
     </div>
-    {assignmentMessage && <p className={`mt-2 text-xs font-bold ${assignmentMessage === "Lead reassigned." ? "text-emerald-700" : "text-red-600"}`}>{assignmentMessage}</p>}
-    {detailLead && <LeadDetailPanel lead={detailLead} columns={detailColumns ?? columns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} readOnly={readOnly} />}
+    {actionResult && <p role={actionResult.ok ? "status" : "alert"} className={`mt-2 text-xs font-bold ${actionResult.ok ? "text-emerald-700" : "text-red-600"}`}>{actionResult.message}</p>}
+    {detailLead && <LeadDetailPanel lead={detailLead} columns={detailColumns ?? columns} assignedNames={assignedNames} detailConfiguration={editableConfiguration} onClose={() => setDetailLead(null)} readOnly={readOnly} />}
   </>;
 }

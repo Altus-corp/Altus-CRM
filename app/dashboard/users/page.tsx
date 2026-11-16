@@ -1,21 +1,10 @@
 import { requireAdmin } from "@/app/lib/auth";
 import { type AppRole } from "@/app/lib/roles";
 import { createAdminClient } from "@/app/lib/supabase/admin";
-import { toggleUserSuspension } from "./actions";
-import { DeleteUserDialog } from "./delete-user-dialog";
 import { UserModal } from "./user-modal";
-import { UserRolesEditor } from "./user-roles-editor";
+import { UsersTable, type ManagedUser } from "./users-table";
 
 export const instant = false;
-
-type ManagedUser = {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  roles: AppRole[];
-  isSuspended: boolean;
-};
 
 export default async function UsersPage() {
   await requireAdmin();
@@ -71,27 +60,7 @@ export default async function UsersPage() {
         <UserModal />
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-[0_8px_24px_rgba(42,55,80,0.06)]">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-slate-100 bg-slate-50 text-xs font-extrabold uppercase tracking-[0.08em] text-slate-500">
-              <tr><th className="px-5 py-3">User</th><th className="px-5 py-3">Phone</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Action</th></tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {users.map((user) => (
-                <tr key={user.id} className="hover:bg-slate-50/70">
-                  <td className="px-5 py-3.5"><div className="flex items-center gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-50 text-xs font-extrabold text-red-700">{user.name.slice(0, 2).toUpperCase()}</span><div><p className="font-bold text-slate-800">{user.name}</p><p className="text-xs font-medium text-slate-500">{user.email}</p></div></div></td>
-                  <td className="whitespace-nowrap px-5 py-3.5 font-medium text-slate-600">{user.phone}</td>
-                  <td className="px-5 py-3.5"><UserRolesEditor userId={user.id} name={user.name} roles={user.roles} /></td>
-                  <td className="px-5 py-3.5"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${user.isSuspended ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{user.isSuspended ? "Suspended" : "Active"}</span></td>
-                  <td className="px-5 py-3.5"><div className="flex justify-end gap-2"><form action={toggleUserSuspension}><input type="hidden" name="userId" value={user.id} /><input type="hidden" name="suspend" value={String(!user.isSuspended)} /><button className={`rounded-md border px-3 py-1.5 text-xs font-bold ${user.isSuspended ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-red-200 text-red-700 hover:bg-red-50"}`}>{user.isSuspended ? "Reactivate" : "Suspend"}</button></form><DeleteUserDialog user={{ id: user.id, name: user.name, email: user.email }} transferUsers={transferUsers} /></div></td>
-                </tr>
-              ))}
-              {!users.length && <tr><td colSpan={5} className="px-5 py-10 text-center font-medium text-slate-500">No users found.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <UsersTable users={users} transferUsers={transferUsers} />
     </section>
   );
 }

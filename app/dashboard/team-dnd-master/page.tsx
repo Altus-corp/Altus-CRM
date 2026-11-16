@@ -47,7 +47,7 @@ export default async function TeamDndMasterPage({ searchParams }: { searchParams
   const [resolutionsResult, activitiesResult] = permittedMemberId
     ? await Promise.all([
         admin.from("lead_resolutions").select("id, name").in("name", ["DND", "Not Interested", "Lost", "I will get Back", "I Will Get Back", "Wrong Number"]),
-        admin.from("lead_activities").select("id, created_by, created_at, metadata, assignment:lead_product_assignments!inner(id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(id, lead_number, first_name, last_name, email, phone, created_at, custom_data))").eq("activity_type", "resolution_updated").eq("assignment.assigned_to", permittedMemberId).order("created_at", { ascending: false }).limit(2000),
+        admin.from("lead_activities").select("id, created_by, created_at, metadata, assignment:lead_product_assignments!inner(id, assigned_to, assigned_at, focused_on, next_follow_up_at, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(id, lead_number, first_name, last_name, email, phone, created_at, custom_data))").eq("activity_type", "resolution_updated").is("metadata->>dnd_archived_at", null).eq("assignment.assigned_to", permittedMemberId).order("created_at", { ascending: false }).limit(2000),
       ])
     : [{ data: [] as { id: string; name: string }[], error: null }, { data: [] as ActivityRow[], error: null }];
 
