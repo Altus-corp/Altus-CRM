@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, type ReactNode } from "react";
 import { isAmbassadorWorkspace, type AppRole } from "@/app/lib/roles";
 import { displayProductCode } from "@/app/lib/product-display";
 import type { DashboardNavItem } from "@/app/lib/navigation";
@@ -30,7 +30,7 @@ function NavigationIcon({ label }: { label: string }) {
   if (label.includes("Template")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" /><path d="M8 8h8M8 12h5" /></svg>;
   }
-  if (label.includes("DND")) {
+  if (label.includes("DND") || label.includes("Do Not Call")) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><circle cx="12" cy="12" r="9" /><path d="m5.6 5.6 12.8 12.8" /></svg>;
   }
   if (label.includes("Lead") || label.includes("Client") || label === "Users" || label === "Team" || label === "My Team" || label === "My Ambassador" || label === "Ambassador") {
@@ -61,10 +61,25 @@ function NavigationIcon({ label }: { label: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconClass}><path d="M3 13a9 9 0 1 1 18 0" /><path d="M12 13 16 9M12 13l-3 5" /><circle cx="12" cy="13" r="1" /></svg>;
 }
 
-function ProductsNavigation({ products, pathname }: { products: DashboardShellProps["products"]; pathname: string }) {
+function CompactNavigationLink({ href, label, active }: { href: string; label: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      title={label}
+      aria-label={label}
+      className={`flex h-10 w-full items-center justify-center rounded-[12px] transition ${active ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#d00000]" : "text-[#182035] hover:bg-slate-50"}`}
+    >
+      <NavigationIcon label={label} />
+    </Link>
+  );
+}
+
+function ProductsNavigation({ products, pathname, collapsed }: { products: DashboardShellProps["products"]; pathname: string; collapsed: boolean }) {
   const onProductPage = pathname.startsWith("/dashboard/products");
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
   const open = isOpen ?? onProductPage;
+
+  if (collapsed) return <CompactNavigationLink href="/dashboard/products" label="Products" active={onProductPage} />;
 
   return (
     <div>
@@ -91,7 +106,7 @@ function ProductsNavigation({ products, pathname }: { products: DashboardShellPr
   );
 }
 
-function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean; isSalesManager: boolean }) {
+function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager, collapsed }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean; isSalesManager: boolean; collapsed: boolean }) {
   const children = item.children?.filter((child) => {
     if (child.href === "/dashboard/leads?team=1") return isAdmin;
     if (child.href === "/dashboard/team-leads") return isSalesManager;
@@ -99,12 +114,13 @@ function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }
     return true;
   }) ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
+  if (collapsed) return <CompactNavigationLink href={item.href} label="Leads" active={isCurrentSection} />;
   if (!children.length) {
     const isActive = pathname === item.href;
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}><span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Leads" /></span>{item.label}</Link>;
   }
 
-  const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
   const open = isOpen ?? isCurrentSection;
   return <div>
     <div className={`flex min-h-9 items-center rounded-[12px] transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
@@ -115,13 +131,15 @@ function LeadsNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }
   </div>;
 }
 
-function DoNotCallNavigation({ item, pathname, activeHref, isAdmin, isSalesManager }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean; isSalesManager: boolean }) {
+function DoNotCallNavigation({ item, pathname, activeHref, isAdmin, isSalesManager, collapsed }: { item: DashboardNavItem; pathname: string; activeHref: string; isAdmin: boolean; isSalesManager: boolean; collapsed: boolean }) {
   const children = item.children?.filter((child) => {
     if (child.href === "/dashboard/dnd-master?type=abandoned") return isAdmin;
     if (child.href === "/dashboard/team-dnd-master") return isSalesManager;
     return true;
   }) ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
+  if (collapsed) return <CompactNavigationLink href={item.href} label="Do Not Call" active={isCurrentSection} />;
   if (!children.length) {
     const isActive = pathname === item.href;
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
@@ -130,7 +148,6 @@ function DoNotCallNavigation({ item, pathname, activeHref, isAdmin, isSalesManag
     </Link>;
   }
 
-  const isCurrentSection = pathname === item.href || children.some((child) => child.href.split("?")[0] === pathname);
   const open = isOpen ?? Boolean(isCurrentSection);
 
   return (
@@ -159,15 +176,16 @@ function DoNotCallNavigation({ item, pathname, activeHref, isAdmin, isSalesManag
   );
 }
 
-function AmbassadorNavigation({ item, pathname, activeHref }: { item: DashboardNavItem; pathname: string; activeHref: string }) {
+function AmbassadorNavigation({ item, pathname, activeHref, collapsed }: { item: DashboardNavItem; pathname: string; activeHref: string; collapsed: boolean }) {
   const children = item.children ?? [];
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  const isCurrentSection = pathname === item.href || children.some((child) => child.href === pathname);
+  if (collapsed) return <CompactNavigationLink href={item.href} label={item.label} active={isCurrentSection} />;
   if (!children.length) {
     const isActive = pathname === item.href;
     return <Link href={item.href} className={`flex min-h-9 items-center gap-2.5 rounded-[12px] px-2.5 py-1 text-[13px] font-bold leading-tight transition ${isActive ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}><span className={isActive ? "text-[#d00000]" : "text-[#182035]"}><NavigationIcon label="Ambassador" /></span>{item.label}</Link>;
   }
 
-  const isCurrentSection = pathname === item.href || children.some((child) => child.href === pathname);
   const open = isOpen ?? isCurrentSection;
   return <div>
     <div className={`flex min-h-9 items-center rounded-[12px] transition ${isCurrentSection ? "bg-gradient-to-r from-red-100 via-red-50 to-transparent text-[#172036]" : "text-[#182035] hover:bg-slate-50"}`}>
@@ -191,12 +209,16 @@ export function DashboardShell({
   products,
 }: DashboardShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [isConfigurationOpen, setIsConfigurationOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const isConfigurationPage = pathname === "/dashboard/lead-settings";
   const isAdmin = roles.includes("admin");
   const isSalesManager = roles.includes("sales_manager");
+  const canAddLead = isAdmin || isSalesManager || roles.includes("sales_executive") || isAmbassadorWorkspace(roles);
   const canUseTemplates = roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager");
   const ambassadorWhatsappNumber = ambassadorOwnerPhone?.replace(/\D/g, "");
   const ambassadorWhatsappHref = ambassadorWhatsappNumber
@@ -208,33 +230,60 @@ export function DashboardShell({
     { label: "Product management", href: "/dashboard/lead-settings?tab=products" },
     { label: "Dropdown management", href: "/dashboard/lead-settings?tab=stages" },
   ];
+  useEffect(() => {
+    const syncFullscreenState = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+  useEffect(() => {
+    setIsSidebarCollapsed(window.localStorage.getItem("altus-crm-sidebar-collapsed") === "true");
+  }, []);
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      // Full-screen can be blocked by browser or embedded-window policies.
+    }
+  };
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      window.localStorage.setItem("altus-crm-sidebar-collapsed", String(next));
+      return next;
+    });
+  };
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-[#131c33]">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[196px] flex-col border-r border-slate-100 bg-white px-2.5 pb-2 pt-2 md:flex xl:w-[212px]">
-        <div className="flex items-center gap-2">
+      <aside className={`fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-slate-100 bg-white pb-2 pt-2 transition-[width,padding] duration-200 md:flex ${isSidebarCollapsed ? "w-16 px-2" : "w-[196px] px-2.5 xl:w-[212px]"}`}>
+        <div className={`flex items-center ${isSidebarCollapsed ? "justify-center" : "gap-2"}`}>
+          {!isSidebarCollapsed && <>
+            <button type="button" onClick={() => router.back()} aria-label="Go back" title="Go back" className="grid h-9 w-9 place-items-center rounded-[13px] border border-slate-200 bg-[#fafafa] text-lg text-slate-500 transition hover:bg-slate-100 hover:text-red-700">‹</button>
+            <button type="button" onClick={() => router.forward()} aria-label="Go forward" title="Go forward" className="grid h-9 w-9 place-items-center rounded-[13px] border border-slate-200 bg-[#fafafa] text-lg text-slate-500 transition hover:bg-slate-100 hover:text-red-700">›</button>
+            <span className="mx-1 h-5 w-px bg-slate-200" />
+          </>}
+          <button type="button" onClick={toggleSidebar} aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} className={`${isSidebarCollapsed ? "" : "ml-auto"} grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-sm text-slate-600 transition hover:bg-slate-100 hover:text-red-700`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="h-4 w-4"><rect x="5" y="5" width="14" height="14" rx="1" /><path d="M9 5v14" /></svg>
+          </button>
+          <div className="hidden">
           <button aria-label="Go back" className="grid h-9 w-9 place-items-center rounded-[13px] border border-slate-200 bg-[#fafafa] text-lg text-slate-500">‹</button>
           <button aria-label="Go forward" className="grid h-9 w-9 place-items-center rounded-[13px] border border-slate-200 bg-[#fafafa] text-lg text-slate-500">›</button>
           <span className="mx-1 h-5 w-px bg-slate-200" />
           <button aria-label="Toggle sidebar" className="ml-auto grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-white text-sm text-slate-600">▣</button>
         </div>
 
-        <Link href="/dashboard" className="mt-3 flex items-center gap-2.5 border-b border-slate-200 pb-3.5 px-1">
-          <span className="grid h-10 w-10 place-items-center rounded-[15px] bg-[#d90000] text-xl font-bold text-white shadow-[0_8px_18px_rgba(217,0,0,0.16)]">A</span>
-          <div>
-            <p className="text-[18px] font-extrabold tracking-[-0.04em] text-[#c90000]">ALTUS</p>
-            <p className="-mt-1 text-[10px] font-bold tracking-[0.17em] text-slate-500">CRM</p>
           </div>
-        </Link>
-
-        <nav className="mt-2.5 min-h-0 flex-1 space-y-0 overflow-y-auto overscroll-contain pr-1" aria-label="Dashboard navigation">
+        <nav className={`mt-5 min-h-0 flex-1 space-y-0 overflow-x-hidden overflow-y-auto overscroll-contain ${isSidebarCollapsed ? "px-0" : "pr-1"}`} aria-label="Dashboard navigation">
           {navigation.filter((item) => item.label !== "Lead configuration").map((item) => {
-            if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} />;
-            if (item.href === "/dashboard/leads" && (isAdmin || isSalesManager)) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={pathname === "/dashboard/leads" ? `${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}` : pathname} isAdmin={isAdmin} isSalesManager={isSalesManager} />;
-            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={pathname === "/dashboard/dnd-master" ? `${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}` : pathname} isAdmin={isAdmin} isSalesManager={isSalesManager} />;
-            if ((item.href === "/dashboard/my-ambassador" && item.label === "Ambassador") || (item.href === "/dashboard/senior-ambassadors" && item.label === "My Ambassador")) return <AmbassadorNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("stage") ? `?stage=${searchParams.get("stage")}` : ""}`} />;
+            if (item.href === "/dashboard/products") return <ProductsNavigation key={item.href} products={products} pathname={pathname} collapsed={isSidebarCollapsed} />;
+            if (item.href === "/dashboard/leads" && (isAdmin || isSalesManager)) return <LeadsNavigation key={item.href} item={item} pathname={pathname} activeHref={pathname === "/dashboard/leads" ? `${pathname}${searchParams.get("team") === "1" ? "?team=1" : ""}` : pathname} isAdmin={isAdmin} isSalesManager={isSalesManager} collapsed={isSidebarCollapsed} />;
+            if (item.href === "/dashboard/dnd-master") return <DoNotCallNavigation key={item.href} item={item} pathname={pathname} activeHref={pathname === "/dashboard/dnd-master" ? `${pathname}${searchParams.get("type") ? `?type=${searchParams.get("type")}` : ""}` : pathname} isAdmin={isAdmin} isSalesManager={isSalesManager} collapsed={isSidebarCollapsed} />;
+            if ((item.href === "/dashboard/my-ambassador" && item.label === "Ambassador") || (item.href === "/dashboard/senior-ambassadors" && item.label === "My Ambassador")) return <AmbassadorNavigation key={item.href} item={item} pathname={pathname} activeHref={`${pathname}${searchParams.get("stage") ? `?stage=${searchParams.get("stage")}` : ""}`} collapsed={isSidebarCollapsed} />;
 
             const isActive = pathname === item.href;
+
+            if (isSidebarCollapsed) return <CompactNavigationLink key={item.href} href={item.href} label={item.label} active={isActive} />;
 
             return (
               <div key={item.href}>
@@ -252,7 +301,7 @@ export function DashboardShell({
                   {item.label}
                 </Link>
 
-                {isAdmin && item.label === "Roles & permissions" && (
+                {!isSidebarCollapsed && isAdmin && item.label === "Roles & permissions" && (
                   <div className="mt-0.5">
                     <button
                       type="button"
@@ -295,17 +344,17 @@ export function DashboardShell({
         </nav>
 
         <div className="mt-2 shrink-0">
-          {!isAdmin && !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && <TodaysCallTarget assignedLeads={todayAssignedLeads} />}
+          {!isSidebarCollapsed && !isAdmin && !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant") && <TodaysCallTarget assignedLeads={todayAssignedLeads} />}
           <form action={signOut}>
-          <button className="flex w-full items-center gap-3 rounded-[16px] px-3 py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700">
+          <button title="Sign out" aria-label="Sign out" className={`flex w-full rounded-[16px] py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700 ${isSidebarCollapsed ? "justify-center px-0" : "items-center gap-3 px-3"}`}>
             <span className="text-lg">↪</span>
-            Sign out
+            {!isSidebarCollapsed && "Sign out"}
           </button>
           </form>
         </div>
       </aside>
 
-      <div className="md:pl-[196px] xl:pl-[212px]">
+      <div className={`transition-[padding] duration-200 ${isSidebarCollapsed ? "md:pl-16" : "md:pl-[196px] xl:pl-[212px]"}`}>
         <header className="sticky top-0 z-10 flex h-[52px] items-center justify-between border-b border-slate-200 bg-white px-3 shadow-[0_3px_12px_rgba(28,39,64,0.08)] md:px-5">
           <Link href="/dashboard" className="font-extrabold text-[#cf0000] md:hidden">
             ALTUS CRM
@@ -321,8 +370,8 @@ export function DashboardShell({
               <span className="shrink-0 font-medium">Sales Person:</span><span>{ambassadorOwnerLabel}</span>
             </span>}
             <LeadNavTools />
-            <button aria-label="Add" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035]">+</button>
-            <button aria-label="Expand" className="hidden h-9 w-9 place-items-center rounded-lg text-base text-slate-600 lg:grid">↗</button>
+            {canAddLead && <button type="button" onClick={() => router.push("/dashboard/leads?add=1")} aria-label="Add lead" title="Add lead" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035] transition hover:border-red-200 hover:bg-red-50 hover:text-red-700">+</button>}
+            <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit full screen" : "Enter full screen"} title={isFullscreen ? "Exit full screen" : "Full screen"} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-red-700"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="h-4 w-4"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5" /><path d="m3 8 6-6M15 9l6-6M9 15l-6 6M21 16l-6 6" /></svg></button>
             <div className="relative">
               <WmsProfileAvatar initials={initialsFor(displayName)} expanded={isProfileMenuOpen} onClick={() => setIsProfileMenuOpen((value) => !value)} />
               {isProfileMenuOpen && <div role="dialog" aria-label="Account menu" className="absolute right-0 top-[46px] z-50 w-[280px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_18px_46px_rgba(25,38,61,0.22)]">

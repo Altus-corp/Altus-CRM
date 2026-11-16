@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
@@ -82,6 +82,22 @@ export function SalesLeadsWorkspace({
   const [assignmentMessage, setAssignmentMessage] = useState("");
   const [isAssigning, startAssigning] = useTransition();
   const selectedTeamMember = teamMembers.find((member) => member.id === selectedTeamMemberId) ?? null;
+  useEffect(() => {
+    if (!addLeadMode) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddLeadMode(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [addLeadMode]);
+  useEffect(() => {
+    if (searchParams.get("add") !== "1" || selectedTeamMemberId) return;
+    setAddLeadMode("choice");
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("add");
+    const query = next.toString();
+    router.replace(`/dashboard/leads${query ? `?${query}` : ""}`);
+  }, [router, searchParams, selectedTeamMemberId]);
   if (syncedUrlView !== urlView) {
     setSyncedUrlView(urlView);
     setView(urlView);

@@ -2,6 +2,7 @@
 
 import { useActionState, useRef, useState } from "react";
 import { APP_ROLES, ROLE_LABELS } from "@/app/lib/roles";
+import { PasswordField } from "@/components/auth/password-field";
 import { createUser } from "./actions";
 
 type UserFormProps = {
@@ -64,7 +65,7 @@ export function UserForm({ onClose }: UserFormProps) {
               <label className={`cursor-pointer rounded-md border px-3 py-1.5 text-xs font-bold ${passwordMode === "manual" ? "border-red-400 bg-red-50 text-red-700" : "border-slate-200 text-slate-600"}`}><input className="sr-only" type="radio" name="passwordMode" value="manual" checked={passwordMode === "manual"} onChange={() => setPasswordMode("manual")} />Set manually</label>
               <label className={`cursor-pointer rounded-md border px-3 py-1.5 text-xs font-bold ${passwordMode === "generated" ? "border-red-400 bg-red-50 text-red-700" : "border-slate-200 text-slate-600"}`}><input className="sr-only" type="radio" name="passwordMode" value="generated" checked={passwordMode === "generated"} onChange={() => setPasswordMode("generated")} />Generate automatically</label>
             </div>
-            {passwordMode === "manual" && <input name="password" type="password" required minLength={12} autoComplete="new-password" placeholder="Enter password" className="mt-1.5 h-9 w-full rounded-md border border-slate-200 px-3 text-sm font-medium outline-none focus:border-red-500" />}
+            {passwordMode === "manual" && <PasswordField name="password" required minLength={12} autoComplete="new-password" placeholder="Enter password" className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm font-medium outline-none focus:border-red-500" />}
             <p className="mt-1 text-[11px] font-medium text-slate-500">Minimum 12 characters: upper/lowercase, number, and symbol.</p>
           </fieldset>
           <div className="flex justify-between border-t border-slate-100 pt-3">

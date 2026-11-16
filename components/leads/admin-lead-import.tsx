@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { importLeadsCsv } from "@/app/dashboard/leads/actions";
 import { ManualLeadModal } from "./sales-leads-workspace";
 
@@ -61,11 +62,33 @@ async function downloadSample(columns: SampleColumn[], products: Product[], reso
 }
 
 export function AdminLeadImport({ sampleColumns, products, resolutions, salesPeople, ambassadors = [], ownImports = false, showManualOption = false }: { sampleColumns: SampleColumn[]; products: Product[]; resolutions: NamedOption[]; salesPeople: SalesPerson[]; ambassadors?: Ambassador[]; ownImports?: boolean; showManualOption?: boolean }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [isOpen, setIsOpen] = useState(false);
   const [addMode, setAddMode] = useState<"choice" | "manual" | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    if (!addMode && !isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || isImporting) return;
+      setAddMode(null);
+      setIsOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [addMode, isImporting, isOpen]);
+  useEffect(() => {
+    if (searchParams.get("add") !== "1") return;
+    setMessage(null);
+    if (ownImports || showManualOption) setAddMode("choice");
+    else setIsOpen(true);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("add");
+    const query = next.toString();
+    router.replace(`/dashboard/leads${query ? `?${query}` : ""}`);
+  }, [ownImports, router, searchParams, showManualOption]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;

@@ -37,6 +37,7 @@ export function LeadNavTools() {
   const [assignmentPopupsEnabled, setAssignmentPopupsEnabled] = useState(true);
   const [assignmentPopup, setAssignmentPopup] = useState<AssignmentPopup | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
 
   const loadNotifications = async () => {
     const response = await fetch("/api/notifications", { cache: "no-store" });
@@ -66,6 +67,17 @@ export function LeadNavTools() {
   useEffect(() => {
     if (searchOpen) window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [searchOpen]);
+  useEffect(() => {
+    if (!searchOpen && !notificationsOpen) return;
+
+    const closePanelsOnOutsideClick = (event: PointerEvent) => {
+      if (toolsRef.current?.contains(event.target as Node)) return;
+      setSearchOpen(false);
+      setNotificationsOpen(false);
+    };
+    document.addEventListener("pointerdown", closePanelsOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closePanelsOnOutsideClick);
+  }, [notificationsOpen, searchOpen]);
   useEffect(() => {
     const timer = window.setTimeout(async () => {
       if (query.trim().length < 2) {
@@ -116,7 +128,7 @@ export function LeadNavTools() {
 
   return (
     <>
-      <div className="relative flex items-center gap-2">
+      <div ref={toolsRef} className="relative flex items-center gap-2">
         <button
           type="button"
           onClick={() => {
