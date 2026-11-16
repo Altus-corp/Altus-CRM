@@ -35,6 +35,12 @@ import {
 } from "@/app/lib/external-lead-sources";
 import { indiaToday, scheduledIndiaDate } from "@/app/lib/lead-event-schedule";
 import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
+import {
+  LEAD_ADDRESS_FIELD_DEFINITIONS,
+  isLeadAddressFieldKey,
+  type LeadAddressFieldKey,
+  validateLeadAddressLocation,
+} from "@/app/lib/lead-address-fields";
 
 type ImportResult = {
   ok: boolean;
@@ -3596,14 +3602,16 @@ export async function updateLeadDetails(formData: FormData) {
   const customData = { ...(lead.custom_data ?? {}) } as Record<string, unknown>;
   const update: Record<string, unknown> = { custom_data: customData };
   const updatedFields: string[] = [];
+    const addressValues: Partial<Record<LeadAddressFieldKey, string>> = {};
   for (const input of values) {
     const key = typeof input.key === "string" ? input.key : "";
     const value = typeof input.value === "string" ? input.value.trim() : "";
     const column = configured.get(key);
-    if (!column || column.computed_from?.length) continue;
-    const normalizedLabel = column.label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "");
+      const addressFieldKey = isLeadAddressFieldKey(key) ? key : null;
+      if ((!column && !addressFieldKey) || column?.computed_from?.length) continue;
+      const normalizedLabel = column?.label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "") ?? "";
     if (normalizedLabel === "channelpartner") continue;
     if (
       key === "lead_name" ||
@@ -3611,17 +3619,24 @@ export async function updateLeadDetails(formData: FormData) {
       normalizedLabel === "firstname"
     ) {
       update.first_name = value;
-      updatedFields.push(column.label);
+        updatedFields.push(column?.label ?? "First name");
     } else if (key === "last_name" || normalizedLabel === "lastname") {
       update.last_name = value || null;
-      updatedFields.push(column.label);
+        updatedFields.push(column?.label ?? "Last name");
     } else if (key === "email") {
       update.email = value || null;
-      updatedFields.push(column.label);
+        updatedFields.push(column?.label ?? "Email");
     } else if (key === "phone") {
       update.phone = value || null;
-      updatedFields.push(column.label);
-    } else if (column.source === "custom") {
+        updatedFields.push(column?.label ?? "Phone");
+      } else if (addressFieldKey) {
+        if (addressFieldKey === "google_map" && value && !isValidLeadLink(value)) {
+          throw new Error("Google Map must start with https:// or www.");
+        }
+        customData[addressFieldKey] = value;
+        addressValues[addressFieldKey] = value;
+        updatedFields.push(column?.label ?? LEAD_ADDRESS_FIELD_DEFINITIONS.find((field) => field.field_key === addressFieldKey)?.label ?? addressFieldKey);
+    } else if (column?.source === "custom") {
       const options = Array.isArray(column.options)
         ? column.options.filter((option): option is string => typeof option === "string")
         : [];
@@ -3644,6 +3659,15 @@ export async function updateLeadDetails(formData: FormData) {
       updatedFields.push(column.label);
     }
   }
+    const addressValidation = validateLeadAddressLocation(
+      Object.fromEntries(
+        LEAD_ADDRESS_FIELD_DEFINITIONS.map((field) => [
+          field.field_key,
+          addressValues[field.field_key] ?? String(customData[field.field_key] ?? ""),
+        ]),
+      ) as Partial<Record<LeadAddressFieldKey, string>>,
+    );
+    if (addressValidation) throw new Error(addressValidation);
   if ("first_name" in update && !update.first_name)
     throw new Error("First name is required.");
   const { error } = await supabase

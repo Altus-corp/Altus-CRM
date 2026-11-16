@@ -1,4 +1,5 @@
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
+import { LEAD_ADDRESS_FIELD_DEFINITIONS, leadAddressFieldKeyForColumn } from "@/app/lib/lead-address-fields";
 
 export function completeLeadDetailColumns(lead: LeadRow, columns: LeadColumn[]): LeadColumn[] {
   const result = [...columns];
@@ -29,6 +30,26 @@ export function completeLeadDetailColumns(lead: LeadRow, columns: LeadColumn[]):
   add("last_called_on", "Last called on");
   add("next_follow_up", "Next follow up");
   add("created_at", "Created at");
+  // Address information belongs in the Details workspace, not in every lead
+  // grid. Add these built-in fields even when an admin has not created table
+  // columns for them, while respecting an existing matching custom field.
+  const configuredAddressFields = new Set(
+    result
+      .map((column) => leadAddressFieldKeyForColumn(column))
+      .filter((key): key is NonNullable<typeof key> => Boolean(key)),
+  );
+  for (const field of LEAD_ADDRESS_FIELD_DEFINITIONS) {
+    if (configuredAddressFields.has(field.field_key)) continue;
+    keys.add(field.field_key);
+    result.push({
+      id: `__detail_${field.field_key}`,
+      field_key: field.field_key,
+      label: field.label,
+      source: "custom",
+      field_type: field.field_type,
+      options: field.field_key === "country" ? ["India"] : [],
+    });
+  }
   for (const key of Object.keys(lead.custom_data ?? {})) {
     add(key, key.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()));
   }

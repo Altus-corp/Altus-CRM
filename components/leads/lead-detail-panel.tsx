@@ -7,6 +7,7 @@ import { formatCrmDate } from "@/app/lib/date";
 import { displayProductCode } from "@/app/lib/product-display";
 import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { completeLeadDetailColumns, storedDetailValue } from "@/app/lib/lead-detail-fields";
+import { LEAD_ADDRESS_COUNTRIES, leadAddressFieldKeyForColumn, locationCities, locationStates } from "@/app/lib/lead-address-fields";
 import { attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadDetails, updateLeadFollowUp } from "@/app/dashboard/leads/actions";
 import type { LeadColumn, LeadRow } from "./leads-table";
 import { ZoomMeetingModal } from "./zoom-meeting-modal";
@@ -259,7 +260,7 @@ function ContactInput({ name, label, required = false, type = "text" }: { name: 
 function ContactDropdown({ name, label, options, unavailable }: { name: string; label: string; options: string[]; unavailable: boolean }) { return <label className="block text-xs font-bold text-slate-700">{label}<select name={name} disabled={unavailable} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-red-400 disabled:cursor-not-allowed disabled:bg-slate-50"><option value="">{unavailable ? `No ${label} dropdown configured` : `Select ${label}`}</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>; }
 function normalizeContactColumnLabel(value: string) { return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, ""); }
 
-function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, onSaved, readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; onSaved: () => void; readOnly?: boolean }) {
+function BasicDetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, onSaved, readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; onSaved: () => void; readOnly?: boolean }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
@@ -282,6 +283,81 @@ function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], det
   }
 
   return <div><div className="flex items-center justify-between gap-3"><div><h3 className="text-base font-extrabold text-slate-900">Lead details</h3><p className="mt-1 text-xs text-slate-500">Lead information and custom fields.</p></div>{!readOnly && <button type="button" onClick={() => { setEditing((value) => !value); setMessage(""); }} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 hover:bg-red-50">{editing ? "Cancel" : "Edit details"}</button>}</div>{message && <p className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message === "Details saved." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}<form onSubmit={submit} className="mt-4"><dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{fields.map(({ column, value }) => <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt><dd className="mt-1">{editing && !readOnly && isEditableColumn(column) ? <DetailInput column={column} value={value} /> : <span className="whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{value || "—"}</span>}</dd></div>)}{supplementalDetails.map((field) => <div key={field.label} className="rounded-xl border border-red-100 bg-red-50/40 p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-red-500">{field.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{field.value || "—"}</dd></div>)}</dl>{editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Product, stage, resolution, assignments, and calculated fields remain managed in the Leads table.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving…" : "Save changes"}</button></div>}</form>{detailsExtra}</div>;
+}
+
+function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, onSaved, readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; onSaved: () => void; readOnly?: boolean }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [message, setMessage] = useState("");
+  const [isPending, startTransition] = useTransition();
+  const fields = completeLeadDetailColumns(lead, columns).map((column) => ({ column, value: detailValue(lead, column, assignedName) }));
+  const editableFields = fields.filter(({ column }) => isEditableColumn(column));
+  const savedAddressValue = (key: "country" | "state" | "city") => fields.find(({ column }) => leadAddressFieldKeyForColumn(column) === key)?.value ?? "";
+  const [country, setCountry] = useState(() => savedAddressValue("country"));
+  const [state, setState] = useState(() => savedAddressValue("state"));
+  const [city, setCity] = useState(() => savedAddressValue("city"));
+
+  const resetLocation = () => {
+    setCountry(savedAddressValue("country"));
+    setState(savedAddressValue("state"));
+    setCity(savedAddressValue("city"));
+  };
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const values = editableFields.map(({ column }) => ({ key: column.field_key, value: String(form.get(`field:${column.id}`) ?? "") }));
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("leadId", lead.id);
+      formData.set("assignmentId", lead.assignment_id);
+      formData.set("values", JSON.stringify(values));
+      setMessage("");
+      try {
+        await updateLeadDetails(formData);
+        setEditing(false);
+        setMessage("Details saved.");
+        onSaved();
+        router.refresh();
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Unable to save details.");
+      }
+    });
+  }
+
+  const toggleEditing = () => {
+    if (!editing) resetLocation();
+    setEditing((value) => !value);
+    setMessage("");
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900">Lead details</h3>
+          <p className="mt-1 text-xs text-slate-500">Lead information, address, and custom fields.</p>
+        </div>
+        {!readOnly && <button type="button" onClick={toggleEditing} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 hover:bg-red-50">{editing ? "Cancel" : "Edit details"}</button>}
+      </div>
+      {message && <p className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message === "Details saved." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}
+      <form onSubmit={submit} className="mt-4">
+        <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {fields.map(({ column, value }) => <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4">
+            <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt>
+            <dd className="mt-1">
+              {editing && !readOnly && isEditableColumn(column)
+                ? <AddressDetailInput column={column} value={value} country={country} state={state} city={city} onCountryChange={(value) => { setCountry(value); setState(""); setCity(""); }} onStateChange={(value) => { setState(value); setCity(""); }} onCityChange={setCity} />
+                : <DetailDisplayValue column={column} value={value} />}
+            </dd>
+          </div>)}
+          {supplementalDetails.map((field) => <div key={field.label} className="rounded-xl border border-red-100 bg-red-50/40 p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-red-500">{field.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{field.value || "—"}</dd></div>)}
+        </dl>
+        {editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Product, stage, resolution, assignments, and calculated fields remain managed in the Leads table.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving..." : "Save changes"}</button></div>}
+      </form>
+      {detailsExtra}
+    </div>
+  );
 }
 
 function NotesTab({ leadId, assignmentId, onSaved }: { leadId: string; assignmentId: string; onSaved: () => void }) {
@@ -331,6 +407,21 @@ function TranscriptTab({ leadId, selectedAssignmentId, assignments, transcripts,
 }
 
 function DetailInput({ column, value }: { column: LeadColumn; value: string }) { const className = "mt-1 h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400"; if (column.field_type === "dropdown") return <select name={`field:${column.id}`} defaultValue={value} className={className}><option value="">Select</option>{(column.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}</select>; if (column.field_type === "checkbox") return <label className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><input name={`field:${column.id}`} type="checkbox" value="true" defaultChecked={value === "true"} className="h-4 w-4 rounded border-slate-300 accent-red-600" />Yes</label>; if (column.field_type === "textarea") return <textarea name={`field:${column.id}`} defaultValue={value} className="mt-1 min-h-20 w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400" />; return <input name={`field:${column.id}`} type={column.field_type === "date" ? "date" : column.field_type === "number" ? "number" : "text"} inputMode={column.field_type === "link" ? "url" : undefined} placeholder={column.field_type === "link" ? "https:// or www." : undefined} pattern={column.field_type === "link" ? "(https://|www\\.).+" : undefined} title={column.field_type === "link" ? "Start the link with https:// or www." : undefined} defaultValue={column.field_type === "date" ? dateInputValue(value) : value} className={className} />; }
+function AddressDetailInput({ column, value, country, state, city, onCountryChange, onStateChange, onCityChange }: { column: LeadColumn; value: string; country: string; state: string; city: string; onCountryChange: (value: string) => void; onStateChange: (value: string) => void; onCityChange: (value: string) => void }) {
+  const field = leadAddressFieldKeyForColumn(column);
+  const className = "mt-1 h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:cursor-not-allowed disabled:bg-slate-50";
+  if (field === "country") return <select name={`field:${column.id}`} value={country} onChange={(event) => onCountryChange(event.target.value)} className={className}><option value="">Select Country</option>{LEAD_ADDRESS_COUNTRIES.map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+  if (field === "state") return <select name={`field:${column.id}`} value={state} disabled={!country} onChange={(event) => onStateChange(event.target.value)} className={className}><option value="">{country ? "Select State" : "Select Country first"}</option>{locationStates(country).map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+  if (field === "city") return <select name={`field:${column.id}`} value={city} disabled={!country || !state} onChange={(event) => onCityChange(event.target.value)} className={className}><option value="">{state ? "Select City" : "Select State first"}</option>{locationCities(country, state).map((option) => <option key={option} value={option}>{option}</option>)}</select>;
+  return <DetailInput column={column} value={value} />;
+}
+function DetailDisplayValue({ column, value }: { column: LeadColumn; value: string }) {
+  if (column.field_type === "link" && value) {
+    const href = value.startsWith("www.") ? `https://${value}` : value;
+    return <a href={href} target="_blank" rel="noreferrer" className="break-all text-sm font-extrabold text-red-600 underline underline-offset-2 hover:text-red-800">Open link</a>;
+  }
+  return <span className="whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{value || "—"}</span>;
+}
 function isLeadNumberColumn(column: LeadColumn) { return column.field_key === "lead_number" || ["lead no", "lead number"].includes(column.label.trim().toLowerCase()); }
 function isLeadAcquisitionDateColumn(column: LeadColumn) { return column.field_key === "lead_acquisition_date" || column.label.trim().toLowerCase() === "lead acquisition date"; }
 function isEditableColumn(column: LeadColumn) { return !isChannelPartnerColumn(column) && !isSeniorAmbassadorColumn(column) && !column.read_only && !column.computed_from?.length && !isLeadNumberColumn(column) && !isLeadAcquisitionDateColumn(column) && !["product", "stage", "call_resolution", "assigned_to", "next_follow_up", "created_at"].includes(column.field_key); }
