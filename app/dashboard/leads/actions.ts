@@ -48,6 +48,11 @@ type ImportResult = {
   imported?: number;
   skipped?: number;
 };
+
+// This non-UUID value cannot be mistaken for a real CRM user. It is accepted
+// only by the admin bulk-assignment action below.
+const UNASSIGNED_POOL_VALUE = "__unassigned_pool__";
+
 type ProductivityShastraLead = Record<string, unknown>;
 type MananvasaLead = {
   id?: string | number;
@@ -2363,6 +2368,74 @@ export async function manuallyAssignLeads(formData: FormData) {
   // the normal row policy lets a user update an assignment only while it
   // remains assigned to them.
   const supabase = createAdminClient();
+
+  // Preserve the lead, product work and full audit trail. Only release the
+  // selected product work so the existing round-robin process sees it as
+  // available in the unassigned pool again.
+  if (assigneeId === UNASSIGNED_POOL_VALUE) {
+    if (!isAdmin) {
+      throw new Error("Only an admin can return leads to the unassigned pool.");
+    }
+
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from("lead_product_assignments")
+      .select("id, lead_id, product_id")
+      .in("id", assignmentIds);
+    if (
+      assignmentsError ||
+      !assignments?.length ||
+      assignments.length !== assignmentIds.length
+    ) {
+      throw new Error("The selected product assignments are no longer available.");
+    }
+
+    const { data: releasedAssignments, error: releaseError } = await supabase
+      .from("lead_product_assignments")
+      .update({
+        assigned_to: null,
+        assigned_at: null,
+        focused_on: null,
+        next_follow_up_at: null,
+        assignment_origin: "released",
+      })
+      .in(
+        "id",
+        assignments.map((assignment) => assignment.id),
+      )
+      .select("id");
+    if (releaseError || releasedAssignments?.length !== assignments.length) {
+      throw new Error(
+        releaseError?.message ??
+          "One or more leads changed before they could be returned to the unassigned pool.",
+      );
+    }
+
+    const { error: activityError } = await supabase
+      .from("lead_activities")
+      .insert(
+        assignments.map((assignment) => ({
+          lead_id: assignment.lead_id,
+          lead_product_assignment_id: assignment.id,
+          activity_type: "lead_released",
+          note: "Returned to the unassigned pool.",
+          metadata: {
+            released_by: userId,
+            source: "manual_assignment",
+            product_id: assignment.product_id,
+          },
+          created_by: userId,
+        })),
+      );
+    if (activityError) throw new Error(activityError.message);
+
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/dnd-master");
+    revalidatePath("/dashboard/old-graduate-master");
+    revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/uncategorized-leads");
+    return;
+  }
+
   let teamMemberIds = new Set<string>();
   if (!isAdmin) {
     teamMemberIds = new Set(await getSalesManagerTeamMemberIds(userId));
