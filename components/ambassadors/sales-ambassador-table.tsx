@@ -2,8 +2,9 @@
 
 import dynamic from "next/dynamic";
 import { Mail, MessageCircle, PhoneCall, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { getAmbassadorActualBreakdown, updateAmbassadorActuals, type AmbassadorActualBreakdownItem, type AmbassadorActualMetric } from "@/app/dashboard/my-ambassador/actions";
+import { getAmbassadorActualBreakdown, updateAmbassadorActuals, updateAmbassadorAgreementStatus, type AmbassadorActualBreakdownItem, type AmbassadorActualMetric } from "@/app/dashboard/my-ambassador/actions";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
 
 const LeadDetailPanel = dynamic(() => import("@/components/leads/lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
@@ -22,13 +23,17 @@ export type SalesAmbassadorRow = {
   actualSales: number | null;
   assignedTo: string | null;
   canEditActualSales: boolean;
+  canEditAgreementStatus: boolean;
 };
 
 const countValue = (value: number | null) => String(value ?? 0);
+const agreementStatuses = ["Abandoned", "Agreement Sent", "Agreement Signed", "Not Pitched", "Pitched", "Query", "Said No", "Verbal Yes"];
 
 export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPerson = false }: { rows: SalesAmbassadorRow[]; columns: LeadColumn[]; assignedNames: Record<string, string>; showSalesPerson?: boolean }) {
+  const router = useRouter();
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { actualSales: string }>>({});
+  const [agreementStatusDrafts, setAgreementStatusDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
   const [breakdown, setBreakdown] = useState<{ metric: AmbassadorActualMetric; items: AmbassadorActualBreakdownItem[]; error: string } | null>(null);
@@ -43,6 +48,20 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPe
     setMessage(result.message);
     if (result.ok) setDrafts((current) => { const next = { ...current }; delete next[row.assignmentId]; return next; });
   });
+  const agreementStatusFor = (row: SalesAmbassadorRow) => agreementStatusDrafts[row.assignmentId] ?? row.agreementStatus ?? "";
+  const saveAgreementStatus = (row: SalesAmbassadorRow, status: string) => {
+    const previousStatus = agreementStatusFor(row);
+    setAgreementStatusDrafts((current) => ({ ...current, [row.assignmentId]: status }));
+    startTransition(async () => {
+      const result = await updateAmbassadorAgreementStatus(row.assignmentId, status);
+      setMessage(result.message);
+      if (result.ok) {
+        router.refresh();
+      } else {
+        setAgreementStatusDrafts((current) => ({ ...current, [row.assignmentId]: previousStatus }));
+      }
+    });
+  };
   const showBreakdown = (row: SalesAmbassadorRow, metric: AmbassadorActualMetric) => startTransition(async () => {
     setBreakdown({ metric, items: [], error: "" });
     const result = await getAmbassadorActualBreakdown(row.assignmentId, metric);
@@ -60,7 +79,7 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPe
           const contact = row.lead.phone?.replace(/\D/g, "") ?? "";
           return <tr key={row.assignmentId} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("input,button,a")) setDetailLead(row.lead); }} title="Double-click to open Ambassador detail" className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50">
             <td className="px-3 py-3"><div className="flex items-center gap-2">{contact ? <a href={`tel:${contact}`} onClick={(event) => event.stopPropagation()} title="Call" className="text-red-500 hover:text-red-700"><PhoneCall className="h-4 w-4" /></a> : <PhoneCall className="h-4 w-4 text-slate-300" />}{contact ? <a href={`https://wa.me/91${contact.slice(-10)}`} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} title="WhatsApp" className="text-emerald-500 hover:text-emerald-700"><MessageCircle className="h-4 w-4" /></a> : null}{row.lead.email ? <a href={`mailto:${row.lead.email}`} onClick={(event) => event.stopPropagation()} title="Email" className="text-slate-500 hover:text-slate-700"><Mail className="h-4 w-4" /></a> : null}</div></td>
-            <td className="px-3 py-3 font-extrabold text-slate-800">{[row.lead.first_name, row.lead.last_name].filter(Boolean).join(" ")}</td>{showSalesPerson && <td className="px-3 py-3 font-semibold text-slate-600">{row.assignedTo ? assignedNames[row.assignedTo] || "Unavailable user" : "Unassigned"}</td>}<td className="px-3 py-3 font-semibold text-slate-600">{row.lead.phone || "—"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.agreementStatus || "—"}</td>
+            <td className="px-3 py-3 font-extrabold text-slate-800">{[row.lead.first_name, row.lead.last_name].filter(Boolean).join(" ")}</td>{showSalesPerson && <td className="px-3 py-3 font-semibold text-slate-600">{row.assignedTo ? assignedNames[row.assignedTo] || "Unavailable user" : "Unassigned"}</td>}<td className="px-3 py-3 font-semibold text-slate-600">{row.lead.phone || "—"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.canEditAgreementStatus ? <select aria-label="Agreement Status" value={agreementStatusFor(row)} disabled={isPending} onDoubleClick={(event) => event.stopPropagation()} onChange={(event) => saveAgreementStatus(row, event.target.value)} className="h-8 min-w-36 rounded border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-red-400 disabled:cursor-wait disabled:opacity-60"><option value="">Select status</option>{agreementStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select> : row.agreementStatus || "—"}</td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetLeads)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "leads"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View leads counted for this Ambassador">{countValue(row.actualLeads)}</button></td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetDemo)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "demo"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View demo outcomes counted for this Ambassador">{countValue(row.actualDemo)}</button></td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetProposals)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "proposals"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View proposal outcomes counted for this Ambassador">{countValue(row.actualProposals)}</button></td>
@@ -70,7 +89,7 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPe
         })}{!rows.length && <tr><td colSpan={headers.length} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">No Ambassadors assigned to you yet.</td></tr>}</tbody>
       </table>
     </div>
-    {message && <p className={`mt-2 text-xs font-bold ${message === "Actuals saved." ? "text-emerald-700" : "text-red-600"}`}>{message}</p>}
+    {message && <p className={`mt-2 text-xs font-bold ${message === "Actuals saved." || message === "Agreement status saved." ? "text-emerald-700" : "text-red-600"}`}>{message}</p>}
     {detailLead && <LeadDetailPanel lead={detailLead} columns={columns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
     {breakdown && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label={metricTitle[breakdown.metric]}>
       <div className="max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">

@@ -3,6 +3,7 @@ import { requireUser } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 import { DndMasterTable, type DndRow } from "@/components/leads/dnd-master-table";
 import type { LeadRow } from "@/components/leads/leads-table";
 import { AdminAmbassadorManager, type AmbassadorRecord } from "@/components/ambassadors/admin-ambassador-manager";
@@ -50,7 +51,8 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     ? await managerAdmin.from("crm_team_members").select("user_id").in("team_id", managedTeamIds)
     : { data: [], error: null };
   if (managedMembershipsError) throw new Error("Unable to load the Sales Manager's team members.");
-  const visibleOwnerIds = [...new Set([userId, ...(managedMemberships ?? []).map((membership) => membership.user_id)])];
+  const directManagerMemberIds = isSalesManager ? await getSalesManagerTeamMemberIds(userId) : [];
+  const visibleOwnerIds = [...new Set([userId, ...(managedMemberships ?? []).map((membership) => membership.user_id), ...directManagerMemberIds])];
   const selectedManagerOwnerId = isSalesManager && visibleOwnerIds.includes(ownerFilter) ? ownerFilter : "";
   const activeOwnerFilter = isSalesManager ? selectedManagerOwnerId : ownerFilter;
   const ambassadorDataClient = managerAdmin ?? supabase;
@@ -195,6 +197,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
       actualProposals: assignment.ambassador_actual_proposals, actualSales: assignment.ambassador_actual_sales,
       assignedTo: assignment.assigned_to,
       canEditActualSales: assignment.assigned_to === userId,
+      canEditAgreementStatus: assignment.assigned_to === userId || (isSalesManager && Boolean(assignment.assigned_to && visibleOwnerIds.includes(assignment.assigned_to))),
     }];
   });
 

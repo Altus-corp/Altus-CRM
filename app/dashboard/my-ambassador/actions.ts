@@ -7,6 +7,7 @@ import { sendAccountCredentials } from "@/app/lib/email";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { notifyLeadMovedToAmbassador } from "@/app/lib/lead-notifications";
 import { indiaToday } from "@/app/lib/lead-event-schedule";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 const AGREEMENT_STATUSES = new Set(["Abandoned", "Agreement Sent", "Agreement Signed", "Not Pitched", "Pitched", "Query", "Said No", "Verbal Yes"]);
 
@@ -666,6 +667,84 @@ export async function updateAmbassadorDetails(assignmentId: string, input: Ambas
     revalidatePath("/dashboard/senior-ambassadors");
     return { ok: true, message: "Ambassador details saved." };
   } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to update Ambassador." }; }
+}
+
+// Sales users can change only the agreement outcome on records assigned to
+// them. Sales Managers also have that access for their configured team.
+export async function updateAmbassadorAgreementStatus(assignmentId: string, agreementStatus: string) {
+  try {
+    const user = await requireUser();
+    if (!user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) {
+      throw new Error("Only sales users can update an Ambassador agreement status.");
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(assignmentId)) throw new Error("Invalid Ambassador record.");
+    const status = cleanText(agreementStatus, 120);
+    if (!AGREEMENT_STATUSES.has(status)) throw new Error("Choose a valid agreement status.");
+
+    const supabase = createAdminClient();
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("lead_product_assignments")
+      .select("lead_id, product_id, assigned_to, is_ambassador")
+      .eq("id", assignmentId)
+      .maybeSingle();
+    if (assignmentError || !assignment) throw new Error(assignmentError?.message || "Ambassador record not found.");
+    const { data: product, error: productError } = await supabase
+      .from("lead_products")
+      .select("code")
+      .eq("id", assignment.product_id)
+      .maybeSingle();
+    if (productError || workflowKey(product?.code) !== "ambassador") throw new Error("Ambassador record not found.");
+
+    let canUpdate = assignment.assigned_to === user.userId;
+    if (!canUpdate && user.roles.includes("sales_manager")) {
+      const teamMemberIds = await getSalesManagerTeamMemberIds(user.userId);
+      canUpdate = Boolean(assignment.assigned_to && teamMemberIds.includes(assignment.assigned_to));
+    }
+    if (!canUpdate) throw new Error("This Ambassador record is not assigned to you or your team.");
+
+    const patch: Record<string, unknown> = {
+      ambassador_agreement_status: status,
+      updated_at: new Date().toISOString(),
+    };
+    // Signing is a real workflow transition: it moves the record into
+    // Onboarding Ambassador and records Agreement Signed / Waived.
+    if (status === "Agreement Signed") {
+      const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
+        supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
+        supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+      ]);
+      if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
+      const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
+      const signed = (resolutions ?? []).find((resolution) => ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"].includes(workflowKey(resolution.name)));
+      if (!onboarding || !signed) throw new Error("Configure Onboarding Ambassador and Agreement Signed / Waived before marking this Ambassador as signed.");
+      Object.assign(patch, {
+        stage_id: onboarding.id,
+        latest_resolution_id: signed.id,
+        is_ambassador: true,
+        is_active: true,
+        is_closed: true,
+        focused_on: null,
+        next_follow_up_at: null,
+      });
+    }
+
+    const { error } = await supabase.from("lead_product_assignments").update(patch).eq("id", assignmentId);
+    if (error) throw new Error(error.message);
+    await supabase.from("lead_activities").insert({
+      lead_id: assignment.lead_id,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "ambassador_agreement_status_updated",
+      note: `Ambassador agreement status changed to ${status}${status === "Agreement Signed" ? "; moved to Onboarding Ambassador." : "."}`,
+      metadata: { agreement_status: status },
+      created_by: user.userId,
+    });
+    revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/senior-ambassadors");
+    return { ok: true, message: "Agreement status saved." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to save the agreement status." };
+  }
 }
 
 export type AmbassadorActualMetric = "leads" | "demo" | "proposals";

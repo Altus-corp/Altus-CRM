@@ -25,12 +25,13 @@ const isUncategorizedProduct = (product: unknown) => {
   return code === "UNCATEGORIZED";
 };
 
-export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ page?: string; view?: string; assignee?: string; member?: string; workspace?: string; team?: string }> }) {
+export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ page?: string; view?: string; assignee?: string; member?: string; workspace?: string; team?: string; q?: string }> }) {
   await connection();
   const params = await searchParams;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const pageSize = 50;
   const offset = (page - 1) * pageSize;
+  const searchQuery = (params.q ?? "").trim().slice(0, 120);
   const user = await requireUser();
   const supabase = await createClient();
   const isAdmin = user.roles.includes("admin");
@@ -77,6 +78,18 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const productJoin = isAdminLeadMaster ? "!inner" : "";
   let leadsPromise = leadDataClient.from("leads").select(`id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments${assignmentsJoin}(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products${productJoin}(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))`).order("created_at", { ascending: false }).range(offset, offset + pageSize);
   if (isAdminLeadMaster) leadsPromise = leadsPromise.eq("assignments.is_ambassador", false).neq("assignments.product.code", "UNCATEGORIZED");
+  if (isAdminLeadMaster && searchQuery) {
+    // Restrict special PostgREST filter characters while preserving useful
+    // name, email, and phone searches. This runs before the page range.
+    const terms = searchQuery
+      .replace(/[^a-zA-Z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 4);
+    for (const term of terms) {
+      leadsPromise = leadsPromise.or(`first_name.ilike.%${term}%,last_name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%`);
+    }
+  }
   if (selectedOwnerId) {
     leadsPromise = leadsPromise
       .eq("assignments.assigned_to", selectedOwnerId)
@@ -191,7 +204,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const productResolutions = (resolutionMappings ?? []).map((mapping) => ({ product_id: mapping.product_id, resolution_id: mapping.resolution_id, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
 
   const preferences = { order: Array.isArray(tablePreferences?.column_order) ? tablePreferences.column_order.filter((value): value is string => typeof value === "string") : [], widths: tablePreferences?.column_widths && typeof tablePreferences.column_widths === "object" ? tablePreferences.column_widths as Record<string, number> : {}, frozen: tablePreferences?.frozen_column_keys ?? [], hidden: tablePreferences?.hidden_column_keys ?? [], layoutVersion: tablePreferences?.layout_version ?? 0 };
-  const pager = <LeadsPager page={page} hasNext={hasNextPage} view={params.view} team={showTeamLeads} assignee={selectedAssigneeId} member={selectedManagerMemberId} workspace={selectedAssigneeId ? selectedWorkspaceView : undefined} />;
+  const pager = <LeadsPager page={page} hasNext={hasNextPage} view={params.view} team={showTeamLeads} assignee={selectedAssigneeId} member={selectedManagerMemberId} workspace={selectedAssigneeId ? selectedWorkspaceView : undefined} query={searchQuery} />;
   if (ambassadorWorkspace) {
     const focusedLeadIds = normalizedLeads.filter((lead) => lead.focused_on === indiaToday()).map((lead) => lead.assignment_id);
     return <><SalesLeadsWorkspace columns={columns ?? []} leads={normalizedLeads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} products={products ?? []} stages={stages ?? []} productResolutions={productResolutions} />{partnerLinksUnavailable && <p className="mx-auto mt-3 max-w-7xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Channel Partner leads will appear after the latest Channel Partner migration is run in Supabase.</p>}{pager}</>;
@@ -204,7 +217,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   return <><section className="mx-auto max-w-7xl" aria-label="Leads"><LeadsTable columns={columns ?? []} leads={normalizedLeads} assignedNames={assignedNames} preferences={preferences} /></section>{pager}</>;
 }
 
-function LeadsPager({ page, hasNext, view, team, assignee, member, workspace }: { page: number; hasNext: boolean; view?: string; team?: boolean; assignee?: string | null; member?: string | null; workspace?: "master" | "focused" | "ambassador" }) {
+function LeadsPager({ page, hasNext, view, team, assignee, member, workspace, query: searchQuery }: { page: number; hasNext: boolean; view?: string; team?: boolean; assignee?: string | null; member?: string | null; workspace?: "master" | "focused" | "ambassador"; query?: string }) {
   const href = (nextPage: number) => {
     const query = new URLSearchParams({ page: String(nextPage) });
     if (view) query.set("view", view);
@@ -212,6 +225,7 @@ function LeadsPager({ page, hasNext, view, team, assignee, member, workspace }: 
     if (assignee) query.set("assignee", assignee);
     if (member) query.set("member", member);
     if (workspace) query.set("workspace", workspace);
+    if (searchQuery) query.set("q", searchQuery);
     return `/dashboard/leads?${query.toString()}`;
   };
   return <nav className="mx-auto mt-3 flex max-w-[1500px] items-center justify-end gap-2" aria-label="Lead table pagination"><span className="mr-auto text-[10px] font-semibold text-slate-500">Page {page} Â· 50 records per page</span>{page > 1 && <Link href={href(page - 1)} className="rounded border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50">Previous</Link>}{hasNext && <Link href={href(page + 1)} className="rounded bg-[#d90000] px-3 py-1.5 text-[11px] font-extrabold text-white hover:bg-red-700">Next</Link>}</nav>;

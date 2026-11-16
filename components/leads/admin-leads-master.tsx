@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
 import { AdminLeadImport } from "./admin-lead-import";
@@ -14,13 +14,30 @@ type ProductResolution = { product_id: string; resolution_id: string; resolution
 export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames, assignmentUsers, importUsers, ambassadors, preferences, showTeamLeads, selectedAssigneeId, selectedWorkspaceView, databaseCounts, products, stages, resolutions, productResolutions }: { columns: LeadColumn[]; sampleColumns: { label: string; field_key: string; field_type?: string; options?: string[]; computed_from?: string[] }[]; leads: LeadRow[]; assignedNames: Record<string, string>; assignmentUsers: { id: string; name: string }[]; importUsers: { id: string; name: string }[]; ambassadors: { id: string; name: string }[]; preferences: { order: string[]; widths: Record<string, number>; frozen: string[]; hidden: string[] }; showTeamLeads: boolean; selectedAssigneeId: string | null; selectedWorkspaceView: "master" | "focused" | "ambassador"; databaseCounts: { databaseLeads: number; referenceLeads: number; qualifiedLeads: number; leads: number }; products: Product[]; stages: Stage[]; resolutions: { id: string; name: string }[]; productResolutions: ProductResolution[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [search, setSearch] = useState("");
+  const urlSearch = searchParams.get("q") ?? "";
+  const [search, setSearch] = useState(urlSearch);
   const [productId, setProductId] = useState("");
   const [stageId, setStageId] = useState("");
   const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>([]);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncFailed, setSyncFailed] = useState(false);
   const [isSyncing, startSyncTransition] = useTransition();
+  useEffect(() => {
+    setSearch(urlSearch);
+  }, [urlSearch]);
+  useEffect(() => {
+    if (search === urlSearch) return;
+    const timer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete("page");
+      const value = search.trim();
+      if (value) next.set("q", value);
+      else next.delete("q");
+      const query = next.toString();
+      router.replace(`/dashboard/leads${query ? `?${query}` : ""}`);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [router, search, searchParams, urlSearch]);
   const selectedUser = assignmentUsers.find((user) => user.id === selectedAssigneeId);
   const selectableStages = productId ? stages.filter((stage) => stage.product_id === productId) : stages;
   const filteredLeads = leads.filter((lead) => {
