@@ -1,7 +1,9 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/app/lib/auth";
+import { sendAccountCredentials } from "@/app/lib/email";
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { notifyLeadMovedToAmbassador } from "@/app/lib/lead-notifications";
 import { indiaToday } from "@/app/lib/lead-event-schedule";
@@ -82,6 +84,11 @@ export type AmbassadorInput = {
   targetSales?: string;
 };
 
+export type CreateAmbassadorAccountState = {
+  error?: string;
+  success?: string;
+};
+
 function cleanText(value: unknown, max = 4000) {
   return String(value ?? "").trim().slice(0, max);
 }
@@ -93,6 +100,14 @@ function workflowKey(value: unknown) {
 function normalizePhone(value: unknown) {
   const digits = cleanText(value, 40).replace(/\D/g, "");
   return digits.length >= 10 ? digits.slice(-10) : "";
+}
+
+function generateAmbassadorPassword() {
+  return `Altus!${randomBytes(9).toString("base64url")}`;
+}
+
+function isValidAccountPassword(password: string) {
+  return password.length >= 12 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
 }
 
 function splitName(value: unknown) {
@@ -217,6 +232,112 @@ async function requireAdmin() {
   const user = await requireUser();
   if (!user.roles.includes("admin")) throw new Error("Only an admin can manage Ambassador records.");
   return user;
+}
+
+export async function createAmbassadorAccount(
+  _previousState: CreateAmbassadorAccountState,
+  formData: FormData,
+): Promise<CreateAmbassadorAccountState> {
+  const actor = await requireUser();
+  if (!actor.roles.some((role) => role === "sales_executive" || role === "sales_manager")) {
+    return { error: "Only Sales Executives and Sales Managers can create Ambassador accounts." };
+  }
+
+  const firstName = cleanText(formData.get("firstName"), 120);
+  const lastName = cleanText(formData.get("lastName"), 120);
+  const email = cleanText(formData.get("email"), 254).toLowerCase();
+  const phone = normalizePhone(formData.get("phone"));
+  const passwordMode = cleanText(formData.get("passwordMode"), 20) || "manual";
+  const manualPassword = String(formData.get("password") ?? "");
+
+  if (!firstName || !lastName || !email || !phone) return { error: "Complete the Ambassador's name, email, and 10-digit mobile number." };
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { error: "Enter a valid email address." };
+  if (!/^[0-9]{10}$/.test(phone)) return { error: "Enter a valid 10-digit mobile number." };
+
+  const password = passwordMode === "generated" ? generateAmbassadorPassword() : manualPassword;
+  if (!isValidAccountPassword(password)) {
+    return { error: "Use at least 12 characters, including uppercase, lowercase, a number, and a symbol." };
+  }
+
+  const admin = createAdminClient();
+  const fullName = `${firstName} ${lastName}`;
+  const { data: created, error: createError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    app_metadata: { must_change_password: true },
+    user_metadata: { first_name: firstName, last_name: lastName, full_name: fullName, phone },
+  });
+  if (createError || !created.user) return { error: createError?.message ?? "Unable to create the Ambassador account." };
+
+  const ambassadorId = created.user.id;
+  const cleanup = async () => {
+    await admin.auth.admin.deleteUser(ambassadorId);
+  };
+
+  const [{ error: profileError }, { error: roleError }] = await Promise.all([
+    admin.from("profiles").upsert({ id: ambassadorId, first_name: firstName, last_name: lastName, full_name: fullName, phone }, { onConflict: "id" }),
+    admin.from("user_roles").insert({ user_id: ambassadorId, role: "ambassador" }),
+  ]);
+  if (profileError || roleError) {
+    await cleanup();
+    return { error: "The Ambassador account could not be prepared. Please try again." };
+  }
+
+  // If this mobile number already belongs to an Ambassador record, retain that
+  // record's current CRM owner. Otherwise, the sales user creating the account
+  // becomes the relationship manager for future Ambassador-submitted leads.
+  const { data: matchingLead } = await admin
+    .from("leads")
+    .select("id")
+    .eq("phone_key", phone)
+    .maybeSingle();
+  const { data: existingAmbassadorWork, error: ambassadorWorkError } = matchingLead
+    ? await admin
+      .from("lead_product_assignments")
+      .select("id, assigned_to")
+      .eq("lead_id", matchingLead.id)
+      .eq("is_ambassador", true)
+      .order("updated_at", { ascending: false })
+    : { data: [], error: null };
+  if (ambassadorWorkError) {
+    await cleanup();
+    return { error: "The Ambassador account was not created because the existing Ambassador record could not be linked." };
+  }
+
+  const relationshipManagerId = existingAmbassadorWork?.find((work) => work.assigned_to)?.assigned_to ?? actor.userId;
+  const { error: managerError } = await admin.from("ambassador_relationship_managers").upsert({
+    ambassador_id: ambassadorId,
+    crm_user_id: relationshipManagerId,
+    assigned_by: actor.userId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "ambassador_id" });
+  if (managerError) {
+    await cleanup();
+    return { error: "The Ambassador account was not created because its CRM owner could not be saved." };
+  }
+
+  if (existingAmbassadorWork?.length) {
+    const { error: linkError } = await admin
+      .from("lead_product_assignments")
+      .update({ ambassador_user_id: ambassadorId, updated_at: new Date().toISOString() })
+      .in("id", existingAmbassadorWork.map((work) => work.id));
+    if (linkError) {
+      await cleanup();
+      return { error: "The Ambassador account was not created because its existing CRM record could not be linked." };
+    }
+  }
+
+  try {
+    await sendAccountCredentials({ email, password, fullName });
+  } catch {
+    await cleanup();
+    return { error: "The Ambassador account was not created because the account email could not be sent. Check the SMTP configuration." };
+  }
+
+  revalidatePath("/dashboard/my-ambassador");
+  revalidatePath("/dashboard/leads");
+  return { success: `${fullName}'s Ambassador login was created and their temporary password was emailed.` };
 }
 
 type ExternalAmbassadorSyncResult = { ok: boolean; message: string; imported?: number; updated?: number; skipped?: number };
