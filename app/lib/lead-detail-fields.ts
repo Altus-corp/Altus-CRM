@@ -2,9 +2,21 @@ import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
 import { LEAD_ADDRESS_FIELD_DEFINITIONS, leadAddressFieldKeyForColumn } from "@/app/lib/lead-address-fields";
 
 export function completeLeadDetailColumns(lead: LeadRow, columns: LeadColumn[]): LeadColumn[] {
-  const result = [...columns];
-  const keys = new Set(result.map((column) => column.field_key));
   const normalizedLabel = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const isPrimaryContactNameColumn = (column: LeadColumn) => {
+    const names = [normalizedLabel(column.field_key), normalizedLabel(column.label)];
+    return names.some((name) => ["firstname", "contactfirstname", "lastname", "contactlastname"].includes(name));
+  };
+  // Full Name is a calculated convenience column for the grid. In Details it
+  // would repeat the Primary contact's First Name and Last Name, so show the
+  // separate source fields there instead. Remove configured name variants so
+  // the two canonical fields below are always displayed exactly once.
+  const result = columns.filter((column) =>
+    column.field_key !== "lead_name" &&
+    !(["first_name", "last_name"].every((field) => column.computed_from?.includes(field))) &&
+    !isPrimaryContactNameColumn(column),
+  );
+  const keys = new Set(result.map((column) => column.field_key));
   const hasSystemColumn = (key: "lead_number" | "lead_acquisition_date") => result.some((column) => key === "lead_number"
     ? column.field_key === key || ["leadno", "leadnumber"].includes(normalizedLabel(column.label))
     : column.field_key === key || normalizedLabel(column.label) === "leadacquisitiondate");
@@ -17,8 +29,11 @@ export function completeLeadDetailColumns(lead: LeadRow, columns: LeadColumn[]):
   // hides it from the grid or has not yet added the corresponding table row.
   add("lead_number", "Lead no.");
   add("lead_acquisition_date", "Lead acquisition date");
-  if (!keys.has("lead_name")) add("first_name", "First name");
-  add("last_name", "Contact last name");
+  // The canonical lead row is always the Primary contact. Keep its name
+  // split into First Name and Last Name; secondary contacts are shown by the
+  // Details tab as a separate list.
+  add("first_name", "First name");
+  add("last_name", "Last name");
   add("email", "Email");
   add("phone", "Phone");
   add("product", "Product");
@@ -51,6 +66,7 @@ export function completeLeadDetailColumns(lead: LeadRow, columns: LeadColumn[]):
     });
   }
   for (const key of Object.keys(lead.custom_data ?? {})) {
+    if (["firstname", "contactfirstname", "lastname", "contactlastname"].includes(normalizedLabel(key))) continue;
     add(key, key.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()));
   }
   return result;

@@ -165,7 +165,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
       })}</Fragment>;
       })}</tbody>
     </table>{!leads.length && <div className="px-4 py-12 text-center"><p className="text-sm font-bold text-slate-700">No leads yet</p><p className="mt-1 text-xs text-slate-500">New leads will appear here using the columns selected by the admin.</p></div>}</div>}
-    {detailLead && <LeadDetailPanel lead={{ ...detailLead, channel_partner_name: partnerNames[detailLead.id] ?? detailLead.channel_partner_name, senior_ambassador: seniorConfig.selected[detailLead.id] ?? detailLead.senior_ambassador ?? null }} columns={(detailColumns ?? columns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} onClose={() => setDetailLead(null)} readOnly={readOnly} />}
+    {detailLead && <LeadDetailPanel lead={{ ...detailLead, channel_partner_name: partnerNames[detailLead.id] ?? detailLead.channel_partner_name, channel_partner_ids: partnerConfig.selected[detailLead.id] ?? detailLead.channel_partner_ids ?? [], channel_partner_options: partnerConfig.options, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[detailLead.id] ?? detailLead.senior_ambassador ?? null, senior_ambassador_options: partnerConfig.options, senior_ambassador_editable: !readOnly && seniorConfig.editable }} columns={(detailColumns ?? columns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} detailConfiguration={editableConfiguration} onClose={() => setDetailLead(null)} readOnly={readOnly} />}
   </section>;
 }
 

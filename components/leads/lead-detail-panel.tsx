@@ -8,8 +8,10 @@ import { displayProductCode } from "@/app/lib/product-display";
 import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { completeLeadDetailColumns, storedDetailValue } from "@/app/lib/lead-detail-fields";
 import { LEAD_ADDRESS_COUNTRIES, leadAddressFieldKeyForColumn, locationCities, locationStates } from "@/app/lib/lead-address-fields";
-import { attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadDetails, updateLeadFollowUp } from "@/app/dashboard/leads/actions";
+import { attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadDetails, updateLeadFollowUp, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import type { LeadColumn, LeadRow } from "./leads-table";
+import { ChannelPartnerSelect } from "./channel-partner-select";
+import { SeniorAmbassadorSelect } from "./senior-ambassador-select";
 import { ZoomMeetingModal } from "./zoom-meeting-modal";
 import { GoogleMeetModal } from "./google-meet-modal";
 import { EmailLeadModal } from "./email-lead-modal";
@@ -18,10 +20,14 @@ import { LeadNoteActivity } from "./lead-note-activity";
 
 type Activity = { id: string; activity_type: string; note: string | null; follow_up_at: string | null; created_at: string; metadata: Record<string, unknown> | null; actor?: string | null };
 type Tab = "activity" | "details" | "notes" | "follow-up" | "transcript" | "contacts";
+type DetailEditableConfiguration = {
+  stages: { id: string; product_id: string; name: string }[];
+  productResolutions: { product_id: string; resolution_id: string; resolution_name: string }[];
+};
 
 const activityLabels: Record<string, string> = { lead_created: "Lead added", assigned: "Lead assigned", product_added: "Product added", product_transferred: "Transferred to product", product_transfer_completed: "Product transfer completed", transcript_attached: "Transcript attached", details_updated: "Details updated", product_updated: "Product updated", stage_updated: "Stage updated", resolution_updated: "Call resolution updated", follow_up_scheduled: "Follow-up scheduled", follow_up_rescheduled: "Follow-up date updated", call_transcript_synced: "Call transcript saved", zoom_meeting_scheduled: "Zoom meeting scheduled", zoom_transcript_received: "Zoom transcript received", note: "Note added", call: "Call", video_call: "Video call", offline_meeting: "Offline meeting", whatsapp_message: "WhatsApp message", online_demo: "Online demo", offline_demo: "Offline demo", linkedin: "LinkedIn", online_meeting: "Online meeting", email: "Email" };
 
-export function LeadDetailPanel({ lead, columns, assignedNames, onClose, supplementalDetails = [], detailsExtra, initialTab = "activity", readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedNames: Record<string, string>; onClose: () => void; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; initialTab?: Tab; readOnly?: boolean }) {
+export function LeadDetailPanel({ lead, columns, assignedNames, onClose, supplementalDetails = [], detailsExtra, detailConfiguration, initialTab = "activity", readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedNames: Record<string, string>; onClose: () => void; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; detailConfiguration?: DetailEditableConfiguration; initialTab?: Tab; readOnly?: boolean }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(lead.assignment_id);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -106,7 +112,7 @@ export function LeadDetailPanel({ lead, columns, assignedNames, onClose, supplem
       <main className="p-5">
         <label className="mb-4 flex max-w-sm items-center gap-3 rounded-xl border border-red-100 bg-white px-3 py-2 text-xs font-bold text-slate-600"><span className="shrink-0 text-red-600">Select product</span><select value={scopedLead.assignment_id} onChange={(event) => { setSelectedAssignmentId(event.target.value); setFollowUpAt(detailAssignments.find((assignment) => assignment.id === event.target.value)?.next_follow_up_at ?? null); }} className="min-w-0 flex-1 bg-transparent font-extrabold text-slate-800 outline-none">{detailAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{displayProductCode(assignment.product?.code)}</option>)}</select></label>
         {tab === "activity" && <ActivityTab activities={activities} loading={loading} assignedName={scopedAssignedName} lead={scopedLead} transcripts={transcripts.filter((item) => item.lead_product_assignment_id === scopedLead.assignment_id)} onSaved={() => setActivityVersion((version) => version + 1)} readOnly={readOnly} />}
-        {tab === "details" && <DetailsTab lead={scopedLead} columns={columns} assignedName={scopedAssignedName} supplementalDetails={supplementalDetails} detailsExtra={detailsExtra} onSaved={() => setActivityVersion((version) => version + 1)} readOnly={readOnly} />}
+        {tab === "details" && <DetailsTab lead={scopedLead} columns={columns} assignedName={scopedAssignedName} supplementalDetails={supplementalDetails} detailsExtra={detailsExtra} detailConfiguration={detailConfiguration} contactVersion={activityVersion} onSaved={() => setActivityVersion((version) => version + 1)} readOnly={readOnly} />}
         {tab === "notes" && <NotesTab leadId={lead.id} assignmentId={scopedLead.assignment_id} onSaved={() => setActivityVersion((version) => version + 1)} />}
         {tab === "follow-up" && <FollowUpTab leadId={lead.id} assignmentId={scopedLead.assignment_id} followUpAt={followUpAt} onSaved={(value) => { setFollowUpAt(value); setActivityVersion((version) => version + 1); }} />}
         {tab === "transcript" && <TranscriptTab leadId={lead.id} selectedAssignmentId={scopedLead.assignment_id} assignments={detailAssignments} transcripts={transcripts} onSaved={() => setActivityVersion((version) => version + 1)} />}
@@ -285,7 +291,7 @@ function BasicDetailsTab({ lead, columns, assignedName, supplementalDetails = []
   return <div><div className="flex items-center justify-between gap-3"><div><h3 className="text-base font-extrabold text-slate-900">Lead details</h3><p className="mt-1 text-xs text-slate-500">Lead information and custom fields.</p></div>{!readOnly && <button type="button" onClick={() => { setEditing((value) => !value); setMessage(""); }} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 hover:bg-red-50">{editing ? "Cancel" : "Edit details"}</button>}</div>{message && <p className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message === "Details saved." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}<form onSubmit={submit} className="mt-4"><dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{fields.map(({ column, value }) => <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt><dd className="mt-1">{editing && !readOnly && isEditableColumn(column) ? <DetailInput column={column} value={value} /> : <span className="whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{value || "—"}</span>}</dd></div>)}{supplementalDetails.map((field) => <div key={field.label} className="rounded-xl border border-red-100 bg-red-50/40 p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-red-500">{field.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{field.value || "—"}</dd></div>)}</dl>{editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Product, stage, resolution, assignments, and calculated fields remain managed in the Leads table.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving…" : "Save changes"}</button></div>}</form>{detailsExtra}</div>;
 }
 
-function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, onSaved, readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; onSaved: () => void; readOnly?: boolean }) {
+function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, detailConfiguration, contactVersion, onSaved, readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; detailConfiguration?: DetailEditableConfiguration; contactVersion: number; onSaved: () => void; readOnly?: boolean }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
@@ -343,14 +349,24 @@ function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], det
       {message && <p className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message === "Details saved." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}
       <form onSubmit={submit} className="mt-4">
         <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {fields.map(({ column, value }) => <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4">
-            <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt>
-            <dd className="mt-1">
-              {editing && !readOnly && isEditableColumn(column)
-                ? <AddressDetailInput column={column} value={value} country={country} state={state} city={city} onCountryChange={(value) => { setCountry(value); setState(""); setCity(""); }} onStateChange={(value) => { setState(value); setCity(""); }} onCityChange={setCity} />
-                : <DetailDisplayValue column={column} value={value} />}
-            </dd>
-          </div>)}
+          {fields.map(({ column, value }) => {
+            const workflowDropdown = !readOnly && (
+              (isChannelPartnerColumn(column) && lead.channel_partner_editable) ||
+              (isSeniorAmbassadorColumn(column) && lead.senior_ambassador_editable) ||
+              ((column.field_key === "stage" || column.field_key === "call_resolution") && Boolean(detailConfiguration))
+            );
+            return <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4">
+              <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt>
+              <dd className="mt-1">
+                {workflowDropdown
+                  ? <DetailWorkflowDropdown lead={lead} column={column} configuration={detailConfiguration} onSaved={() => { onSaved(); router.refresh(); }} />
+                  : editing && !readOnly && isEditableColumn(column)
+                    ? <AddressDetailInput column={column} value={value} country={country} state={state} city={city} onCountryChange={(value) => { setCountry(value); setState(""); setCity(""); }} onStateChange={(value) => { setState(value); setCity(""); }} onCityChange={setCity} />
+                    : <DetailDisplayValue column={column} value={value} />}
+              </dd>
+            </div>;
+          })}
+          <SecondaryContactNames leadId={lead.id} assignmentId={lead.assignment_id} refreshVersion={contactVersion} />
           {supplementalDetails.map((field) => <div key={field.label} className="rounded-xl border border-red-100 bg-red-50/40 p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-red-500">{field.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{field.value || "—"}</dd></div>)}
         </dl>
         {editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Product, stage, resolution, assignments, and calculated fields remain managed in the Leads table.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving..." : "Save changes"}</button></div>}
@@ -358,6 +374,135 @@ function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], det
       {detailsExtra}
     </div>
   );
+}
+
+function DetailWorkflowDropdown({ lead, column, configuration, onSaved }: { lead: LeadRow; column: LeadColumn; configuration?: DetailEditableConfiguration; onSaved: () => void }) {
+  if (isChannelPartnerColumn(column) && lead.channel_partner_editable) {
+    return <ChannelPartnerSelect leadId={lead.id} assignmentId={lead.assignment_id} names={lead.channel_partner_name} options={lead.channel_partner_options ?? []} selectedIds={lead.channel_partner_ids ?? []} onSaved={() => onSaved()} />;
+  }
+  if (isSeniorAmbassadorColumn(column) && lead.senior_ambassador_editable) {
+    return <SeniorAmbassadorSelect leadId={lead.id} assignmentId={lead.assignment_id} selected={lead.senior_ambassador} options={lead.senior_ambassador_options ?? []} onSaved={onSaved} />;
+  }
+  if (!configuration) return null;
+  if (column.field_key === "stage") return <DetailStageDropdown lead={lead} configuration={configuration} onSaved={onSaved} />;
+  if (column.field_key === "call_resolution") return <DetailResolutionDropdown lead={lead} configuration={configuration} onSaved={onSaved} />;
+  return null;
+}
+
+function DetailStageDropdown({ lead, configuration, onSaved }: { lead: LeadRow; configuration: DetailEditableConfiguration; onSaved: () => void }) {
+  const productId = lead.product?.[0]?.id ?? "";
+  const stages = configuration.stages.filter((stage) => stage.product_id === productId);
+  const savedStageId = stages.find((stage) => stage.name === lead.stage?.[0]?.name)?.id ?? "";
+  const [value, setValue] = useState(savedStageId);
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => setValue(savedStageId), [savedStageId]);
+
+  const save = (stageId: string) => startTransition(async () => {
+    const formData = new FormData();
+    formData.set("leadId", lead.id);
+    formData.set("assignmentId", lead.assignment_id);
+    formData.set("stageId", stageId);
+    setError("");
+    try {
+      await updateLeadStageInline(formData);
+      onSaved();
+    } catch (saveError) {
+      setValue(savedStageId);
+      setError(saveError instanceof Error ? saveError.message : "Unable to update the stage.");
+    }
+  });
+
+  return <div>
+    <select aria-label="Stage" value={value} disabled={isPending || !stages.length} onChange={(event) => { const stageId = event.target.value; setValue(stageId); if (stageId) save(stageId); }} className="h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50"><option value="" disabled>{productId ? "Select stage" : "Select product first"}</option>{stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select>
+    {error && <p className="mt-1 text-[11px] font-bold text-red-600">{error}</p>}
+  </div>;
+}
+
+function DetailResolutionDropdown({ lead, configuration, onSaved }: { lead: LeadRow; configuration: DetailEditableConfiguration; onSaved: () => void }) {
+  const productId = lead.product?.[0]?.id ?? "";
+  const resolutions = configuration.productResolutions.filter((resolution) => resolution.product_id === productId);
+  const savedResolutionId = resolutions.find((resolution) => resolution.resolution_name === lead.resolution?.[0]?.name)?.resolution_id ?? "";
+  const [value, setValue] = useState(savedResolutionId);
+  const [followUpResolutionId, setFollowUpResolutionId] = useState<string | null>(null);
+  const [followUpAt, setFollowUpAt] = useState("");
+  const [followUpNote, setFollowUpNote] = useState("");
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => setValue(savedResolutionId), [savedResolutionId]);
+
+  const save = (resolutionId: string, nextFollowUpAt?: string, nextFollowUpNote?: string) => startTransition(async () => {
+    const formData = new FormData();
+    formData.set("leadId", lead.id);
+    formData.set("assignmentId", lead.assignment_id);
+    formData.set("resolutionId", resolutionId);
+    if (nextFollowUpAt) formData.set("followUpAt", nextFollowUpAt);
+    if (nextFollowUpNote) formData.set("followUpNote", nextFollowUpNote);
+    setError("");
+    try {
+      await updateLeadResolutionInline(formData);
+      setFollowUpResolutionId(null);
+      setFollowUpAt("");
+      setFollowUpNote("");
+      onSaved();
+    } catch (saveError) {
+      if (!followUpResolutionId) setValue(savedResolutionId);
+      setError(saveError instanceof Error ? saveError.message : "Unable to update the activity resolution.");
+    }
+  });
+
+  const chooseResolution = (resolutionId: string) => {
+    setValue(resolutionId);
+    const resolution = resolutions.find((item) => item.resolution_id === resolutionId);
+    if (/follow[\s-]?up|verbal\s*yes/i.test(resolution?.resolution_name ?? "")) {
+      setFollowUpResolutionId(resolutionId);
+      setError("");
+      return;
+    }
+    setFollowUpResolutionId(null);
+    save(resolutionId);
+  };
+
+  return <div>
+    <select aria-label="Activity resolution" value={value} disabled={isPending || !resolutions.length} onChange={(event) => chooseResolution(event.target.value)} className="h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50"><option value="" disabled>{productId ? "Select activity resolution" : "Select product first"}</option>{resolutions.map((resolution) => <option key={resolution.resolution_id} value={resolution.resolution_id}>{resolution.resolution_name}</option>)}</select>
+    {followUpResolutionId && <div className="mt-2 space-y-2 rounded-lg border border-red-100 bg-red-50/50 p-2"><label className="block text-[11px] font-bold text-slate-700">Follow-up date and time<input type="datetime-local" value={followUpAt} onChange={(event) => setFollowUpAt(event.target.value)} className="mt-1 h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs" /></label><label className="block text-[11px] font-bold text-slate-700">Follow-up note<textarea value={followUpNote} onChange={(event) => setFollowUpNote(event.target.value)} className="mt-1 min-h-16 w-full rounded border border-slate-200 bg-white px-2 py-1 text-xs" /></label><div className="flex justify-end gap-2"><button type="button" disabled={isPending} onClick={() => { setFollowUpResolutionId(null); setValue(savedResolutionId); }} className="h-8 rounded border border-slate-200 px-2 text-[11px] font-bold text-slate-600">Cancel</button><button type="button" disabled={isPending || !followUpAt || !followUpNote.trim()} onClick={() => save(followUpResolutionId, followUpAt, followUpNote)} className="h-8 rounded bg-[#d90000] px-2 text-[11px] font-extrabold text-white disabled:opacity-50">{isPending ? "Saving..." : "Save resolution"}</button></div></div>}
+    {error && <p className="mt-1 text-[11px] font-bold text-red-600">{error}</p>}
+  </div>;
+}
+
+function SecondaryContactNames({ leadId, assignmentId, refreshVersion }: { leadId: string; assignmentId: string; refreshVersion: number }) {
+  const [contacts, setContacts] = useState<LeadContact[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetch(`/api/leads/${leadId}/contacts?assignmentId=${encodeURIComponent(assignmentId)}`, { cache: "no-store" })
+      .then(async (response) => ({ response, result: await response.json() as { ok?: boolean; contacts?: LeadContact[] } }))
+      .then(({ response, result }) => {
+        if (!response.ok || !result.ok) throw new Error("Unable to load contacts.");
+        if (active) setContacts(result.contacts ?? []);
+      })
+      .catch(() => {
+        if (active) setContacts([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [leadId, assignmentId, refreshVersion]);
+
+  const names = contacts
+    .filter((contact) => contact.contact_type === "secondary")
+    .map((contact) => [contact.first_name, contact.last_name].filter(Boolean).join(" "))
+    .filter(Boolean);
+
+  return <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{names.length === 1 ? "Secondary contact full name" : "Secondary contact full names"}</dt>
+    <dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{loading ? "Loading..." : names.join(", ") || "—"}</dd>
+  </div>;
 }
 
 function NotesTab({ leadId, assignmentId, onSaved }: { leadId: string; assignmentId: string; onSaved: () => void }) {
