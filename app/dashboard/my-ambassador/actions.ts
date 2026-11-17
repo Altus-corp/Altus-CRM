@@ -160,6 +160,10 @@ type AltusCorpExternalAmbassador = {
   altusSignatory?: { name?: string | null; designation?: string | null; signedAt?: string | null } | null;
   approvedAt?: string | null;
   hasSignedPdf?: boolean | null;
+  // Each entry is a short-lived (5-minute) signed Supabase Storage URL, so it
+  // is never stored directly. The lead instead gets a link to our own proxy
+  // route, which re-fetches a fresh URL from AltusCorp at click time.
+  documents?: Partial<Record<"selfie" | "panCopy" | "cancelledCheque" | "kycIdProof" | "gstCertificate" | "ambassadorSignature" | "altusSignature", { url?: string | null; path?: string | null; expiresIn?: number | null } | null>> | null;
 };
 
 export type AmbassadorInput = {
@@ -453,10 +457,11 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
     if (!records.length) return { ok: true, message: "AltusCorp Ambassador sync completed. No records were returned.", imported: 0, updated: 0, skipped: 0 };
 
     const supabase = createAdminClient();
-    const [{ data: product }, { data: stages }, { data: resolutions }] = await Promise.all([
+    const [{ data: product }, { data: stages }, { data: resolutions }, { data: customColumns }] = await Promise.all([
       supabase.from("lead_products").select("id").eq("code", "AMBASSADOR").eq("is_active", true).maybeSingle(),
       supabase.from("lead_stages").select("id, product_id, name").eq("is_active", true),
       supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+      supabase.from("lead_table_columns").select("field_key, label").eq("source", "custom"),
     ]);
     if (!product) throw new Error("Create an active AMBASSADOR product before syncing Ambassador records.");
     const key = (value: string | null | undefined) => cleanText(value, 200).toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -465,6 +470,30 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
     const agreementSent = (resolutions ?? []).find((resolution) => key(resolution.name) === "agreementsent");
     const agreementSigned = (resolutions ?? []).find((resolution) => ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"].includes(key(resolution.name)));
     if (!preSales || !onboarding || !agreementSent || !agreementSigned) throw new Error("Configure Pre Sales, Onboarding Ambassador, Agreement Sent, and Agreement Signed / Waived before syncing.");
+    // The actual custom_data key for "Ambassador Import Summary" is
+    // admin-generated (label slug + a random suffix) once that column
+    // exists, so it is looked up by label instead of assuming a fixed key.
+    // This also keeps it from colliding with the unrelated "Form Message"
+    // key the PSO/BSSO website sync writes.
+    const importSummaryKey =
+      (customColumns ?? []).find((column) => key(column.label) === "ambassadorimportsummary")?.field_key ?? "ambassador_import_summary";
+    // KYC/bank columns and document links are also looked up by label for
+    // the same reason. A missing column simply means that field is skipped.
+    const fieldKeyFor = (label: string) => (customColumns ?? []).find((column) => key(column.label) === key(label))?.field_key ?? null;
+    const panKey = fieldKeyFor("PAN");
+    const gstinKey = fieldKeyFor("GSTIN");
+    const bankNameKey = fieldKeyFor("Bank Name");
+    const accountHolderNameKey = fieldKeyFor("Account Holder Name");
+    const accountNumberKey = fieldKeyFor("Account Number");
+    const ifscCodeKey = fieldKeyFor("IFSC Code");
+    const governmentIdKey = fieldKeyFor("Government ID / Aadhaar Number");
+    const documentColumnKeys: Record<"selfie" | "panCopy" | "cancelledCheque" | "kycIdProof" | "gstCertificate", string | null> = {
+      selfie: fieldKeyFor("Selfie"),
+      panCopy: fieldKeyFor("PAN Copy"),
+      cancelledCheque: fieldKeyFor("Cancelled Cheque"),
+      kycIdProof: fieldKeyFor("KYC ID Proof"),
+      gstCertificate: fieldKeyFor("GST Certificate"),
+    };
 
     const source = "altuscorp_ambassador";
     const unique = [...new Map(records.filter((record) => cleanText(record.id, 120)).map((record) => [cleanText(record.id, 120), record])).values()];
@@ -514,9 +543,24 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       const owner = priorLead ? (assignmentsByLead.get(priorLead.id) ?? [])
         .filter((item) => item.assigned_to && item.is_active)
         .sort((a, b) => Number(b.product_id === product.id) - Number(a.product_id === product.id) || String(b.assigned_at ?? "").localeCompare(String(a.assigned_at ?? "")))[0]?.assigned_to ?? priorLead.assigned_to ?? null : null;
+      const kycFieldEntries: [string | null, string | undefined][] = [
+        [panKey, cleanText(record.pan, 40) || undefined],
+        [gstinKey, cleanText(record.gstin, 40) || undefined],
+        [bankNameKey, cleanText(record.bank?.bankName, 160) || undefined],
+        [accountHolderNameKey, cleanText(record.bank?.accountHolderName, 240) || undefined],
+        [accountNumberKey, cleanText(record.bank?.accountNumber, 60) || undefined],
+        [ifscCodeKey, cleanText(record.bank?.ifscCode, 40) || undefined],
+        [governmentIdKey, cleanText(record.kyc?.aadhaarNumber ?? record.kyc?.aadhaarOrGovId, 40) || undefined],
+      ];
+      // AltusCorp's document URLs are signed and expire in minutes, so the
+      // lead gets a link to our own proxy instead of the raw URL. Clicking
+      // it re-fetches a fresh URL from AltusCorp at that moment.
+      const documentFieldEntries: [string | null, string | undefined][] = (Object.keys(documentColumnKeys) as (keyof typeof documentColumnKeys)[])
+        .map((type) => [documentColumnKeys[type], record.documents?.[type]?.url ? `/api/ambassador-documents/${type}?externalId=${encodeURIComponent(externalId)}` : undefined]);
       const customData = {
-        ...(priorLead?.custom_data ?? {}), form_message: ambassadorFormMessage(record),
+        ...(priorLead?.custom_data ?? {}), [importSummaryKey]: ambassadorFormMessage(record),
         altuscorp_ambassador: { external_id: externalId, updated_at: record.updatedAt ?? null, status: record.status ?? null, referral_fee_percent: record.referralFeePercent ?? null, agreement_date: record.agreementDate ?? null, has_signed_pdf: signed },
+        ...Object.fromEntries([...kycFieldEntries, ...documentFieldEntries].filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1]))),
       };
       let leadId = priorLead?.id;
       if (leadId) {
@@ -528,6 +572,18 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
         if (error || !data) { skipped += 1; if (skipReasons.length < 3) skipReasons.push(error?.message || "The CRM lead could not be created."); continue; }
         leadId = data.id; imported += 1;
       }
+      // A re-sync must not redo the signing side effects (closing the lead's
+      // other active product work) every time it runs — only the first time
+      // this Ambassador actually becomes signed. Otherwise a sales team
+      // reopening or adding a product on this lead later gets silently
+      // closed again on the next scheduled sync.
+      const { data: priorAssignment } = await supabase
+        .from("lead_product_assignments")
+        .select("ambassador_agreement_status")
+        .eq("lead_id", leadId)
+        .eq("product_id", product.id)
+        .maybeSingle();
+      const justSigned = signed && priorAssignment?.ambassador_agreement_status !== "Agreement Signed";
       const { data: assignment, error: assignmentError } = await supabase.from("lead_product_assignments").upsert({
         lead_id: leadId, product_id: product.id, stage_id: (signed ? onboarding : preSales).id, latest_resolution_id: (signed ? agreementSigned : agreementSent).id,
         assigned_to: owner, assigned_at: owner ? new Date().toISOString() : null, focused_on: !signed && owner ? indiaToday() : null,
@@ -536,7 +592,7 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
         ambassador_agreement_status: signed ? "Agreement Signed" : "Agreement Sent",
       }, { onConflict: "lead_id,product_id" }).select("id").single();
       if (assignmentError || !assignment) { skipped += 1; if (skipReasons.length < 3) skipReasons.push(assignmentError?.message || "The Ambassador product assignment could not be created."); continue; }
-      if (signed) await supabase.from("lead_product_assignments").update({ is_active: false, is_closed: true, focused_on: null, next_follow_up_at: null }).eq("lead_id", leadId).neq("product_id", product.id).eq("is_active", true).eq("is_closed", false);
+      if (justSigned) await supabase.from("lead_product_assignments").update({ is_active: false, is_closed: true, focused_on: null, next_follow_up_at: null }).eq("lead_id", leadId).neq("product_id", product.id).eq("is_active", true).eq("is_closed", false);
       await supabase.from("lead_external_sources").upsert({ lead_id: leadId, source, external_id: externalId }, { onConflict: "source,external_id" });
       await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignment.id, activity_type: "altuscorp_ambassador_synced", note: `Ambassador agreement synced from AltusCorp (${signed ? "Agreement Signed / Waived — Onboarding Ambassador" : "Agreement Sent — Pre Sales"}).`, metadata: { external_id: externalId, has_signed_pdf: signed, matched_by_cell_number: Boolean(phoneMatchedLead), updated_at: record.updatedAt ?? null }, created_by: actor.userId });
     }

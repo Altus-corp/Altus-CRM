@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
 import { AdminLeadImport } from "./admin-lead-import";
 import { deleteLeads, manuallyAssignLeads, syncAltusCorpQualifiedLeads, syncGoogleAppsScriptBssoLeads, syncGoogleAppsScriptPsoLeads, syncMananvasaQualifiedLeads, syncProductivityShastraQualifiedLeads } from "@/app/dashboard/leads/actions";
+import { getLeadsAndAmbassadorsExport, type ExportRow } from "@/app/dashboard/leads/export-actions";
 import { displayProductLabel } from "@/app/lib/product-display";
 
 type Product = { id: string; code: string; name: string };
@@ -27,6 +28,7 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
   const [syncMessage, setSyncMessage] = useState("");
   const [syncFailed, setSyncFailed] = useState(false);
   const [isSyncing, startSyncTransition] = useTransition();
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     setSearch(urlSearch);
   }, [urlSearch]);
@@ -130,11 +132,63 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
     });
   }
 
+  async function exportAllData() {
+    setExporting(true);
+    setSyncFailed(false);
+    setSyncMessage("");
+    try {
+      const result = await getLeadsAndAmbassadorsExport();
+      if (!result.ok) { setSyncFailed(true); setSyncMessage(result.message ?? "The export could not be prepared."); return; }
+      const ExcelJS = (await import("exceljs")).default;
+      const book = new ExcelJS.Workbook();
+      const customColumns = result.customColumns ?? [];
+      const stringifyCustomValue = (value: unknown) => {
+        if (value === null || value === undefined || value === "") return "";
+        if (typeof value === "object") return JSON.stringify(value);
+        return String(value);
+      };
+      const baseHeaders = ["Assignment ID", "Lead ID", "Lead Number", "First Name", "Last Name", "Email", "Phone", "Product", "Stage", "Resolution", "Assigned To", "Assigned At", "Focused On", "Next Follow Up At", "Active", "Closed", "Created At", "External Source", "External ID", "Lead Database"];
+      const baseValues = (row: ExportRow) => [row.assignmentId, row.leadId, row.leadNumber, row.firstName, row.lastName, row.email, row.phone, row.productCode, row.stage, row.resolution, row.assignedTo, row.assignedAt, row.focusedOn, row.nextFollowUpAt, row.isActive, row.isClosed, row.createdAt, row.externalSource, row.externalId, row.leadDatabase];
+
+      const leadsSheet = book.addWorksheet("Leads");
+      leadsSheet.addRow([...baseHeaders, ...customColumns.map((column) => column.label)]);
+      for (const row of result.leads ?? []) {
+        leadsSheet.addRow([...baseValues(row), ...customColumns.map((column) => stringifyCustomValue(row.customData?.[column.field_key]))]);
+      }
+
+      const ambassadorExtraHeaders = ["Agreement Status", "Commission", "Commission Notes", "Priority", "Signed Agreement Link", "Last Called On", "Last Call Notes", "Remark", "Manan Sir Notes", "Target Leads", "Target Demo", "Target Proposals", "Target Sales", "Actual Leads", "Actual Demo", "Actual Proposals", "Actual Sales"];
+      const ambassadorsSheet = book.addWorksheet("Ambassadors");
+      ambassadorsSheet.addRow([...baseHeaders, ...ambassadorExtraHeaders, ...customColumns.map((column) => column.label)]);
+      for (const row of result.ambassadors ?? []) {
+        const ambassador = row.ambassador;
+        ambassadorsSheet.addRow([
+          ...baseValues(row),
+          ambassador?.agreementStatus, ambassador?.commission, ambassador?.commissionNotes, ambassador?.priority, ambassador?.signedAgreementLink, ambassador?.lastCalledOn, ambassador?.lastCallNotes, ambassador?.remark, ambassador?.mananSirNotes, ambassador?.targetLeads, ambassador?.targetDemo, ambassador?.targetProposals, ambassador?.targetSales, ambassador?.actualLeads, ambassador?.actualDemo, ambassador?.actualProposals, ambassador?.actualSales,
+          ...customColumns.map((column) => stringifyCustomValue(row.customData?.[column.field_key])),
+        ]);
+      }
+
+      const buffer = await book.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `leads-ambassadors-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setSyncMessage(`Exported ${result.leads?.length ?? 0} leads and ${result.ambassadors?.length ?? 0} Ambassadors.`);
+    } catch (error) {
+      setSyncFailed(true);
+      setSyncMessage(error instanceof Error ? error.message : "The export could not be prepared.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const workspaceLabel = selectedWorkspaceView === "focused" ? "Focused Leads" : selectedWorkspaceView === "ambassador" ? "My Ambassador" : "Lead Master";
   const workspaceDescription = selectedWorkspaceView === "focused" ? "leads assigned today" : selectedWorkspaceView === "ambassador" ? "active Ambassadors" : "active assigned leads";
 
   return <section className="mx-auto max-w-[1500px]">
-    <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">{selectedUser ? `${selectedUser.name}'s ${workspaceLabel}` : showTeamLeads ? "Team Leads" : "Leads Master"}</h1>{selectedUser && <p className="mt-1 text-xs text-slate-500">Viewing this CRM user&apos;s {workspaceDescription}.</p>}</div>{!showTeamLeads && <div className="flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={syncAllWebsiteLeads} disabled={isSyncing} className="h-8 rounded border border-red-200 bg-red-50 px-3 text-[10px] font-extrabold text-red-600 hover:bg-red-100 disabled:opacity-50">{isSyncing ? "Syncing..." : "Sync website leads"}</button><AdminLeadImport sampleColumns={sampleColumns} products={products} resolutions={resolutions} salesPeople={importUsers} ambassadors={ambassadors} showManualOption /></div>}</header>
+    <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h1 className="mt-0.5 text-[22px] font-extrabold tracking-[-0.04em] text-slate-900">{selectedUser ? `${selectedUser.name}'s ${workspaceLabel}` : showTeamLeads ? "Team Leads" : "Leads Master"}</h1>{selectedUser && <p className="mt-1 text-xs text-slate-500">Viewing this CRM user&apos;s {workspaceDescription}.</p>}</div>{!showTeamLeads && <div className="flex flex-wrap items-center justify-end gap-2"><button type="button" onClick={exportAllData} disabled={exporting} title="Download every lead and Ambassador with their full data, as a snapshot before testing a sync" className="h-8 rounded border border-slate-200 bg-white px-3 text-[10px] font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-50">{exporting ? "Exporting..." : "Export all data"}</button><button type="button" onClick={syncAllWebsiteLeads} disabled={isSyncing} className="h-8 rounded border border-red-200 bg-red-50 px-3 text-[10px] font-extrabold text-red-600 hover:bg-red-100 disabled:opacity-50">{isSyncing ? "Syncing..." : "Sync website leads"}</button><AdminLeadImport sampleColumns={sampleColumns} products={products} resolutions={resolutions} salesPeople={importUsers} ambassadors={ambassadors} showManualOption /></div>}</header>
     {syncMessage && <p role="status" className={`mt-2 rounded-md border px-3 py-2 text-xs font-semibold ${syncFailed ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{syncMessage}</p>}
     {!showTeamLeads && <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Database Leads" value={databaseCounts.databaseLeads} hint="All time" tone="orange" /><Metric label="Reference Leads" value={databaseCounts.referenceLeads} hint="All time" tone="blue" /><Metric label="Qualified Leads" value={databaseCounts.qualifiedLeads} hint="All time" tone="purple" /><Metric label="Leads" value={databaseCounts.leads} hint="All time" tone="red" /></div>}
     {showTeamLeads && <div className="mt-3 flex flex-wrap items-center gap-2"><select aria-label="Choose CRM user" value={selectedAssigneeId ?? ""} onChange={(event) => updateWorkspace(event.target.value)} className="h-9 min-w-[240px] rounded border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700"><option value="">Choose CRM user</option>{assignmentUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select><button type="button" disabled={!selectedAssigneeId} onClick={() => selectedAssigneeId && updateWorkspace(selectedAssigneeId, "focused")} className={`h-9 rounded border px-3 text-[11px] font-extrabold disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 ${selectedWorkspaceView === "focused" && selectedAssigneeId ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-red-200 hover:text-red-600"}`}>Focused Leads</button><button type="button" disabled={!selectedAssigneeId} onClick={() => selectedAssigneeId && updateWorkspace(selectedAssigneeId, "master")} className={`h-9 rounded border px-3 text-[11px] font-extrabold disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 ${selectedWorkspaceView === "master" && selectedAssigneeId ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-red-200 hover:text-red-600"}`}>Lead Master</button><button type="button" disabled={!selectedAssigneeId} onClick={() => selectedAssigneeId && updateWorkspace(selectedAssigneeId, "ambassador")} className={`h-9 rounded border px-3 text-[11px] font-extrabold disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 ${selectedWorkspaceView === "ambassador" && selectedAssigneeId ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-red-200 hover:text-red-600"}`}>My Ambassador</button></div>}

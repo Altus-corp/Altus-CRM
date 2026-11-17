@@ -1032,6 +1032,16 @@ async function syncGoogleAppsScriptLeadSource(
       };
 
     const supabase = createAdminClient();
+    // The actual custom_data key for "Form Message" is admin-generated
+    // (label slug + a random suffix) once that column exists, so this is
+    // looked up by label instead of assuming a fixed key. Falls back to the
+    // legacy "form_message" key when the column has not been created yet.
+    const { data: customColumns } = await supabase
+      .from("lead_table_columns")
+      .select("field_key, label")
+      .eq("source", "custom");
+    const formMessageKey =
+      (customColumns ?? []).find((column) => normalizedLeadContactField(column.label) === "formmessage")?.field_key ?? "form_message";
     const { data: product, error: productError } = await supabase
       .from("lead_products")
       .select("id, code")
@@ -1097,7 +1107,7 @@ async function syncGoogleAppsScriptLeadSource(
           ...(scheduleText
             ? { [`${source.externalSource}_schedule`]: scheduleText }
             : {}),
-          ...(formMessage ? { form_message: formMessage } : {}),
+          ...(formMessage ? { [formMessageKey]: formMessage } : {}),
         };
         return {
           externalId: sourceLeadId(
@@ -1734,7 +1744,7 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
     ];
     const { data: existing, error: existingError } = await supabase
       .from("leads")
-      .select("id, external_id")
+      .select("id, external_id, custom_data")
       .eq("external_source", "mananvasa")
       .in("external_id", externalIds);
     if (existingError)
@@ -1745,6 +1755,14 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
       };
     const existingByExternalId = new Map(
       (existing ?? []).map((lead) => [lead.external_id, lead.id]),
+    );
+    const existingCustomDataByLeadId = new Map(
+      (existing ?? []).map((lead) => [
+        lead.id,
+        lead.custom_data && typeof lead.custom_data === "object" && !Array.isArray(lead.custom_data)
+          ? lead.custom_data as Record<string, unknown>
+          : {},
+      ]),
     );
     const phoneKeys = [
       ...new Set(eligibleForSync.map((record) => record.phoneKey).filter(Boolean)),
@@ -1838,19 +1856,20 @@ export async function syncMananvasaQualifiedLeads(actorUserId?: string): Promise
     }
 
     const updateResults = await Promise.all(
-      updateRecords.map((record) =>
-        supabase
+      updateRecords.map((record) => {
+        const leadId = existingByExternalId.get(record.externalId)!;
+        return supabase
           .from("leads")
           .update({
             first_name: record.first_name,
             last_name: record.last_name,
             email: record.email,
             phone: record.phone,
-            custom_data: record.custom_data,
+            custom_data: { ...(existingCustomDataByLeadId.get(leadId) ?? {}), ...record.custom_data },
             lead_database: "qualified_leads",
           })
-          .eq("id", existingByExternalId.get(record.externalId)!),
-      ),
+          .eq("id", leadId);
+      }),
     );
     const updateError = updateResults.find((result) => result.error)?.error;
     if (updateError) return { ok: false, message: updateError.message };
@@ -2050,7 +2069,7 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
     ];
     const { data: existing, error: existingError } = await supabase
       .from("leads")
-      .select("id, external_id")
+      .select("id, external_id, custom_data")
       .eq("external_source", "altuscorp_website")
       .in("external_id", externalIds);
     if (existingError)
@@ -2061,6 +2080,14 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
       };
     const existingByExternalId = new Map(
       (existing ?? []).map((lead) => [lead.external_id, lead.id]),
+    );
+    const existingCustomDataByLeadId = new Map(
+      (existing ?? []).map((lead) => [
+        lead.id,
+        lead.custom_data && typeof lead.custom_data === "object" && !Array.isArray(lead.custom_data)
+          ? lead.custom_data as Record<string, unknown>
+          : {},
+      ]),
     );
     const phoneKeys = [
       ...new Set(eligibleForSync.map((record) => record.phoneKey).filter(Boolean)),
@@ -2152,19 +2179,20 @@ export async function syncAltusCorpQualifiedLeads(actorUserId?: string): Promise
       }
     }
     const updateResults = await Promise.all(
-      updateRecords.map((record) =>
-        supabase
+      updateRecords.map((record) => {
+        const leadId = existingByExternalId.get(record.externalId)!;
+        return supabase
           .from("leads")
           .update({
             first_name: record.first_name,
             last_name: record.last_name,
             email: record.email,
             phone: record.phone,
-            custom_data: record.custom_data,
+            custom_data: { ...(existingCustomDataByLeadId.get(leadId) ?? {}), ...record.custom_data },
             lead_database: "qualified_leads",
           })
-          .eq("id", existingByExternalId.get(record.externalId)!),
-      ),
+          .eq("id", leadId);
+      }),
     );
     const updateError = updateResults.find((result) => result.error)?.error;
     if (updateError) return { ok: false, message: updateError.message };
