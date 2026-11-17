@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, useTransition, type FormEvent } from "rea
 import { Download, FileSpreadsheet, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { createAmbassador, deleteAmbassadorRecords, importAmbassadors, updateAmbassadorDetails, type AmbassadorInput } from "@/app/dashboard/my-ambassador/actions";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
+import { AgreementDocUpload } from "./agreement-doc-upload";
 
 const LeadDetailPanel = dynamic(() => import("@/components/leads/lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
@@ -237,7 +238,7 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
       </div>
       <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-[2050px] w-full text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-slate-500"><tr><th className="border-b border-slate-200 px-3 py-3"><input type="checkbox" aria-label="Select all Ambassador records" checked={rows.length > 0 && selectedIds.size === rows.length} onChange={toggleAll} /></th>{["Edit", "Full Name", "Cell Number", "Email", "Sales Person", "Commission", "Commission Notes", "Priority", "Agreement Status", "Signed Agreement Link", "Last Called On", "Last Call Notes", "Remark", "Manan Sir Notes", "Target Leads", "Target Demo", "Target Proposals", "Target Sales"].map((header, index) => <th key={`${header}-${index}`} className="whitespace-nowrap border-b border-slate-200 px-3 py-3">{header}</th>)}</tr></thead>
+          <thead className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wide text-slate-500"><tr><th className="border-b border-slate-200 px-3 py-3"><input type="checkbox" aria-label="Select all Ambassador records" checked={rows.length > 0 && selectedIds.size === rows.length} onChange={toggleAll} /></th>{["Edit", "Full Name", "Cell Number", "Email", "Sales Person", "Commission", "Commission Notes", "Priority", "Agreement Status", "Signed Agreement Link", "Agreement Doc", "Last Called On", "Last Call Notes", "Remark", "Manan Sir Notes", "Target Leads", "Target Demo", "Target Proposals", "Target Sales"].map((header, index) => <th key={`${header}-${index}`} className="whitespace-nowrap border-b border-slate-200 px-3 py-3">{header}</th>)}</tr></thead>
           <tbody>
             {rows.map((row) => <tr key={row.assignmentId} onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("input, select, button, a")) setDetailRecord(row); }} title="Double-click to open Ambassador details" className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50">
               <td className="px-3 py-3"><input type="checkbox" aria-label={`Select ${row.fullName}`} checked={selectedIds.has(row.assignmentId)} onChange={() => toggleSelected(row.assignmentId)} onClick={(event) => event.stopPropagation()} /></td>
@@ -247,11 +248,13 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
               <td className="px-3 py-3">{row.commission || "—"}</td><td className="max-w-48 truncate px-3 py-3" title={row.commissionNotes}>{row.commissionNotes || "—"}</td>
               <td className="px-3 py-3"><select aria-label={`Priority for ${row.fullName}`} value={row.priority} onChange={(event) => saveInline(row, { priority: event.target.value })} disabled={isSavingInline} className="h-8 min-w-24 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"><option value="">None</option>{[1, 2, 3].map((priority) => <option key={priority} value={priority}>{priority}</option>)}</select></td>
               <td className="px-3 py-3"><select aria-label={`Agreement Status for ${row.fullName}`} value={row.agreementStatus} onChange={(event) => saveInline(row, { agreementStatus: event.target.value })} disabled={isSavingInline} className="h-8 min-w-40 rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"><option value="">Select status</option>{agreementStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select></td>
-              <td className="px-3 py-3">{row.signedAgreementLink ? <a href={row.signedAgreementLink} target="_blank" rel="noreferrer" className="font-bold text-red-600 underline">Open</a> : "—"}</td><td className="px-3 py-3">{formatDate(row.lastCalledOn || "")}</td>
+              <td className="px-3 py-3">{row.signedAgreementLink ? <a href={row.signedAgreementLink} target="_blank" rel="noreferrer" className="font-bold text-red-600 underline">Open</a> : "—"}</td>
+              <td className="px-3 py-3"><AgreementDocUpload leadId={row.leadId} assignmentId={row.assignmentId} documentUrl={row.signedAgreementLink || null} canUpload onUploaded={() => router.refresh()} /></td>
+              <td className="px-3 py-3">{formatDate(row.lastCalledOn || "")}</td>
               <td className="max-w-48 truncate px-3 py-3" title={row.lastCallNotes}>{row.lastCallNotes || "—"}</td><td className="max-w-48 truncate px-3 py-3" title={row.remark}>{row.remark || "—"}</td><td className="max-w-48 truncate px-3 py-3" title={row.mananSirNotes}>{row.mananSirNotes || "—"}</td>
               <td className="px-3 py-3 font-bold text-slate-700">{row.targetLeads || "0"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.targetDemo || "0"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.targetProposals || "0"}</td><td className="px-3 py-3 font-bold text-slate-700">{row.targetSales || "0"}</td>
             </tr>)}
-            {!rows.length && <tr><td colSpan={19} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">No Ambassador records yet.</td></tr>}
+            {!rows.length && <tr><td colSpan={20} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">No Ambassador records yet.</td></tr>}
           </tbody>
         </table>
       </div>

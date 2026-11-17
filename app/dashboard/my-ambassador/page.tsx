@@ -200,6 +200,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
       assignedTo: assignment.assigned_to,
       canEditActualSales: assignment.assigned_to === userId,
       canEditAgreementStatus: assignment.assigned_to === userId || (isSalesManager && Boolean(assignment.assigned_to && visibleOwnerIds.includes(assignment.assigned_to))),
+      signedAgreementLink: assignment.ambassador_signed_agreement_link,
     }];
   });
 

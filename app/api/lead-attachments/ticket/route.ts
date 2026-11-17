@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { requireUser } from "@/app/lib/auth";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,6 +29,10 @@ export async function POST(request: Request) {
     if (assignmentError || !assignment) return Response.json({ ok: false, error: "This product work record is no longer available." }, { status: 404 });
 
     let allowed = user.roles.includes("admin") || assignment.assigned_to === user.userId;
+    if (!allowed && user.roles.includes("sales_manager")) {
+      const teamMemberIds = await getSalesManagerTeamMemberIds(user.userId);
+      allowed = Boolean(assignment.assigned_to && teamMemberIds.includes(assignment.assigned_to));
+    }
     if (!allowed && user.roles.includes("ambassador")) {
       const { data: partner } = await admin
         .from("lead_channel_partners")

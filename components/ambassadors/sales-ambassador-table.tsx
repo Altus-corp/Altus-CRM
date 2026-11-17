@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { getAmbassadorActualBreakdown, updateAmbassadorActuals, updateAmbassadorAgreementStatus, type AmbassadorActualBreakdownItem, type AmbassadorActualMetric } from "@/app/dashboard/my-ambassador/actions";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
+import { AgreementDocUpload } from "./agreement-doc-upload";
 
 const LeadDetailPanel = dynamic(() => import("@/components/leads/lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
 
@@ -24,6 +25,7 @@ export type SalesAmbassadorRow = {
   assignedTo: string | null;
   canEditActualSales: boolean;
   canEditAgreementStatus: boolean;
+  signedAgreementLink: string | null;
 };
 
 const countValue = (value: number | null) => String(value ?? 0);
@@ -81,7 +83,7 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPe
   });
   const metricTitle: Record<AmbassadorActualMetric, string> = { leads: "Actual Leads", demo: "Actual Demos", proposals: "Actual Proposals" };
 
-  const headers = ["Contact", "Full Name", ...(showSalesPerson ? ["Sales Person"] : []), "Cell Number", "Agreement Status", "Target Lead", "Actual Lead", "Target Demo", "Actual Demo", "Target Proposal", "Actual Proposal", "Target Sales", "Actual Sales", ""];
+  const headers = ["Contact", "Full Name", ...(showSalesPerson ? ["Sales Person"] : []), "Cell Number", "Agreement Status", "Target Lead", "Actual Lead", "Target Demo", "Actual Demo", "Target Proposal", "Actual Proposal", "Target Sales", "Actual Sales", "", "Agreement Doc"];
   return <>
     <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <table className="min-w-[1500px] w-full text-left text-xs">
@@ -97,6 +99,7 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPe
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetProposals)}</td><td className="px-3 py-3"><button type="button" onClick={(event) => { event.stopPropagation(); showBreakdown(row, "proposals"); }} className="rounded px-1 font-extrabold text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-red-600" title="View proposal outcomes counted for this Ambassador">{countValue(row.actualProposals)}</button></td>
             <td className="px-3 py-3 font-bold text-slate-700">{countValue(row.targetSales)}</td><td className="px-3 py-3">{row.canEditActualSales ? <input aria-label="Actual Sales" value={draft.actualSales} onChange={(event) => change(row, "actualSales", event.target.value)} inputMode="numeric" className="h-8 w-20 rounded border border-slate-200 px-2 font-bold text-slate-700 outline-none focus:border-red-400" /> : <span className="font-bold text-slate-700">{countValue(row.actualSales)}</span>}</td>
             <td className="px-3 py-3">{row.canEditActualSales ? <button type="button" disabled={isPending} onClick={() => save(row)} className="h-8 rounded bg-[#d90000] px-3 text-[11px] font-extrabold text-white disabled:opacity-50">Save</button> : <span className="text-[10px] font-semibold text-slate-400">Team member</span>}</td>
+            <td className="px-3 py-3"><AgreementDocUpload leadId={row.lead.id} assignmentId={row.assignmentId} documentUrl={row.signedAgreementLink} canUpload={row.canEditAgreementStatus} onUploaded={() => router.refresh()} /></td>
           </tr>;
         })}{!rows.length && <tr><td colSpan={headers.length} className="px-4 py-12 text-center text-sm font-semibold text-slate-400">No Ambassadors assigned to you yet.</td></tr>}</tbody>
       </table>

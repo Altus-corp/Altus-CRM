@@ -10,6 +10,7 @@ import { indiaToday } from "@/app/lib/lead-event-schedule";
 import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 const AGREEMENT_STATUSES = new Set(["Abandoned", "Agreement Sent", "Agreement Signed", "Not Pitched", "Pitched", "Query", "Said No", "Verbal Yes"]);
+const SIGNED_RESOLUTION_KEYS = ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"];
 
 type AltusCorpExternalAmbassador = {
   id?: string;
@@ -744,6 +745,87 @@ export async function updateAmbassadorAgreementStatus(assignmentId: string, agre
     return { ok: true, message: "Agreement status saved." };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to save the agreement status." };
+  }
+}
+
+// A signed agreement PDF is the same real-world event as marking the
+// Agreement Status "Agreement Signed": both move the record into Onboarding
+// Ambassador and record the Agreement Signed / Waived resolution. Uploading
+// the document performs that transition automatically instead of requiring
+// a separate status change first.
+export async function uploadAmbassadorAgreementDocument(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const user = await requireUser();
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const documentUrl = String(formData.get("documentUrl") ?? "").trim();
+    const documentMime = String(formData.get("documentMime") ?? "").trim().toLowerCase();
+    const documentSize = Number(formData.get("documentSize") ?? 0);
+    if (!/^[0-9a-f-]{36}$/i.test(assignmentId)) throw new Error("Invalid Ambassador record.");
+    if (documentMime !== "application/pdf") throw new Error("Upload the signed agreement as a PDF.");
+    if (!Number.isFinite(documentSize) || documentSize < 1 || documentSize > 20 * 1024 * 1024) throw new Error("The agreement PDF must be 20 MB or smaller.");
+
+    const base = process.env.CDN_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+    if (!base) throw new Error("CDN attachments are not configured yet.");
+    const baseUrl = new URL(base);
+    const uploadedUrl = new URL(documentUrl);
+    if (uploadedUrl.origin !== baseUrl.origin || !uploadedUrl.pathname.startsWith(`${baseUrl.pathname}/`)) {
+      throw new Error("The agreement must be uploaded through the approved CDN.");
+    }
+
+    const supabase = createAdminClient();
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("lead_product_assignments")
+      .select("lead_id, product_id, assigned_to")
+      .eq("id", assignmentId)
+      .maybeSingle();
+    if (assignmentError || !assignment) throw new Error(assignmentError?.message || "Ambassador record not found.");
+    const { data: product, error: productError } = await supabase.from("lead_products").select("code").eq("id", assignment.product_id).maybeSingle();
+    if (productError || workflowKey(product?.code) !== "ambassador") throw new Error("Ambassador record not found.");
+
+    let allowed = user.roles.includes("admin") || assignment.assigned_to === user.userId;
+    if (!allowed && user.roles.includes("sales_manager")) {
+      const teamMemberIds = await getSalesManagerTeamMemberIds(user.userId);
+      allowed = Boolean(assignment.assigned_to && teamMemberIds.includes(assignment.assigned_to));
+    }
+    if (!allowed) throw new Error("This Ambassador record is not assigned to you or your team.");
+
+    const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
+      supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
+      supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+    ]);
+    if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
+    const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
+    const signed = (resolutions ?? []).find((resolution) => SIGNED_RESOLUTION_KEYS.includes(workflowKey(resolution.name)));
+    if (!onboarding || !signed) throw new Error("Configure Onboarding Ambassador and Agreement Signed / Waived before uploading an agreement.");
+
+    const { error } = await supabase.from("lead_product_assignments").update({
+      ambassador_signed_agreement_link: uploadedUrl.toString(),
+      ambassador_agreement_status: "Agreement Signed",
+      stage_id: onboarding.id,
+      latest_resolution_id: signed.id,
+      is_ambassador: true,
+      is_active: true,
+      is_closed: true,
+      focused_on: null,
+      next_follow_up_at: null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", assignmentId);
+    if (error) throw new Error(error.message);
+
+    await supabase.from("lead_activities").insert({
+      lead_id: assignment.lead_id,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "ambassador_agreement_document_uploaded",
+      note: "Signed agreement PDF uploaded; agreement marked Signed and moved to Onboarding Ambassador.",
+      metadata: { document_url: uploadedUrl.toString() },
+      created_by: user.userId,
+    });
+    revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/senior-ambassadors");
+    return { ok: true, message: "Agreement uploaded and marked Signed." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to upload this agreement." };
   }
 }
 
