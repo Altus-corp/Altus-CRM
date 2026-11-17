@@ -92,7 +92,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
     }));
     router.refresh();
   };
-  const leads = inputLeads.map((lead) => ({ ...lead, channel_partner_name: partnerNames[lead.id] ?? lead.channel_partner_name, channel_partner_ids: partnerConfig.selected[lead.id] ?? [], channel_partner_options: availableAmbassadorOptions, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[lead.id] ?? lead.senior_ambassador ?? null, senior_ambassador_options: availableAmbassadorOptions, senior_ambassador_editable: !readOnly && seniorConfig.editable }));
+  const baseLeads = inputLeads.map((lead) => ({ ...lead, channel_partner_name: partnerNames[lead.id] ?? lead.channel_partner_name, channel_partner_ids: partnerConfig.selected[lead.id] ?? [], channel_partner_options: availableAmbassadorOptions, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[lead.id] ?? lead.senior_ambassador ?? null, senior_ambassador_options: availableAmbassadorOptions, senior_ambassador_editable: !readOnly && seniorConfig.editable }));
   const router = useRouter();
   const hasSavedLayout = preferences.layoutVersion === 1 && (preferences.order.length > 0 || preferences.frozen.length > 0 || preferences.hidden.length > 0 || Object.keys(preferences.widths).length > 0);
   const initialLayout = hasSavedLayout ? preferences : defaultLeadLayout(columns);
@@ -104,6 +104,18 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ key: string; after: boolean } | null>(null);
+  const [sort, setSort] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const toggleSort = (key: string) => setSort((current) => !current || current.key !== key ? { key, direction: "asc" } : current.direction === "asc" ? { key, direction: "desc" } : null);
+  const sortColumn = sort ? tableColumns.find((column) => column.field_key === sort.key) : undefined;
+  const leads = sort && sortColumn
+    ? [...baseLeads].sort((a, b) => {
+        const left = sortValueFor(a, sortColumn, assignedNames);
+        const right = sortValueFor(b, sortColumn, assignedNames);
+        const factor = sort.direction === "asc" ? 1 : -1;
+        if (typeof left === "number" && typeof right === "number") return (left - right) * factor;
+        return String(left).localeCompare(String(right)) * factor;
+      })
+    : baseLeads;
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
   // Server actions refresh the table data. Keep an open detail panel aligned
   // with that refreshed row so consecutive admin edits use the latest product,
@@ -172,7 +184,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
       <thead className="sticky top-0 z-[30] bg-[#f7f8fa] text-[11px] font-extrabold tracking-[0.06em] text-slate-600 shadow-[0_1px_0_#dfe4ec]"><tr>
         <th style={{ position: "sticky", left: 0, zIndex: 20, width: 48, minWidth: 48, maxWidth: 48 }} className="box-border bg-[#f7f8fa] px-4 py-2.5"><input type="checkbox" aria-label="Select all leads" checked={selectionEnabled ? allSelected : false} onChange={toggleAll} disabled={!selectionEnabled} className="h-4 w-4 rounded border-slate-300 accent-red-600 disabled:cursor-default" /></th>
         <th style={{ position: "sticky", left: 48, zIndex: 20, width: 106, minWidth: 106, maxWidth: 106 }} className={`box-border bg-[#f7f8fa] px-2 py-2.5 ${frozenBoundaryKey ? "" : "border-r border-slate-200 shadow-[4px_0_7px_-6px_rgba(15,23,42,0.45)]"}`}><span>Contact</span></th>
-        {orderedColumns.map((column) => <th key={column.id} draggable onDragStart={() => setDragged(column.field_key)} onDragOver={(event) => { event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); setDropTarget({ key: column.field_key, after: event.clientX > box.left + box.width / 2 }); }} onDrop={() => { if (!dragged || !dropTarget || dragged === column.field_key) return; setOrder((current) => { const next = current.filter((key) => key !== dragged); next.splice(next.indexOf(column.field_key) + (dropTarget.after ? 1 : 0), 0, dragged); return next; }); setDragged(null); setDropTarget(null); }} style={{ width: widths[column.field_key] ?? 160, minWidth: widths[column.field_key] ?? 160, ...stickyColumnStyle(column.field_key, true) }} className={`relative whitespace-nowrap bg-[#f7f8fa] px-4 py-2.5 ${column.field_key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""} ${dropTarget?.key === column.field_key ? (dropTarget.after ? "border-r-2 border-red-500" : "border-l-2 border-red-500") : ""}`}><span className="inline-flex items-center gap-1.5">{displayColumnLabel(column)}<button type="button" onClick={() => setFreezeBoundary(column.field_key)} className={frozen.includes(column.field_key) ? "text-red-600" : "text-slate-400"} title={frozen.includes(column.field_key) ? "Unfreeze this column" : "Freeze this column"}>{frozen.includes(column.field_key) ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}</button><SortIcon /></span><span onPointerDown={(event) => resize(event, column.field_key)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-red-400" /></th>)}
+        {orderedColumns.map((column) => <th key={column.id} draggable onDragStart={() => setDragged(column.field_key)} onDragOver={(event) => { event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); setDropTarget({ key: column.field_key, after: event.clientX > box.left + box.width / 2 }); }} onDrop={() => { if (!dragged || !dropTarget || dragged === column.field_key) return; setOrder((current) => { const next = current.filter((key) => key !== dragged); next.splice(next.indexOf(column.field_key) + (dropTarget.after ? 1 : 0), 0, dragged); return next; }); setDragged(null); setDropTarget(null); }} style={{ width: widths[column.field_key] ?? 160, minWidth: widths[column.field_key] ?? 160, ...stickyColumnStyle(column.field_key, true) }} className={`relative whitespace-nowrap bg-[#f7f8fa] px-4 py-2.5 ${column.field_key === frozenBoundaryKey ? "border-r border-slate-200 shadow-[5px_0_8px_-6px_rgba(15,23,42,0.5)]" : ""} ${dropTarget?.key === column.field_key ? (dropTarget.after ? "border-r-2 border-red-500" : "border-l-2 border-red-500") : ""}`}><span className="inline-flex items-center gap-1.5">{displayColumnLabel(column)}<button type="button" onClick={() => setFreezeBoundary(column.field_key)} className={frozen.includes(column.field_key) ? "text-red-600" : "text-slate-400"} title={frozen.includes(column.field_key) ? "Unfreeze this column" : "Freeze this column"}>{frozen.includes(column.field_key) ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}</button>{!isActivityColumn(column) && <button type="button" onClick={() => toggleSort(column.field_key)} title={sort?.key === column.field_key ? (sort.direction === "asc" ? "Sorted ascending — click to sort descending" : "Sorted descending — click to clear sorting") : `Sort by ${displayColumnLabel(column)}`}><SortIcon direction={sort?.key === column.field_key ? sort.direction : undefined} /></button>}</span><span onPointerDown={(event) => resize(event, column.field_key)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-red-400" /></th>)}
         {!orderedColumns.some(isActivityColumn) && <th className="whitespace-nowrap bg-[#f7f8fa] px-4 py-2.5">Activity</th>}
       </tr></thead>
       <tbody className="divide-y divide-slate-200">{leads.map((lead) => {
@@ -514,4 +526,42 @@ function valueFor(lead: LeadRow, column: LeadColumn, assignedNames: Record<strin
   return String(value);
 }
 
-function SortIcon() { return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-3 w-3 text-slate-400" aria-hidden="true"><path d="m5 6 3-3 3 3M11 10l-3 3-3-3" /></svg>; }
+// Mirrors valueFor's value resolution but returns a raw, comparable value
+// (a timestamp number for dates, a lowercased string otherwise) instead of a
+// formatted display string, since sorting "17 Nov 2026" lexicographically
+// would not sort chronologically.
+function sortValueFor(lead: LeadRow, column: LeadColumn, assignedNames: Record<string, string>): string | number {
+  if (isChannelPartnerColumn(column)) return (lead.channel_partner_name || "").toLowerCase();
+  if (isSeniorAmbassadorColumn(column)) return (lead.senior_ambassador?.name || "").toLowerCase();
+  if (column.computed_from?.length) {
+    return column.computed_from.map((field) => field === "first_name" ? lead.first_name : field === "last_name" ? lead.last_name : field === "email" ? lead.email : field === "phone" ? lead.phone : lead.custom_data?.[field]).filter((part): part is string | number => typeof part === "string" || typeof part === "number").join(" ").toLowerCase();
+  }
+  if (isLeadNumberColumn(column)) return lead.lead_number ?? -Infinity;
+  if (isLeadAcquisitionDateColumn(column)) return Date.parse(lead.created_at) || 0;
+  if (isLastCalledOnColumn(column)) return lead.last_called_at ? Date.parse(lead.last_called_at) || 0 : -Infinity;
+  const multiProduct = lead.product_assignments.length > 1;
+  switch (column.field_key) {
+    case "lead_name": return [lead.first_name, lead.last_name].filter(Boolean).join(" ").toLowerCase();
+    case "phone": return lead.phone ?? "";
+    case "email": return (lead.email ?? "").toLowerCase();
+    case "product": return multiProduct ? "" : lead.product?.[0] ? displayProductCode(lead.product[0].code).toLowerCase() : "";
+    case "stage": return multiProduct ? "" : (lead.stage?.[0]?.name ?? "").toLowerCase();
+    case "call_resolution": return multiProduct ? "" : (lead.resolution?.[0]?.name ?? "").toLowerCase();
+    case "assigned_to": return lead.assigned_to ? (assignedNames[lead.assigned_to] ?? "").toLowerCase() : "";
+    case "next_follow_up": return lead.next_follow_up_at ? Date.parse(lead.next_follow_up_at) || 0 : -Infinity;
+    case "created_at": return Date.parse(lead.created_at) || 0;
+    default: {
+      const raw = lead.custom_data?.[column.field_key];
+      if (typeof raw === "number") return raw;
+      if (typeof raw === "boolean") return raw ? 1 : 0;
+      return typeof raw === "string" ? raw.toLowerCase() : "";
+    }
+  }
+}
+
+function SortIcon({ direction }: { direction?: "asc" | "desc" }) {
+  return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" className={`h-3 w-3 ${direction ? "text-red-600" : "text-slate-400"}`} aria-hidden="true">
+    <path d="m5 6 3-3 3 3" opacity={direction === "desc" ? 0.3 : 1} />
+    <path d="M11 10l-3 3-3-3" opacity={direction === "asc" ? 0.3 : 1} />
+  </svg>;
+}
