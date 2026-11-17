@@ -26,8 +26,8 @@ export async function GET(request: Request, context: { params: Promise<{ leadId:
     }
     if (!allowed) return Response.json({ ok: false, error: "You do not have access to this lead's contacts." }, { status: 403 });
     const [{ data, error }, { data: lead, error: leadError }, { data: fields }] = await Promise.all([
-      admin.from("lead_contacts").select("id, first_name, last_name, email, designation, department_function, contact_type, created_at").eq("lead_id", leadId).order("created_at", { ascending: true }),
-      admin.from("leads").select("first_name, last_name, email, custom_data, created_at").eq("id", leadId).single(),
+      admin.from("lead_contacts").select("id, first_name, last_name, email, phone, designation, department_function, contact_type, created_at").eq("lead_id", leadId).order("created_at", { ascending: true }),
+      admin.from("leads").select("first_name, last_name, email, phone, custom_data, created_at").eq("id", leadId).single(),
       admin.from("lead_table_columns").select("field_key, label").eq("source", "custom").eq("field_type", "dropdown"),
     ]);
     if (error || leadError || !lead) return Response.json({ ok: false, error: "Contacts are not available. Run the latest database migration." }, { status: 400 });
@@ -40,6 +40,7 @@ export async function GET(request: Request, context: { params: Promise<{ leadId:
       first_name: lead.first_name,
       last_name: lead.last_name,
       email: lead.email,
+      phone: lead.phone,
       designation: designationKey ? String(customData[designationKey] ?? "") || null : null,
       department_function: departmentKey ? String(customData[departmentKey] ?? "") || null : null,
       contact_type: "primary",

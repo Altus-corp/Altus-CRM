@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useState, useTransition, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Clock3, Mail, MapPin, MessageCircle, PhoneCall, UserRound, Video, X } from "lucide-react";
+import { CalendarDays, Clock3, Mail, MapPin, MessageCircle, Pencil, PhoneCall, UserRound, Video, X } from "lucide-react";
 import { formatCrmDate } from "@/app/lib/date";
 import { displayProductCode } from "@/app/lib/product-display";
 import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { completeLeadDetailColumns, storedDetailValue } from "@/app/lib/lead-detail-fields";
 import { LEAD_ADDRESS_COUNTRIES, leadAddressFieldKeyForColumn, locationCities, locationStates } from "@/app/lib/lead-address-fields";
-import { addProductToLeadDetails, attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, manuallyAssignLeads, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadDetails, updateLeadFollowUp, updateLeadProductInline, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
+import { addProductToLeadDetails, attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, manuallyAssignLeads, sendEmailToLeadContact, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadContact, updateLeadDetails, updateLeadFollowUp, updateLeadProductInline, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import type { LeadColumn, LeadRow } from "./leads-table";
 import { ChannelPartnerSelect } from "./channel-partner-select";
 import { SeniorAmbassadorSelect } from "./senior-ambassador-select";
@@ -198,7 +199,7 @@ function ActivityCard({ activity, transcript, productCode }: { activity: Activit
 function CallDetail({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) { return <div className="flex min-w-0 items-center gap-2.5 border-b border-r border-slate-100 bg-white/70 px-4 py-3 last:border-r-0 sm:border-b-0"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-50 text-red-600">{icon}</span><div className="min-w-0"><dt className="text-[10px] font-bold text-slate-400">{label}</dt><dd className="mt-0.5 truncate text-xs font-extrabold text-slate-800">{value}</dd></div></div>; }
 function formatCallDateTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Not available" : new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }).format(date); }
 
-type LeadContact = { id: string; first_name: string; last_name: string | null; email: string | null; designation: string | null; department_function: string | null; contact_type: "primary" | "secondary"; created_at: string };
+type LeadContact = { id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; designation: string | null; department_function: string | null; contact_type: "primary" | "secondary"; created_at: string };
 
 function ContactsTab({ leadId, assignmentId, columns, readOnly = false, onSaved }: { leadId: string; assignmentId: string; columns: LeadColumn[]; readOnly?: boolean; onSaved: () => void }) {
   const router = useRouter();
@@ -206,8 +207,29 @@ function ContactsTab({ leadId, assignmentId, columns, readOnly = false, onSaved 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [editingContact, setEditingContact] = useState<LeadContact | null>(null);
+  const [emailingContact, setEmailingContact] = useState<LeadContact | null>(null);
+  const [dialingId, setDialingId] = useState<string | null>(null);
+  const [dialMessages, setDialMessages] = useState<Record<string, string>>({});
   const designationColumn = columns.find((column) => column.source === "custom" && column.field_type === "dropdown" && normalizeContactColumnLabel(column.label) === "designation");
   const departmentColumn = columns.find((column) => column.source === "custom" && column.field_type === "dropdown" && normalizeContactColumnLabel(column.label) === "departmentfunction");
+
+  const callContact = async (contact: LeadContact) => {
+    if (!contact.phone || dialingId) return;
+    setDialingId(contact.id);
+    setDialMessages((current) => ({ ...current, [contact.id]: "" }));
+    try {
+      const response = await fetch("/api/altus-contacts/dial", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadId, assignmentId, number: contact.phone }) });
+      const result = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || "Unable to start the call.");
+      setDialMessages((current) => ({ ...current, [contact.id]: "Call requested in Altus Contacts." }));
+      onSaved();
+    } catch (error) {
+      setDialMessages((current) => ({ ...current, [contact.id]: error instanceof Error ? error.message : "Unable to start the call." }));
+    } finally {
+      setDialingId(null);
+    }
+  };
 
   const loadContacts = () => {
     setLoading(true);
@@ -232,6 +254,7 @@ function ContactsTab({ leadId, assignmentId, columns, readOnly = false, onSaved 
       formData.set("firstName", String(form.get("firstName") ?? ""));
       formData.set("lastName", String(form.get("lastName") ?? ""));
       formData.set("email", String(form.get("email") ?? ""));
+      formData.set("phone", String(form.get("phone") ?? ""));
       formData.set("designation", String(form.get("designation") ?? ""));
       formData.set("departmentFunction", String(form.get("departmentFunction") ?? ""));
       formData.set("contactType", String(form.get("contactType") ?? "secondary"));
@@ -260,7 +283,65 @@ function ContactsTab({ leadId, assignmentId, columns, readOnly = false, onSaved 
     });
   };
 
-  return <section className="max-w-5xl"><div><h3 className="text-base font-extrabold text-slate-900">Lead contacts</h3><p className="mt-1 text-xs text-slate-500">The lead record is the Primary contact. Saving a new Primary contact updates the lead and preserves the previous lead contact as Secondary.</p></div>{!readOnly && <form onSubmit={submit} className="mt-4 rounded-xl border border-red-100 bg-white p-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><ContactInput name="firstName" label="First name" required /><ContactInput name="lastName" label="Last name" /><ContactInput name="email" label="Email" type="email" /><ContactDropdown name="designation" label="Designation" options={designationColumn?.options ?? []} unavailable={!designationColumn} /><ContactDropdown name="departmentFunction" label="Department/Function" options={departmentColumn?.options ?? []} unavailable={!departmentColumn} /><label className="block text-xs font-bold text-slate-700">Contact type<select name="contactType" defaultValue="secondary" className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-red-400"><option value="secondary">Secondary</option><option value="primary">Primary</option></select></label></div><p className="mt-3 text-[11px] text-slate-500">Saving a new Primary contact updates the lead and moves the previous lead contact into the Secondary list.</p>{message && <p className={`mt-3 text-xs font-bold ${message.includes("added") || message.includes("updated") || message.includes("now the Primary") ? "text-emerald-700" : "text-red-600"}`}>{message}</p>}<div className="mt-4 flex justify-end"><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white disabled:opacity-60">{isPending ? "Saving..." : "Add contact"}</button></div></form>}<div className="mt-4 space-y-3">{loading ? <p className="text-sm font-semibold text-slate-400">Loading contacts...</p> : contacts.length ? contacts.map((contact) => <article key={contact.id} className={`rounded-xl border p-4 ${contact.contact_type === "primary" ? "border-red-200 bg-red-50/30" : "border-slate-200 bg-white"}`}><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-extrabold text-slate-900">{[contact.first_name, contact.last_name].filter(Boolean).join(" ")}</p><p className="mt-0.5 text-xs font-semibold text-slate-500">{contact.designation || "No designation"}{contact.department_function ? ` · ${contact.department_function}` : ""}</p>{contact.email && <p className="mt-1 text-xs text-slate-600">{contact.email}</p>}</div><div className="flex items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${contact.contact_type === "primary" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>{contact.contact_type}</span>{!readOnly && contact.contact_type === "secondary" && <button type="button" disabled={isPending} onClick={() => makePrimary(contact.id)} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-[10px] font-extrabold text-red-600 hover:bg-red-50 disabled:opacity-50">Make primary</button>}</div></div></article>) : <p className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm font-semibold text-slate-500">No Secondary contacts have been added to this lead.</p>}</div></section>;
+  return <section className="max-w-5xl"><div><h3 className="text-base font-extrabold text-slate-900">Lead contacts</h3><p className="mt-1 text-xs text-slate-500">The lead record is the Primary contact. Saving a new Primary contact updates the lead and preserves the previous lead contact as Secondary.</p></div>{!readOnly && <form onSubmit={submit} className="mt-4 rounded-xl border border-red-100 bg-white p-4"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><ContactInput name="firstName" label="First name" required /><ContactInput name="lastName" label="Last name" /><ContactInput name="email" label="Email" type="email" /><ContactInput name="phone" label="Phone" type="tel" /><ContactDropdown name="designation" label="Designation" options={designationColumn?.options ?? []} unavailable={!designationColumn} /><ContactDropdown name="departmentFunction" label="Department/Function" options={departmentColumn?.options ?? []} unavailable={!departmentColumn} /><label className="block text-xs font-bold text-slate-700">Contact type<select name="contactType" defaultValue="secondary" className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-red-400"><option value="secondary">Secondary</option><option value="primary">Primary</option></select></label></div><p className="mt-3 text-[11px] text-slate-500">Saving a new Primary contact updates the lead and moves the previous lead contact into the Secondary list.</p>{message && <p className={`mt-3 text-xs font-bold ${message.includes("added") || message.includes("updated") || message.includes("now the Primary") ? "text-emerald-700" : "text-red-600"}`}>{message}</p>}<div className="mt-4 flex justify-end"><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white disabled:opacity-60">{isPending ? "Saving..." : "Add contact"}</button></div></form>}<div className="mt-4 space-y-3">{loading ? <p className="text-sm font-semibold text-slate-400">Loading contacts...</p> : contacts.length ? contacts.map((contact) => <article key={contact.id} className={`rounded-xl border p-4 ${contact.contact_type === "primary" ? "border-red-200 bg-red-50/30" : "border-slate-200 bg-white"}`}><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-extrabold text-slate-900">{[contact.first_name, contact.last_name].filter(Boolean).join(" ")}</p><p className="mt-0.5 text-xs font-semibold text-slate-500">{contact.designation || "No designation"}{contact.department_function ? ` · ${contact.department_function}` : ""}</p>{(contact.phone || contact.email) && <p className="mt-1 text-xs text-slate-600">{[contact.phone, contact.email].filter(Boolean).join(" · ")}</p>}{dialMessages[contact.id] && <p className="mt-1 text-[10px] font-bold text-emerald-700">{dialMessages[contact.id]}</p>}</div><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${contact.contact_type === "primary" ? "bg-red-600 text-white" : "bg-slate-100 text-slate-600"}`}>{contact.contact_type}</span>{!readOnly && <button type="button" disabled={!contact.phone || dialingId === contact.id} onClick={() => callContact(contact)} title={contact.phone ? `Call ${contact.phone}` : "No phone number"} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"><PhoneCall className="h-3.5 w-3.5" /></button>}{!readOnly && <button type="button" disabled={!contact.email} onClick={() => setEmailingContact(contact)} title={contact.email ? `Email ${contact.email}` : "No email address"} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"><Mail className="h-3.5 w-3.5" /></button>}{!readOnly && <button type="button" onClick={() => setEditingContact(contact)} title="Edit contact" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-red-50 hover:text-red-600"><Pencil className="h-3.5 w-3.5" /></button>}{!readOnly && contact.contact_type === "secondary" && <button type="button" disabled={isPending} onClick={() => makePrimary(contact.id)} className="h-8 rounded-lg border border-red-200 bg-white px-2.5 text-[10px] font-extrabold text-red-600 hover:bg-red-50 disabled:opacity-50">Make primary</button>}</div></div></article>) : <p className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm font-semibold text-slate-500">No Secondary contacts have been added to this lead.</p>}</div>{editingContact && <EditContactModal contact={editingContact} leadId={leadId} assignmentId={assignmentId} designationOptions={designationColumn?.options ?? []} departmentOptions={departmentColumn?.options ?? []} onClose={() => setEditingContact(null)} onSaved={() => { setEditingContact(null); void loadContacts(); onSaved(); router.refresh(); }} />}{emailingContact?.email && <ContactEmailModal leadId={leadId} assignmentId={assignmentId} to={emailingContact.email} name={[emailingContact.first_name, emailingContact.last_name].filter(Boolean).join(" ")} onClose={() => setEmailingContact(null)} onSent={() => { onSaved(); router.refresh(); }} />}</section>;
+}
+
+function EditContactModal({ contact, leadId, assignmentId, designationOptions, departmentOptions, onClose, onSaved }: { contact: LeadContact; leadId: string; assignmentId: string; designationOptions: string[]; departmentOptions: string[]; onClose: () => void; onSaved: () => void }) {
+  const [message, setMessage] = useState("");
+  const [isPending, startTransition] = useTransition();
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("leadId", leadId); formData.set("assignmentId", assignmentId); formData.set("contactId", contact.id);
+      formData.set("firstName", String(form.get("firstName") ?? ""));
+      formData.set("lastName", String(form.get("lastName") ?? ""));
+      formData.set("email", String(form.get("email") ?? ""));
+      formData.set("phone", String(form.get("phone") ?? ""));
+      formData.set("designation", String(form.get("designation") ?? ""));
+      formData.set("departmentFunction", String(form.get("departmentFunction") ?? ""));
+      const result = await updateLeadContact(formData);
+      if (!result.ok) { setMessage(result.message); return; }
+      onSaved();
+    });
+  };
+  if (typeof document === "undefined") return null;
+  return createPortal(<div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/35 p-4" role="dialog" aria-modal="true" aria-label={`Edit ${contact.first_name}`}>
+    <form onSubmit={submit} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+      <div className="flex items-start justify-between gap-3"><h3 className="text-base font-extrabold text-slate-900">Edit contact</h3><button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><X className="h-4 w-4" /></button></div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-xs font-bold text-slate-700">First name *<input name="firstName" defaultValue={contact.first_name} required maxLength={120} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /></label><label className="block text-xs font-bold text-slate-700">Last name<input name="lastName" defaultValue={contact.last_name ?? ""} maxLength={120} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /></label><label className="block text-xs font-bold text-slate-700">Email<input name="email" type="email" defaultValue={contact.email ?? ""} maxLength={254} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /></label><label className="block text-xs font-bold text-slate-700">Phone<input name="phone" type="tel" defaultValue={contact.phone ?? ""} maxLength={20} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /></label><ContactDropdown name="designation" label="Designation" options={designationOptions} unavailable={!designationOptions.length} /><ContactDropdown name="departmentFunction" label="Department/Function" options={departmentOptions} unavailable={!departmentOptions.length} /></div>
+      {message && <p className="mt-3 text-xs font-bold text-red-600">{message}</p>}
+      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600">Cancel</button><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving..." : "Save changes"}</button></div>
+    </form>
+  </div>, document.body);
+}
+
+function ContactEmailModal({ leadId, assignmentId, to, name, onClose, onSent }: { leadId: string; assignmentId: string; to: string; name: string; onClose: () => void; onSent: () => void }) {
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("leadId", leadId); formData.set("assignmentId", assignmentId); formData.set("to", to); formData.set("subject", subject); formData.set("body", body);
+      const result = await sendEmailToLeadContact(formData);
+      setMessage({ ok: result.ok, text: result.message });
+      if (result.ok) { onSent(); window.setTimeout(onClose, 900); }
+    });
+  };
+  if (typeof document === "undefined") return null;
+  return createPortal(<div className="fixed inset-0 z-[120] grid place-items-center bg-slate-950/35 p-4" role="dialog" aria-modal="true" aria-label={`Email ${name || to}`}>
+    <form onSubmit={submit} className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+      <div className="flex items-start justify-between gap-3"><div><h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900"><Mail className="h-4 w-4 text-red-600" />Email {name || to}</h3><p className="mt-1 text-xs text-slate-500">To: {to}. Sent from the assigned Sales Person&apos;s mailbox.</p></div><button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><X className="h-4 w-4" /></button></div>
+      <input value={subject} onChange={(event) => setSubject(event.target.value)} required maxLength={200} placeholder="Subject" className="mt-3 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" />
+      <textarea value={body} onChange={(event) => setBody(event.target.value)} required maxLength={10000} placeholder="Write your message..." className="mt-3 min-h-40 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-red-400" />
+      {message && <p role="status" className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message.text}</p>}
+      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600">Cancel</button><button type="submit" disabled={isPending || !subject.trim() || !body.trim()} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-50">{isPending ? "Sending..." : "Send email"}</button></div>
+    </form>
+  </div>, document.body);
 }
 
 function ContactInput({ name, label, required = false, type = "text" }: { name: string; label: string; required?: boolean; type?: string }) { return <label className="block text-xs font-bold text-slate-700">{label}{required ? " *" : ""}<input name={name} type={type} required={required} maxLength={type === "email" ? 254 : 120} className="mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /></label>; }

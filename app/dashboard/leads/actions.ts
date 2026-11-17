@@ -3145,6 +3145,7 @@ export async function createLeadContact(formData: FormData): Promise<{ ok: boole
     const firstName = String(formData.get("firstName") ?? "").trim().slice(0, 120);
     const lastName = String(formData.get("lastName") ?? "").trim().slice(0, 120);
     const email = String(formData.get("email") ?? "").trim().toLowerCase().slice(0, 254);
+    const phone = String(formData.get("phone") ?? "").trim().slice(0, 20);
     const designation = String(formData.get("designation") ?? "").trim().slice(0, 160);
     const departmentFunction = String(formData.get("departmentFunction") ?? "").trim().slice(0, 160);
     const contactType = String(formData.get("contactType") ?? "secondary");
@@ -3172,7 +3173,7 @@ export async function createLeadContact(formData: FormData): Promise<{ ok: boole
     if (contactType === "primary") {
       const { data: currentLead, error: currentLeadError } = await supabase
         .from("leads")
-        .select("first_name, last_name, email, custom_data")
+        .select("first_name, last_name, email, phone, custom_data")
         .eq("id", leadId)
         .single();
       if (currentLeadError || !currentLead) throw new Error("This lead is no longer available.");
@@ -3186,6 +3187,7 @@ export async function createLeadContact(formData: FormData): Promise<{ ok: boole
         first_name: currentLead.first_name,
         last_name: currentLead.last_name || null,
         email: currentLead.email || null,
+        phone: currentLead.phone || null,
         designation: designationField ? String(currentCustomData[designationField.field_key] ?? "") || null : null,
         department_function: departmentField ? String(currentCustomData[departmentField.field_key] ?? "") || null : null,
         contact_type: "secondary",
@@ -3201,6 +3203,7 @@ export async function createLeadContact(formData: FormData): Promise<{ ok: boole
           first_name: firstName,
           last_name: lastName || null,
           email: email || null,
+          phone: phone || currentLead.phone || null,
           custom_data: nextCustomData,
           updated_at: new Date().toISOString(),
         })
@@ -3221,6 +3224,7 @@ export async function createLeadContact(formData: FormData): Promise<{ ok: boole
         first_name: firstName,
         last_name: lastName || null,
         email: email || null,
+        phone: phone || null,
         designation: designation || null,
         department_function: departmentFunction || null,
         contact_type: "secondary",
@@ -3259,13 +3263,13 @@ export async function makeLeadContactPrimary(formData: FormData): Promise<{ ok: 
     const [contactResult, leadResult, fieldsResult] = await Promise.all([
       admin
         .from("lead_contacts")
-        .select("id, first_name, last_name, email, designation, department_function")
+        .select("id, first_name, last_name, email, phone, designation, department_function")
         .eq("id", contactId)
         .eq("lead_id", leadId)
         .maybeSingle(),
       admin
         .from("leads")
-        .select("first_name, last_name, email, custom_data")
+        .select("first_name, last_name, email, phone, custom_data")
         .eq("id", leadId)
         .single(),
       admin
@@ -3292,6 +3296,7 @@ export async function makeLeadContactPrimary(formData: FormData): Promise<{ ok: 
       first_name: currentLead.first_name,
       last_name: currentLead.last_name || null,
       email: currentLead.email || null,
+      phone: currentLead.phone || null,
       designation: designationField ? String(currentCustomData[designationField.field_key] ?? "") || null : null,
       department_function: departmentField ? String(currentCustomData[departmentField.field_key] ?? "") || null : null,
       contact_type: "secondary",
@@ -3308,6 +3313,7 @@ export async function makeLeadContactPrimary(formData: FormData): Promise<{ ok: 
         first_name: contact.first_name,
         last_name: contact.last_name || null,
         email: contact.email || null,
+        phone: contact.phone || currentLead.phone || null,
         custom_data: nextCustomData,
         updated_at: new Date().toISOString(),
       })
@@ -3337,6 +3343,132 @@ export async function makeLeadContactPrimary(formData: FormData): Promise<{ ok: 
     return { ok: true, message: `${primaryName} is now the Primary contact. The previous Primary is kept as Secondary.` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to make this contact Primary." };
+  }
+}
+
+// Corrects a contact's own details in place. The synthetic Primary id
+// ("lead-<leadId>") edits the canonical leads row directly; any other id
+// edits its lead_contacts row. Neither path promotes or demotes a contact,
+// unlike createLeadContact and makeLeadContactPrimary.
+export async function updateLeadContact(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const contactId = String(formData.get("contactId") ?? "");
+    const firstName = String(formData.get("firstName") ?? "").trim().slice(0, 120);
+    const lastName = String(formData.get("lastName") ?? "").trim().slice(0, 120);
+    const email = String(formData.get("email") ?? "").trim().toLowerCase().slice(0, 254);
+    const phone = String(formData.get("phone") ?? "").trim().slice(0, 20);
+    const designation = String(formData.get("designation") ?? "").trim().slice(0, 160);
+    const departmentFunction = String(formData.get("departmentFunction") ?? "").trim().slice(0, 160);
+    if (!leadId || !assignmentId || !contactId || !firstName) throw new Error("First name is required.");
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
+
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const { data: fields, error: fieldsError } = await supabase
+      .from("lead_table_columns")
+      .select("field_key, label, source, field_type, options")
+      .eq("source", "custom")
+      .eq("field_type", "dropdown");
+    if (fieldsError) throw new Error("Contact dropdown configuration could not be loaded.");
+    const validateDropdown = (label: string, value: string) => {
+      if (!value) return;
+      const column = (fields ?? []).find((field) => normalizedLeadContactField(field.label) === label);
+      if (!column || !Array.isArray(column.options) || !column.options.includes(value)) {
+        throw new Error(`Choose a valid ${label === "designation" ? "Designation" : "Department/Function"}.`);
+      }
+    };
+    validateDropdown("designation", designation);
+    validateDropdown("departmentfunction", departmentFunction);
+
+    if (contactId === `lead-${leadId}`) {
+      const { data: currentLead, error: currentLeadError } = await supabase
+        .from("leads")
+        .select("custom_data")
+        .eq("id", leadId)
+        .single();
+      if (currentLeadError || !currentLead) throw new Error("This lead is no longer available.");
+      const designationField = (fields ?? []).find((field) => normalizedLeadContactField(field.label) === "designation");
+      const departmentField = (fields ?? []).find((field) => normalizedLeadContactField(field.label) === "departmentfunction");
+      const currentCustomData = currentLead.custom_data && typeof currentLead.custom_data === "object" && !Array.isArray(currentLead.custom_data)
+        ? currentLead.custom_data as Record<string, unknown>
+        : {};
+      const nextCustomData: Record<string, unknown> = { ...currentCustomData };
+      if (designationField) nextCustomData[designationField.field_key] = designation;
+      if (departmentField) nextCustomData[departmentField.field_key] = departmentFunction;
+      const { error: updateError } = await supabase
+        .from("leads")
+        .update({
+          first_name: firstName,
+          last_name: lastName || null,
+          email: email || null,
+          phone: phone || null,
+          custom_data: nextCustomData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", leadId);
+      if (updateError) throw new Error(updateError.message);
+    } else {
+      const { error: updateError } = await supabase
+        .from("lead_contacts")
+        .update({
+          first_name: firstName,
+          last_name: lastName || null,
+          email: email || null,
+          phone: phone || null,
+          designation: designation || null,
+          department_function: departmentFunction || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", contactId)
+        .eq("lead_id", leadId);
+      if (updateError) throw new Error(updateError.message);
+    }
+
+    const name = [firstName, lastName].filter(Boolean).join(" ");
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "contact_updated",
+      note: `${name}'s contact details were updated.`,
+      metadata: { contact_id: contactId },
+      created_by: userId,
+    });
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: "Contact updated." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to update this contact." };
+  }
+}
+
+// Sends from the mailbox of whoever the product work is currently assigned
+// to, not the clicking admin's own mailbox, so an Ambassador or lead contact
+// always hears from the correct Sales Person regardless of who triggers it.
+export async function sendEmailToLeadContact(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  const leadId = String(formData.get("leadId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const to = String(formData.get("to") ?? "").trim().toLowerCase();
+  const subject = String(formData.get("subject") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return { ok: false, message: "Enter a valid email address." };
+  if (!subject || !body) return { ok: false, message: "Enter a subject and a message." };
+  if (subject.length > 200 || body.length > 10000) return { ok: false, message: "The subject or message is too long." };
+  try {
+    const { supabase, lead: assignment, userId } = await getEditableLead(leadId, assignmentId);
+    const ownerId = assignment.assigned_to ?? userId;
+    await sendEmailWithUserSmtp(ownerId, { to, subject, text: body });
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "email",
+      note: `Email sent to ${to}: ${subject}`,
+      metadata: { channel: "email", direction: "sent", to, subject, body },
+      created_by: userId,
+    });
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: `Email sent to ${to}.` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to send this email." };
   }
 }
 
