@@ -24,6 +24,7 @@ const roleNavigation: DashboardNavItem[] = [
       { label: "Uncategorized Leads", href: "/dashboard/uncategorized-leads" },
     ],
   },
+  { label: "Hot Leads", href: "/dashboard/hot-leads", roles: ["admin", "sales_manager", "sales_executive"] },
   {
     label: "Do Not Call",
     href: "/dashboard/dnd-master",
