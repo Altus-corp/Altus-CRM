@@ -18,7 +18,6 @@ export default async function DashboardLayout({
   await connection();
   const { roles, userId, displayName, email } = await requireUser();
   const roleLabel = roles.map((role) => ROLE_LABELS[role]).join(" · ");
-  const ambassadorOwner = isAmbassadorWorkspace(roles) ? await getAmbassadorOwner() : undefined;
   const hasSalesWorkspace = !isAmbassadorWorkspace(roles) && roles.some((role) => role === "sales_executive" || role === "sales_manager" || role === "consultant");
   const supabase = await createClient();
   const indiaDateParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -33,7 +32,8 @@ export default async function DashboardLayout({
   const focusedCountPromise = hasSalesWorkspace
     ? supabase.from("lead_focused_assignment_counts").select("assignment_count").eq("user_id", userId).eq("focused_on", indiaDate).maybeSingle()
     : Promise.resolve({ data: null, error: null });
-  const [sharedConfig, focusedCountResult] = await Promise.all([sharedConfigPromise, focusedCountPromise]);
+  const ambassadorOwnerPromise = isAmbassadorWorkspace(roles) ? getAmbassadorOwner() : Promise.resolve(undefined);
+  const [sharedConfig, focusedCountResult, ambassadorOwner] = await Promise.all([sharedConfigPromise, focusedCountPromise, ambassadorOwnerPromise]);
   const focusedCountFallback = hasSalesWorkspace && focusedCountResult.error
     ? await supabase.from("lead_product_assignments").select("id", { count: "exact", head: true }).eq("assigned_to", userId).eq("focused_on", indiaDate).eq("is_active", true)
     : null;

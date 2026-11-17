@@ -13,9 +13,28 @@ export const requireUser = cache(async () => {
         redirect("/login");
     }
 
-    const {
-        data: { user },
-    } = await supabase.auth.getUser();
+    // getUser() (session revocation check), the profile row, and the role
+    // list each depend only on userId above, not on each other, so they run
+    // as one round trip instead of three sequential ones. This runs on every
+    // dashboard page load, so the latency here is felt everywhere.
+    const [
+        {
+            data: { user },
+        },
+        { data: profile, error: profileError },
+        { data: roles, error },
+    ] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase
+            .from("profiles")
+            .select("is_suspended, first_name, last_name, full_name")
+            .eq("id", userId)
+            .single(),
+        supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", userId),
+    ]);
 
     if (!user) {
         redirect("/login");
@@ -25,21 +44,10 @@ export const requireUser = cache(async () => {
         redirect("/change-password");
     }
 
-    const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("is_suspended, first_name, last_name, full_name")
-        .eq("id", userId)
-        .single();
-
     if (profileError || profile?.is_suspended) {
         await supabase.auth.signOut();
         redirect("/login?error=account-suspended");
     }
-
-    const { data: roles, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId);
 
     if (error || !roles?.length) {
         await supabase.auth.signOut();
