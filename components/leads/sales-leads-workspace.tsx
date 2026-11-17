@@ -250,6 +250,11 @@ export function ManualLeadModal({
   outsideRoundRobin?: boolean;
 }) {
   const router = useRouter();
+  // Ambassador product work is created only through the dedicated Ambassador
+  // flows (Add Ambassador, the Ambassador API, or a lead explicitly converted
+  // there), so it gets the matching Pre Sales/Onboarding routing. Keep it out
+  // of this generic lead form.
+  const selectableProducts = products.filter((product) => product.code !== "AMBASSADOR");
   const [productIds, setProductIds] = useState<string[]>([]);
   const [ambassadorId, setAmbassadorId] = useState("");
   const [message, setMessage] = useState("");
@@ -351,7 +356,7 @@ export function ManualLeadModal({
             <legend className="text-xs font-bold text-slate-700">Products *</legend>
             <p className="mt-1 text-[11px] text-slate-500">Select one or more products for this lead.</p>
             <div className="mt-2 grid max-h-40 grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-slate-200 p-2 sm:grid-cols-3">
-              {products.map((product) => <label key={product.id} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-red-50"><input type="checkbox" checked={productIds.includes(product.id)} onChange={(event) => setProductIds((ids) => event.target.checked ? [...ids, product.id] : ids.filter((id) => id !== product.id))} className="h-4 w-4 accent-red-600" /> <span className="truncate">{manualLeadProductLabel(product)}</span></label>)}
+              {selectableProducts.map((product) => <label key={product.id} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-red-50"><input type="checkbox" checked={productIds.includes(product.id)} onChange={(event) => setProductIds((ids) => event.target.checked ? [...ids, product.id] : ids.filter((id) => id !== product.id))} className="h-4 w-4 accent-red-600" /> <span className="truncate">{manualLeadProductLabel(product)}</span></label>)}
             </div>
           </fieldset>
           {ambassadors.length > 0 && <label className="sm:col-span-2 text-xs font-bold text-slate-700">

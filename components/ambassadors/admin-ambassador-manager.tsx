@@ -3,8 +3,8 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
-import { Download, FileSpreadsheet, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
-import { createAmbassador, deleteAmbassadorRecords, importAmbassadors, updateAmbassadorDetails, type AmbassadorInput } from "@/app/dashboard/my-ambassador/actions";
+import { Download, FileSpreadsheet, Pencil, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { backfillAmbassadorWorkflowStages, createAmbassador, deleteAmbassadorRecords, importAmbassadors, updateAmbassadorDetails, type AmbassadorInput } from "@/app/dashboard/my-ambassador/actions";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
 import { AgreementDocUpload } from "./agreement-doc-upload";
 
@@ -159,6 +159,15 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
       if (result.ok) { setSelectedIds(new Set()); router.refresh(); }
     });
   };
+  const [isSyncingStages, startSyncingStages] = useTransition();
+  const syncStages = () => {
+    if (!window.confirm("Move every Ambassador record's stage to Pre Sales or Onboarding Ambassador based on its current resolution? This updates existing records in bulk and cannot be undone automatically.")) return;
+    startSyncingStages(async () => {
+      const result = await backfillAmbassadorWorkflowStages();
+      setInlineMessage(result.message);
+      if (result.ok) router.refresh();
+    });
+  };
   async function downloadTemplate() {
     const ExcelJS = (await import("exceljs")).default;
     const book = new ExcelJS.Workbook();
@@ -234,7 +243,7 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
     <div id="ambassador-records">
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-100 bg-gradient-to-r from-red-50 to-white p-3">
         <div><p className="text-sm font-extrabold text-slate-900">Ambassador Management</p><p className="mt-0.5 text-xs text-slate-500">Create one Ambassador manually or import many records from the standard template.</p></div>
-        <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setSelecting(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700">Select records</button><button type="button" onClick={deleteSelected} disabled={!selectedIds.size || isDeleting} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" />{isDeleting ? "Deleting..." : `Delete selected${selectedIds.size ? ` (${selectedIds.size})` : ""}`}</button><button onClick={() => setMode("bulk")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700"><Upload className="h-3.5 w-3.5" />Bulk Import</button><button onClick={() => setMode("manual")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#d90000] px-3 text-xs font-extrabold text-white"><Plus className="h-3.5 w-3.5" />Add Ambassador</button></div>
+        <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setSelecting(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700">Select records</button><button type="button" onClick={deleteSelected} disabled={!selectedIds.size || isDeleting} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" />{isDeleting ? "Deleting..." : `Delete selected${selectedIds.size ? ` (${selectedIds.size})` : ""}`}</button><button type="button" onClick={syncStages} disabled={isSyncingStages} title="Move every Ambassador record's stage to Pre Sales or Onboarding Ambassador based on its current resolution" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className="h-3.5 w-3.5" />{isSyncingStages ? "Syncing..." : "Sync Pre Sales/Onboarding stages"}</button><button onClick={() => setMode("bulk")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700"><Upload className="h-3.5 w-3.5" />Bulk Import</button><button onClick={() => setMode("manual")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#d90000] px-3 text-xs font-extrabold text-white"><Plus className="h-3.5 w-3.5" />Add Ambassador</button></div>
       </div>
       <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-[2050px] w-full text-left text-xs">

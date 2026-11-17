@@ -451,8 +451,13 @@ export async function importLeadsCsv(
       .select("id, first_name, last_name, full_name")
       .eq("is_suspended", false),
   ]);
+  // Ambassador product work is created only through the dedicated Ambassador
+  // flows, which apply the matching Pre Sales/Onboarding routing. Keep it out
+  // of bulk CSV import so it can't be attached without that routing.
   const productsByCode = new Map(
-    (products ?? []).map((product) => [product.code.toLowerCase(), product]),
+    (products ?? [])
+      .filter((product) => product.code.toUpperCase() !== "AMBASSADOR")
+      .map((product) => [product.code.toLowerCase(), product]),
   );
   const stagesByKey = new Map(
     (stages ?? []).map((stage) => [
@@ -2231,6 +2236,8 @@ export async function createManualLead(
   const product = productsById.get(productId);
   if (productsError || !product || productsById.size !== productIds.length)
     return { ok: false, message: "Choose active products." };
+  if ([...productsById.values()].some((item) => item.code === "AMBASSADOR"))
+    return { ok: false, message: "Add Ambassador product work through the Ambassador page, not here." };
   if (ambassadorId) {
     if (!user.roles.some((role) => ["admin", "sales_executive", "sales_manager"].includes(role)))
       return { ok: false, message: "Only an admin, Sales Executive, or Sales Manager can select an Ambassador for a new lead." };
@@ -2827,6 +2834,7 @@ export async function addProductToMyLead(formData: FormData) {
     .eq("is_active", true)
     .single();
   if (productError || !product) throw new Error("Choose an active product.");
+  if (product.code === "AMBASSADOR") throw new Error("Add Ambassador product work through the Ambassador page, not here.");
   const { data: assignment, error } = await supabase
     .from("lead_product_assignments")
     .insert({
@@ -2882,6 +2890,7 @@ export async function addProductToLeadDetails(formData: FormData) {
     .eq("is_active", true)
     .single();
   if (productError || !product) throw new Error("Choose an active product.");
+  if (product.code === "AMBASSADOR") throw new Error("Add Ambassador product work through the Ambassador page, not here.");
 
   const { data: assignment, error: assignmentError } = await supabase
     .from("lead_product_assignments")
@@ -4063,6 +4072,7 @@ export async function updateLeadProductInline(formData: FormData) {
     .eq("is_active", true)
     .single();
   if (productError || !product) throw new Error("Choose an active product.");
+  if (product.code === "AMBASSADOR") throw new Error("Add Ambassador product work through the Ambassador page, not here.");
   const { error } = await supabase
     .from("lead_product_assignments")
     .update({

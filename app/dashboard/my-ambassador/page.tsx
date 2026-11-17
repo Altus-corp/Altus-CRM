@@ -68,22 +68,17 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     .eq("product_id", ambassadorProduct.id)
     .eq("name", stageName)
     .maybeSingle() : { data: null };
-  const { data: agreementSentResolution } = stageFilter === "pre-sales" ? await supabase
-    .from("lead_resolutions")
-    .select("id")
-    .eq("name", "Agreement Sent")
-    .eq("is_active", true)
-    .maybeSingle() : { data: null };
   let query = ambassadorDataClient.from("lead_product_assignments")
     .select("id, assigned_to, assigned_at, focused_on, next_follow_up_at, ambassador_commission, ambassador_commission_notes, ambassador_priority, ambassador_agreement_status, ambassador_signed_agreement_link, ambassador_last_called_on, ambassador_last_call_notes, ambassador_remark, ambassador_manan_sir_notes, ambassador_target_leads, ambassador_target_demo, ambassador_target_proposals, ambassador_target_sales, ambassador_actual_leads, ambassador_actual_demo, ambassador_actual_proposals, ambassador_actual_sales, product:lead_products(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name), lead:leads(id, lead_number, first_name, last_name, email, phone, created_at, custom_data)")
     .eq("is_active", true)
     .order("assigned_at", { ascending: false }).order("id").range((page - 1) * pageSize, page * pageSize);
   if (stageFilter === "pre-sales") {
-    // A Pre Sales record is a pending Ambassador-product opportunity, not yet
-    // an onboarded Ambassador. Keep the list exact even if a stale stage ID
-    // exists on another kind of work.
-    if (selectedStage?.id && ambassadorProduct?.id && agreementSentResolution?.id) {
-      query = query.eq("stage_id", selectedStage.id).eq("product_id", ambassadorProduct.id).eq("latest_resolution_id", agreementSentResolution.id);
+    // A Pre Sales record is a real Ambassador (is_ambassador) whose agreement
+    // has not been Signed/Waived yet, so the stage is still Pre Sales
+    // regardless of which specific resolution (Agreement Sent, Pitched,
+    // Query, etc.) it currently carries.
+    if (selectedStage?.id && ambassadorProduct?.id) {
+      query = query.eq("stage_id", selectedStage.id).eq("product_id", ambassadorProduct.id).eq("is_ambassador", true);
     } else {
       query = query.is("id", null);
     }

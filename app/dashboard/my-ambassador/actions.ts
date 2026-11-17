@@ -12,6 +12,103 @@ import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 const AGREEMENT_STATUSES = new Set(["Abandoned", "Agreement Sent", "Agreement Signed", "Not Pitched", "Pitched", "Query", "Said No", "Verbal Yes"]);
 const SIGNED_RESOLUTION_KEYS = ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"];
 
+// Agreement Status is not merely display text: it controls the real stage
+// and resolution that power the Pre Sales/Onboarding Ambassador views.
+// "Agreement Signed" (in whichever spelling the Signed/Waived resolution is
+// configured with) is the only outcome that reaches Onboarding Ambassador;
+// every other outcome belongs in Pre Sales until it is signed, so every
+// write path (manual create, admin edit, sales status change, document
+// upload) must resolve the same stage/resolution for a given status.
+async function resolveAmbassadorWorkflowPatch(supabase: ReturnType<typeof createAdminClient>, productId: string, agreementStatus: string) {
+  const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
+    supabase.from("lead_stages").select("id, name").eq("product_id", productId).eq("is_active", true),
+    supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+  ]);
+  if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
+  const patch: Record<string, unknown> = { is_ambassador: true, is_active: true };
+  if (agreementStatus === "Agreement Signed") {
+    const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
+    const signed = (resolutions ?? []).find((resolution) => SIGNED_RESOLUTION_KEYS.includes(workflowKey(resolution.name)));
+    if (!onboarding || !signed) throw new Error("Configure Onboarding Ambassador and Agreement Signed / Waived before marking this Ambassador as signed.");
+    return Object.assign(patch, { stage_id: onboarding.id, latest_resolution_id: signed.id, is_closed: true, focused_on: null, next_follow_up_at: null });
+  }
+  const preSales = (stages ?? []).find((stage) => workflowKey(stage.name) === "presales");
+  if (!preSales) throw new Error("Configure Pre Sales before saving this Ambassador.");
+  patch.stage_id = preSales.id;
+  patch.is_closed = false;
+  const matchedResolution = (resolutions ?? []).find((resolution) => workflowKey(resolution.name) === workflowKey(agreementStatus));
+  if (matchedResolution) patch.latest_resolution_id = matchedResolution.id;
+  return patch;
+}
+
+// A one-time admin fix for Ambassador records created before stage/resolution
+// routing existed on every write path. Reads whichever resolution each
+// record already carries (set by hand on the lead) and moves its stage to
+// match — Onboarding Ambassador if that resolution is a Signed/Waived
+// variant, Pre Sales otherwise — without anyone re-selecting anything.
+export async function backfillAmbassadorWorkflowStages(): Promise<{ ok: boolean; message: string }> {
+  try {
+    const user = await requireAdmin();
+    const supabase = createAdminClient();
+    const { data: product, error: productError } = await supabase.from("lead_products").select("id").eq("code", "AMBASSADOR").maybeSingle();
+    if (productError || !product) throw new Error("AMBASSADOR product is not configured.");
+    const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
+      supabase.from("lead_stages").select("id, name").eq("product_id", product.id).eq("is_active", true),
+      supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
+    ]);
+    if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
+    const preSales = (stages ?? []).find((stage) => workflowKey(stage.name) === "presales");
+    const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
+    if (!preSales || !onboarding) throw new Error("Configure Pre Sales and Onboarding Ambassador stages before running this.");
+    const signedResolutionIds = new Set((resolutions ?? []).filter((resolution) => SIGNED_RESOLUTION_KEYS.includes(workflowKey(resolution.name))).map((resolution) => resolution.id));
+    const resolutionNameById = new Map((resolutions ?? []).map((resolution) => [resolution.id, resolution.name]));
+
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from("lead_product_assignments")
+      .select("id, lead_id, latest_resolution_id, stage_id, ambassador_agreement_status")
+      .eq("product_id", product.id)
+      .eq("is_active", true);
+    if (assignmentsError) throw new Error(assignmentsError.message);
+
+    let movedToOnboarding = 0;
+    let movedToPreSales = 0;
+    for (const assignment of assignments ?? []) {
+      const isSigned = Boolean(assignment.latest_resolution_id && signedResolutionIds.has(assignment.latest_resolution_id));
+      const resolutionName = assignment.latest_resolution_id ? resolutionNameById.get(assignment.latest_resolution_id) ?? null : null;
+      const patch: Record<string, unknown> = {
+        is_ambassador: true,
+        stage_id: isSigned ? onboarding.id : preSales.id,
+        is_closed: isSigned,
+        updated_at: new Date().toISOString(),
+      };
+      if (isSigned) {
+        patch.ambassador_agreement_status = "Agreement Signed";
+        patch.focused_on = null;
+        patch.next_follow_up_at = null;
+      } else if (resolutionName && AGREEMENT_STATUSES.has(resolutionName)) {
+        patch.ambassador_agreement_status = resolutionName;
+      }
+      const { error } = await supabase.from("lead_product_assignments").update(patch).eq("id", assignment.id);
+      if (error) throw new Error(error.message);
+      await supabase.from("lead_activities").insert({
+        lead_id: assignment.lead_id,
+        lead_product_assignment_id: assignment.id,
+        activity_type: "ambassador_record_updated",
+        note: `Ambassador stage synced to its current resolution (moved to ${isSigned ? "Onboarding Ambassador" : "Pre Sales"}).`,
+        created_by: user.userId,
+      });
+      if (isSigned) movedToOnboarding += 1; else movedToPreSales += 1;
+    }
+    revalidatePath("/dashboard/my-ambassador");
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/senior-ambassadors");
+    const total = movedToOnboarding + movedToPreSales;
+    return { ok: true, message: total ? `${total} Ambassador record${total === 1 ? "" : "s"} synced (${movedToOnboarding} to Onboarding Ambassador, ${movedToPreSales} to Pre Sales).` : "No Ambassador records needed syncing." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to sync Ambassador stages." };
+  }
+}
+
 type AltusCorpExternalAmbassador = {
   id?: string;
   createdAt?: string;
@@ -497,8 +594,9 @@ async function saveRecord(input: AmbassadorInput) {
       .eq("id", leadId);
     if (error) throw new Error(error.message);
   }
+  const workflowPatch = await resolveAmbassadorWorkflowPatch(supabase, product.id, data.agreementStatus ?? "");
   const { data: assignment, error: assignmentError } = await supabase.from("lead_product_assignments").upsert({
-    lead_id: leadId, product_id: product.id, is_ambassador: true, is_active: true, is_closed: true,
+    lead_id: leadId, product_id: product.id, ...workflowPatch,
     assigned_to: effectiveSalesPersonId, assigned_at: effectiveSalesPersonId ? new Date().toISOString() : null, focused_on: null,
     ambassador_commission: data.commission, ambassador_commission_notes: data.commissionNotes || null,
     ambassador_priority: data.priority, ambassador_agreement_status: data.agreementStatus,
@@ -621,37 +719,7 @@ export async function updateAmbassadorDetails(assignmentId: string, input: Ambas
       ambassador_target_proposals: data.targetProposals, ambassador_target_sales: data.targetSales,
     };
 
-    // Agreement Status is not merely display text: it controls the real
-    // product resolution and stage that power the Pre Sales/Onboarding views.
-    if (data.agreementStatus === "Agreement Signed") {
-      const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
-        supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
-        supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
-      ]);
-      if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
-      const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
-      const signed = (resolutions ?? []).find((resolution) => ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"].includes(workflowKey(resolution.name)));
-      if (!onboarding || !signed) throw new Error("Configure Onboarding Ambassador and Agreement Signed / Waived before marking this Ambassador as signed.");
-      Object.assign(patch, {
-        stage_id: onboarding.id,
-        latest_resolution_id: signed.id,
-        is_ambassador: true,
-        is_active: true,
-        is_closed: true,
-        focused_on: null,
-        next_follow_up_at: null,
-      });
-    } else if (data.agreementStatus === "Agreement Sent" && !assignment.is_ambassador) {
-      const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
-        supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
-        supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
-      ]);
-      if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
-      const preSales = (stages ?? []).find((stage) => workflowKey(stage.name) === "presales");
-      const sent = (resolutions ?? []).find((resolution) => workflowKey(resolution.name) === "agreementsent");
-      if (!preSales || !sent) throw new Error("Configure Pre Sales and Agreement Sent before saving this Ambassador.");
-      Object.assign(patch, { stage_id: preSales.id, latest_resolution_id: sent.id, is_active: true, is_closed: false });
-    }
+    Object.assign(patch, await resolveAmbassadorWorkflowPatch(supabase, assignment.product_id, data.agreementStatus ?? ""));
 
     const { error: leadError } = await supabase
       .from("leads")
@@ -707,27 +775,7 @@ export async function updateAmbassadorAgreementStatus(assignmentId: string, agre
       ambassador_agreement_status: status,
       updated_at: new Date().toISOString(),
     };
-    // Signing is a real workflow transition: it moves the record into
-    // Onboarding Ambassador and records Agreement Signed / Waived.
-    if (status === "Agreement Signed") {
-      const [{ data: stages, error: stagesError }, { data: resolutions, error: resolutionsError }] = await Promise.all([
-        supabase.from("lead_stages").select("id, name").eq("product_id", assignment.product_id).eq("is_active", true),
-        supabase.from("lead_resolutions").select("id, name").eq("is_active", true),
-      ]);
-      if (stagesError || resolutionsError) throw new Error(stagesError?.message || resolutionsError?.message || "Unable to load the Ambassador workflow.");
-      const onboarding = (stages ?? []).find((stage) => workflowKey(stage.name) === "onboardingambassador");
-      const signed = (resolutions ?? []).find((resolution) => ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"].includes(workflowKey(resolution.name)));
-      if (!onboarding || !signed) throw new Error("Configure Onboarding Ambassador and Agreement Signed / Waived before marking this Ambassador as signed.");
-      Object.assign(patch, {
-        stage_id: onboarding.id,
-        latest_resolution_id: signed.id,
-        is_ambassador: true,
-        is_active: true,
-        is_closed: true,
-        focused_on: null,
-        next_follow_up_at: null,
-      });
-    }
+    Object.assign(patch, await resolveAmbassadorWorkflowPatch(supabase, assignment.product_id, status));
 
     const { error } = await supabase.from("lead_product_assignments").update(patch).eq("id", assignmentId);
     if (error) throw new Error(error.message);
