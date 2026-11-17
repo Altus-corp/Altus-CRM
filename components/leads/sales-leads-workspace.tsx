@@ -206,6 +206,7 @@ export function SalesLeadsWorkspace({
           assignedNames={assignedNames}
           preferences={preferences}
           editableConfiguration={selectedTeamMemberId ? undefined : { products, stages, productResolutions }}
+          ambassadorOptions={ambassadors}
           readOnly={Boolean(selectedTeamMemberId)}
           showHeader={false}
           onAddLead={selectedTeamMemberId ? undefined : () => setAddLeadMode("choice")}

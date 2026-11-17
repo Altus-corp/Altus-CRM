@@ -46,6 +46,18 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
   const [error, setError] = useState("");
   const [movingId, setMovingId] = useState("");
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
+  const [partnerDetail, setPartnerDetail] = useState<{ leadId: string; name: string | null; ids: string[]; options: { id: string; name: string }[]; editable: boolean; senior: { id: string; name: string } | null; seniorEditable: boolean } | null>(null);
+  const loadPartnerDetail = async (leadId: string) => {
+    try {
+      const response = await fetch("/api/leads/channel-partners", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadIds: [leadId] }), cache: "no-store" });
+      const data = await response.json() as { ok?: boolean; partners?: Record<string, string | null>; selected?: Record<string, string[]>; options?: { id: string; name: string }[]; editable?: boolean; seniors?: Record<string, { id: string; name: string } | null>; seniorEditable?: boolean };
+      if (!response.ok || !data.ok) return;
+      setPartnerDetail({ leadId, name: data.partners?.[leadId] ?? null, ids: data.selected?.[leadId] ?? [], options: data.options ?? [], editable: data.editable ?? false, senior: data.seniors?.[leadId] ?? null, seniorEditable: data.seniorEditable ?? false });
+    } catch { /* keep the previously loaded Ambassador selection on a transient fetch failure */ }
+  };
+  useEffect(() => {
+    if (detailLead) void loadPartnerDetail(detailLead.id);
+  }, [detailLead]);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const countFor = (stageId: string) => leads.filter((lead) => lead.stageId === stageId).length;
@@ -204,7 +216,16 @@ export function ProductStageBoard({ product, stages, leads, resolutions, dropdow
         {!visible.length && <p className="px-3 py-8 text-center text-xs font-semibold text-slate-400">No leads in {active.name} yet. A lead appears here once its product is {productLabel} and its stage is {active.name}.</p>}
       </div>
     </div>}
-    {detailLead && <LeadDetailPanel lead={detailLead} columns={detailColumns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
+    {detailLead && <LeadDetailPanel lead={{
+      ...detailLead,
+      channel_partner_name: partnerDetail?.leadId === detailLead.id ? partnerDetail.name : detailLead.channel_partner_name,
+      channel_partner_ids: partnerDetail?.leadId === detailLead.id ? partnerDetail.ids : [],
+      channel_partner_options: partnerDetail?.leadId === detailLead.id ? partnerDetail.options : [],
+      channel_partner_editable: partnerDetail?.leadId === detailLead.id && partnerDetail.editable,
+      senior_ambassador: partnerDetail?.leadId === detailLead.id ? partnerDetail.senior : null,
+      senior_ambassador_options: partnerDetail?.leadId === detailLead.id ? partnerDetail.options : [],
+      senior_ambassador_editable: partnerDetail?.leadId === detailLead.id && partnerDetail.seniorEditable,
+    }} columns={detailColumns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} onChannelPartnersSaved={() => void loadPartnerDetail(detailLead.id)} onSeniorAmbassadorSaved={() => void loadPartnerDetail(detailLead.id)} />}
     {transferNotice && <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby="ps-onboarding-transfer-title">
       <section className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
         <p className="text-[10px] font-extrabold tracking-[0.14em] text-red-600">PRODUCT TRANSFER</p>

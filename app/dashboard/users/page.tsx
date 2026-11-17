@@ -6,8 +6,9 @@ import { UsersTable, type ManagedUser } from "./users-table";
 
 export const instant = false;
 
-export default async function UsersPage() {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   await requireAdmin();
+  const { q } = await searchParams;
   const admin = createAdminClient();
   const { data: authData, error: authError } = await admin.auth.admin.listUsers({
     page: 1,
@@ -60,7 +61,7 @@ export default async function UsersPage() {
         <UserModal />
       </div>
 
-      <UsersTable users={users} transferUsers={transferUsers} />
+      <UsersTable users={users} transferUsers={transferUsers} initialQuery={q ?? ""} />
     </section>
   );
 }

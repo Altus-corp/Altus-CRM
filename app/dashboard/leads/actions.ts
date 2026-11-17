@@ -2858,6 +2858,61 @@ export async function addProductToMyLead(formData: FormData) {
     });
   if (activityError) throw new Error(activityError.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
+}
+
+// Adds another product from the Details tab without changing ownership. This
+// allows an admin, Sales Manager, or the assigned Sales Executive to keep a
+// lead's existing product work and create an additional product work record.
+export async function addProductToLeadDetails(formData: FormData) {
+  const leadId = String(formData.get("leadId") ?? "");
+  const sourceAssignmentId = String(formData.get("sourceAssignmentId") ?? "");
+  const productId = String(formData.get("productId") ?? "");
+  if (!leadId || !sourceAssignmentId || !productId)
+    throw new Error("Choose a product to add.");
+
+  const { supabase, lead: sourceAssignment, userId } = await getEditableLead(
+    leadId,
+    sourceAssignmentId,
+  );
+  const { data: product, error: productError } = await supabase
+    .from("lead_products")
+    .select("id, code")
+    .eq("id", productId)
+    .eq("is_active", true)
+    .single();
+  if (productError || !product) throw new Error("Choose an active product.");
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from("lead_product_assignments")
+    .insert({
+      lead_id: leadId,
+      product_id: productId,
+      assigned_to: sourceAssignment.assigned_to ?? userId,
+      assigned_at: new Date().toISOString(),
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  if (assignmentError) {
+    if (assignmentError.code === "23505")
+      throw new Error(`This lead already has ${product.code} product work.`);
+    throw new Error(assignmentError.message);
+  }
+
+  const { error: activityError } = await supabase
+    .from("lead_activities")
+    .insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignment.id,
+      activity_type: "product_added",
+      note: `${product.code} product work added from Lead Details.`,
+      metadata: { product_id: productId, source_assignment_id: sourceAssignmentId },
+      created_by: userId,
+    });
+  if (activityError) throw new Error(activityError.message);
+  revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
 }
 
 async function getEditableLead(leadId: string, assignmentId: string) {
@@ -2887,6 +2942,12 @@ async function getEditableLead(leadId: string, assignmentId: string) {
       "This product work record is no longer available to update.",
     );
   const isDirectAssignee = assignment.assigned_to === user.userId;
+  const isManagerTeamAssignee =
+    !user.roles.includes("admin") &&
+    !isDirectAssignee &&
+    user.roles.includes("sales_manager") &&
+    Boolean(assignment.assigned_to) &&
+    (await getSalesManagerTeamMemberIds(user.userId)).includes(assignment.assigned_to!);
   let isSelectedChannelPartner = false;
   if (!user.roles.includes("admin") && !isDirectAssignee && isAmbassadorWorkspace(user.roles)) {
     const { data: partner, error: partnerError } = await supabase
@@ -2899,8 +2960,8 @@ async function getEditableLead(leadId: string, assignmentId: string) {
       throw new Error("Channel Partner access is not available. Run the latest Channel Partner migration first.");
     isSelectedChannelPartner = Boolean(partner);
   }
-  if (!user.roles.includes("admin") && !isDirectAssignee && !isSelectedChannelPartner)
-    throw new Error("You can update only product work assigned to you.");
+  if (!user.roles.includes("admin") && !isDirectAssignee && !isManagerTeamAssignee && !isSelectedChannelPartner)
+    throw new Error("You can update only product work assigned to you or a member of your team.");
   return { supabase, lead: assignment, contact: lead, userId: user.userId };
 }
 
@@ -2947,6 +3008,7 @@ export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok:
   if (legacyError && !["42703", "PGRST204"].includes(legacyError.code ?? ""))
     return { ok: false, message: "Channel Partners were saved, but the lead display could not be refreshed. Please reload the page." };
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/products", "layout");
   return { ok: true, message: "Channel Partners saved." };
@@ -2980,6 +3042,7 @@ export async function saveLeadSeniorAmbassador(formData: FormData): Promise<{ ok
     if (error && !["42P01", "PGRST205"].includes(error.code ?? "")) return { ok: false, message: "Senior Ambassador could not be cleared. Please retry." };
   }
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
   revalidatePath("/dashboard/my-ambassador");
   revalidatePath("/dashboard");
   return { ok: true, message: seniorAmbassadorId ? "Senior Ambassador saved." : "Senior Ambassador cleared." };
@@ -3006,6 +3069,7 @@ export async function createLeadActivity(formData: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
 }
 export async function createLeadNote(formData: FormData) {
   const leadId = String(formData.get("leadId") ?? "");
@@ -3023,6 +3087,7 @@ export async function createLeadNote(formData: FormData) {
   });
   if (error) throw new Error(error.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
 }
 
 export async function createLeadNoteWithAttachment(formData: FormData): Promise<{ ok: boolean; message: string }> {
@@ -3648,6 +3713,8 @@ export async function updateLeadDetails(formData: FormData) {
   if (!Array.isArray(values) || values.length > 100)
     throw new Error("Invalid lead details.");
 
+  const actor = await requireUser();
+  const canOverrideReadOnly = actor.roles.includes("admin");
   const { supabase, userId } = await getEditableLead(leadId, assignmentId);
   const [
     { data: lead, error: leadError },
@@ -3660,17 +3727,16 @@ export async function updateLeadDetails(formData: FormData) {
       .single(),
     supabase
       .from("lead_table_columns")
+      // `read_only` is an optional future schema flag. Do not request it
+      // here: existing CRM databases do not have that column yet, and a
+      // missing column makes Supabase reject the whole configuration query.
       .select("field_key, label, source, field_type, options, computed_from"),
-    createAdminClient()
-      .from("profiles")
-      .select("id, first_name, last_name, full_name")
-      .eq("is_suspended", false),
   ]);
   if (leadError || !lead) throw new Error("This lead is no longer available.");
   if (columnsError || !columns) throw new Error("Lead fields are unavailable.");
 
   const configured = new Map(
-    columns.map((column) => [column.field_key, column]),
+    columns.map((column) => [column.field_key, { ...column, read_only: false }]),
   );
   const customData = { ...(lead.custom_data ?? {}) } as Record<string, unknown>;
   const update: Record<string, unknown> = { custom_data: customData };
@@ -3681,7 +3747,7 @@ export async function updateLeadDetails(formData: FormData) {
     const value = typeof input.value === "string" ? input.value.trim() : "";
     const column = configured.get(key);
       const addressFieldKey = isLeadAddressFieldKey(key) ? key : null;
-      if ((!column && !addressFieldKey) || column?.computed_from?.length) continue;
+      if ((!column && !addressFieldKey) || column?.computed_from?.length || (column?.read_only && !canOverrideReadOnly)) continue;
       const normalizedLabel = column?.label
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "") ?? "";
@@ -3762,6 +3828,7 @@ export async function updateLeadDetails(formData: FormData) {
     if (activityError) throw new Error(activityError.message);
   }
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
 }
 
 function normalizedCustomOption(value: string) {
@@ -3899,6 +3966,7 @@ export async function updateLeadProductInline(formData: FormData) {
     });
   if (activityError) throw new Error(activityError.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
   revalidatePath("/dashboard/uncategorized-leads");
 }
 
@@ -3937,6 +4005,7 @@ export async function updateLeadStageInline(formData: FormData) {
     });
   if (activityError) throw new Error(activityError.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
 }
 
 export async function updateLeadResolutionInline(formData: FormData) {
@@ -4189,6 +4258,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
     if (followUpActivityError) throw new Error(followUpActivityError.message);
   }
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
   if (isDoNotCall) revalidatePath("/dashboard/dnd-master");
   if (isAbandoned) revalidatePath("/dashboard/dnd-master");
   if (isOldGraduate) revalidatePath("/dashboard/old-graduate-master");
@@ -4222,6 +4292,7 @@ export async function updateLeadFollowUp(formData: FormData) {
     });
   if (activityError) throw new Error(activityError.message);
   revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/team-leads");
 }
 
 export async function scheduleLeadZoomMeeting(

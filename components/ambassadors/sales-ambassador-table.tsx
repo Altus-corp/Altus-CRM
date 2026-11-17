@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { Mail, MessageCircle, PhoneCall, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { getAmbassadorActualBreakdown, updateAmbassadorActuals, updateAmbassadorAgreementStatus, type AmbassadorActualBreakdownItem, type AmbassadorActualMetric } from "@/app/dashboard/my-ambassador/actions";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
 
@@ -29,9 +29,21 @@ export type SalesAmbassadorRow = {
 const countValue = (value: number | null) => String(value ?? 0);
 const agreementStatuses = ["Abandoned", "Agreement Sent", "Agreement Signed", "Not Pitched", "Pitched", "Query", "Said No", "Verbal Yes"];
 
-export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPerson = false }: { rows: SalesAmbassadorRow[]; columns: LeadColumn[]; assignedNames: Record<string, string>; showSalesPerson?: boolean }) {
+export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPerson = false, products = [], stages = [], productResolutions = [] }: { rows: SalesAmbassadorRow[]; columns: LeadColumn[]; assignedNames: Record<string, string>; showSalesPerson?: boolean; products?: { id: string; code: string; name: string }[]; stages?: { id: string; product_id: string; name: string }[]; productResolutions?: { product_id: string; resolution_id: string; resolution_name: string }[] }) {
   const router = useRouter();
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
+  const [partnerDetail, setPartnerDetail] = useState<{ leadId: string; name: string | null; ids: string[]; options: { id: string; name: string }[]; editable: boolean; senior: { id: string; name: string } | null; seniorEditable: boolean } | null>(null);
+  const loadPartnerDetail = async (leadId: string) => {
+    try {
+      const response = await fetch("/api/leads/channel-partners", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadIds: [leadId] }), cache: "no-store" });
+      const data = await response.json() as { ok?: boolean; partners?: Record<string, string | null>; selected?: Record<string, string[]>; options?: { id: string; name: string }[]; editable?: boolean; seniors?: Record<string, { id: string; name: string } | null>; seniorEditable?: boolean };
+      if (!response.ok || !data.ok) return;
+      setPartnerDetail({ leadId, name: data.partners?.[leadId] ?? null, ids: data.selected?.[leadId] ?? [], options: data.options ?? [], editable: data.editable ?? false, senior: data.seniors?.[leadId] ?? null, seniorEditable: data.seniorEditable ?? false });
+    } catch { /* keep the previously loaded Ambassador selection on a transient fetch failure */ }
+  };
+  useEffect(() => {
+    if (detailLead) void loadPartnerDetail(detailLead.id);
+  }, [detailLead]);
   const [drafts, setDrafts] = useState<Record<string, { actualSales: string }>>({});
   const [agreementStatusDrafts, setAgreementStatusDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
@@ -90,7 +102,16 @@ export function SalesAmbassadorTable({ rows, columns, assignedNames, showSalesPe
       </table>
     </div>
     {message && <p className={`mt-2 text-xs font-bold ${message === "Actuals saved." || message === "Agreement status saved." ? "text-emerald-700" : "text-red-600"}`}>{message}</p>}
-    {detailLead && <LeadDetailPanel lead={detailLead} columns={columns} assignedNames={assignedNames} onClose={() => setDetailLead(null)} />}
+    {detailLead && <LeadDetailPanel lead={{
+      ...detailLead,
+      channel_partner_name: partnerDetail?.leadId === detailLead.id ? partnerDetail.name : detailLead.channel_partner_name,
+      channel_partner_ids: partnerDetail?.leadId === detailLead.id ? partnerDetail.ids : [],
+      channel_partner_options: partnerDetail?.leadId === detailLead.id ? partnerDetail.options : [],
+      channel_partner_editable: partnerDetail?.leadId === detailLead.id && partnerDetail.editable,
+      senior_ambassador: partnerDetail?.leadId === detailLead.id ? partnerDetail.senior : null,
+      senior_ambassador_options: partnerDetail?.leadId === detailLead.id ? partnerDetail.options : [],
+      senior_ambassador_editable: partnerDetail?.leadId === detailLead.id && partnerDetail.seniorEditable,
+    }} columns={columns} assignedNames={assignedNames} detailConfiguration={{ products, stages, productResolutions }} onClose={() => setDetailLead(null)} onChannelPartnersSaved={() => void loadPartnerDetail(detailLead.id)} onSeniorAmbassadorSaved={() => void loadPartnerDetail(detailLead.id)} />}
     {breakdown && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label={metricTitle[breakdown.metric]}>
       <div className="max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4"><div><h2 className="text-lg font-extrabold text-slate-900">{metricTitle[breakdown.metric]}</h2><p className="mt-1 text-sm text-slate-500">Leads currently counted for this Ambassador.</p></div><button type="button" onClick={() => setBreakdown(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100" aria-label="Close"><X className="h-5 w-5" /></button></div>

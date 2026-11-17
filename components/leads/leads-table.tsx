@@ -51,10 +51,10 @@ function defaultLeadLayout(columns: LeadColumn[]): Preferences {
   return { order, widths: {}, frozen: [fullName, phone, product].filter((key): key is string => Boolean(key)), hidden: columns.filter((column) => !shown.has(column.field_key)).map((column) => column.field_key) };
 }
 
-export function LeadsTable({ columns, detailColumns, leads: inputLeads, assignedNames, showHeader = true, selectedIds = [], onSelectionChange, editableConfiguration, salesPersonOptions, preferences = { order: [], widths: {}, frozen: [], hidden: [] }, onAddLead, readOnly = false }: { columns: LeadColumn[]; detailColumns?: LeadColumn[]; leads: LeadRow[]; assignedNames: Record<string, string>; showHeader?: boolean; selectedIds?: string[]; onSelectionChange?: (ids: string[]) => void; editableConfiguration?: EditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; preferences?: Preferences; onAddLead?: () => void; readOnly?: boolean }) {
+export function LeadsTable({ columns, detailColumns, leads: inputLeads, assignedNames, showHeader = true, selectedIds = [], onSelectionChange, editableConfiguration, salesPersonOptions, ambassadorOptions = [], preferences = { order: [], widths: {}, frozen: [], hidden: [] }, onAddLead, readOnly = false }: { columns: LeadColumn[]; detailColumns?: LeadColumn[]; leads: LeadRow[]; assignedNames: Record<string, string>; showHeader?: boolean; selectedIds?: string[]; onSelectionChange?: (ids: string[]) => void; editableConfiguration?: EditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; ambassadorOptions?: { id: string; name: string }[]; preferences?: Preferences; onAddLead?: () => void; readOnly?: boolean }) {
   const [partnerError, setPartnerError] = useState("");
   const [partnerNames, setPartnerNames] = useState<Record<string, string | null>>({});
-  const [partnerConfig, setPartnerConfig] = useState<{ selected: Record<string, string[]>; options: { id: string; name: string }[]; editable: boolean }>({ selected: {}, options: [], editable: false });
+  const [partnerConfig, setPartnerConfig] = useState<{ selected: Record<string, string[]>; options: { id: string; name: string }[]; editable: boolean }>({ selected: {}, options: ambassadorOptions, editable: false });
   const [seniorConfig, setSeniorConfig] = useState<{ selected: Record<string, { id: string; name: string } | null>; editable: boolean }>({ selected: {}, editable: false });
   const partnerLeadIds = [...new Set(inputLeads.map((lead) => lead.id))].sort().join(",");
   const hasPartnerColumn = !readOnly && [...columns, ...(detailColumns ?? [])].some((column) => isChannelPartnerColumn(column) || isSeniorAmbassadorColumn(column));
@@ -71,7 +71,28 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
     })).then((results) => { if (active) { setPartnerError(results.find((data) => data.warning)?.warning ?? ""); setPartnerNames(Object.assign({}, ...results.map((data) => data.partners ?? {}))); setPartnerConfig({ selected: Object.assign({}, ...results.map((data) => data.selected ?? {})), options: results[0]?.options ?? [], editable: results[0]?.editable ?? false }); setSeniorConfig({ selected: Object.assign({}, ...results.map((data) => data.seniors ?? {})), editable: results[0]?.seniorEditable ?? false }); } }).catch((error: unknown) => { if (active) setPartnerError(error instanceof Error ? error.message : "Channel Partners could not be loaded."); });
     return () => { active = false; };
   }, [hasPartnerColumn, partnerLeadIds, inputLeads]);
-  const leads = inputLeads.map((lead) => ({ ...lead, channel_partner_name: partnerNames[lead.id] ?? lead.channel_partner_name, channel_partner_ids: partnerConfig.selected[lead.id] ?? [], channel_partner_options: partnerConfig.options, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[lead.id] ?? lead.senior_ambassador ?? null, senior_ambassador_options: partnerConfig.options, senior_ambassador_editable: !readOnly && seniorConfig.editable }));
+  const availableAmbassadorOptions = partnerConfig.options.length ? partnerConfig.options : ambassadorOptions;
+  const reflectChannelPartnerSave = (leadId: string, ambassadorIds: string[]) => {
+    const namesById = new Map(availableAmbassadorOptions.map((option) => [option.id, option.name]));
+    setPartnerConfig((current) => ({
+      ...current,
+      selected: { ...current.selected, [leadId]: ambassadorIds },
+    }));
+    setPartnerNames((current) => ({
+      ...current,
+      [leadId]: ambassadorIds.map((id) => namesById.get(id) ?? "Ambassador").join(", ") || null,
+    }));
+    router.refresh();
+  };
+  const reflectSeniorAmbassadorSave = (leadId: string, seniorAmbassadorId: string) => {
+    const namesById = new Map(availableAmbassadorOptions.map((option) => [option.id, option.name]));
+    setSeniorConfig((current) => ({
+      ...current,
+      selected: { ...current.selected, [leadId]: seniorAmbassadorId ? { id: seniorAmbassadorId, name: namesById.get(seniorAmbassadorId) ?? "Ambassador" } : null },
+    }));
+    router.refresh();
+  };
+  const leads = inputLeads.map((lead) => ({ ...lead, channel_partner_name: partnerNames[lead.id] ?? lead.channel_partner_name, channel_partner_ids: partnerConfig.selected[lead.id] ?? [], channel_partner_options: availableAmbassadorOptions, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[lead.id] ?? lead.senior_ambassador ?? null, senior_ambassador_options: availableAmbassadorOptions, senior_ambassador_editable: !readOnly && seniorConfig.editable }));
   const router = useRouter();
   const hasSavedLayout = preferences.layoutVersion === 1 && (preferences.order.length > 0 || preferences.frozen.length > 0 || preferences.hidden.length > 0 || Object.keys(preferences.widths).length > 0);
   const initialLayout = hasSavedLayout ? preferences : defaultLeadLayout(columns);
@@ -84,6 +105,16 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ key: string; after: boolean } | null>(null);
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
+  // Server actions refresh the table data. Keep an open detail panel aligned
+  // with that refreshed row so consecutive admin edits use the latest product,
+  // stage, resolution, assignee, and custom-field values.
+  useEffect(() => {
+    setDetailLead((current) => {
+      if (!current) return current;
+      const refreshed = inputLeads.find((lead) => lead.assignment_id === current.assignment_id || lead.product_assignments.some((assignment) => assignment.id === current.assignment_id));
+      return refreshed ?? current;
+    });
+  }, [inputLeads]);
   const [isSaving, startSaving] = useTransition();
   const [zoom, setZoom] = useState(1);
   const [transposed, setTransposed] = useState(false);
@@ -165,7 +196,7 @@ export function LeadsTable({ columns, detailColumns, leads: inputLeads, assigned
       })}</Fragment>;
       })}</tbody>
     </table>{!leads.length && <div className="px-4 py-12 text-center"><p className="text-sm font-bold text-slate-700">No leads yet</p><p className="mt-1 text-xs text-slate-500">New leads will appear here using the columns selected by the admin.</p></div>}</div>}
-    {detailLead && <LeadDetailPanel lead={{ ...detailLead, channel_partner_name: partnerNames[detailLead.id] ?? detailLead.channel_partner_name, channel_partner_ids: partnerConfig.selected[detailLead.id] ?? detailLead.channel_partner_ids ?? [], channel_partner_options: partnerConfig.options, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[detailLead.id] ?? detailLead.senior_ambassador ?? null, senior_ambassador_options: partnerConfig.options, senior_ambassador_editable: !readOnly && seniorConfig.editable }} columns={(detailColumns ?? columns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} detailConfiguration={editableConfiguration} onClose={() => setDetailLead(null)} readOnly={readOnly} />}
+    {detailLead && <LeadDetailPanel lead={{ ...detailLead, channel_partner_name: partnerNames[detailLead.id] ?? detailLead.channel_partner_name, channel_partner_ids: partnerConfig.selected[detailLead.id] ?? detailLead.channel_partner_ids ?? [], channel_partner_options: availableAmbassadorOptions, channel_partner_editable: !readOnly && partnerConfig.editable, senior_ambassador: seniorConfig.selected[detailLead.id] ?? detailLead.senior_ambassador ?? null, senior_ambassador_options: availableAmbassadorOptions, senior_ambassador_editable: !readOnly && seniorConfig.editable }} columns={(detailColumns ?? columns).filter((column) => !isActivityColumn(column))} assignedNames={assignedNames} detailConfiguration={editableConfiguration} salesPersonOptions={salesPersonOptions} canManageAllDetails={salesPersonOptions !== undefined} onClose={() => setDetailLead(null)} onChannelPartnersSaved={reflectChannelPartnerSave} onSeniorAmbassadorSaved={reflectSeniorAmbassadorSave} readOnly={readOnly} />}
   </section>;
 }
 

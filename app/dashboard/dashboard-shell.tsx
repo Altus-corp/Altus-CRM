@@ -369,7 +369,7 @@ export function DashboardShell({
             {ambassadorOwnerLabel && <span title={`Sales Person: ${ambassadorOwnerLabel}`} className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700">
               <span className="shrink-0 font-medium">Sales Person:</span><span>{ambassadorOwnerLabel}</span>
             </span>}
-            <LeadNavTools />
+            <LeadNavTools isAdmin={isAdmin} />
             {canAddLead && <button type="button" onClick={() => router.push("/dashboard/leads?add=1")} aria-label="Add lead" title="Add lead" className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 bg-[#fafafa] text-xl font-light text-[#182035] transition hover:border-red-200 hover:bg-red-50 hover:text-red-700">+</button>}
             <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? "Exit full screen" : "Enter full screen"} title={isFullscreen ? "Exit full screen" : "Full screen"} className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-red-700"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="h-4 w-4"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5" /><path d="m3 8 6-6M15 9l6-6M9 15l-6 6M21 16l-6 6" /></svg></button>
             <div className="relative">

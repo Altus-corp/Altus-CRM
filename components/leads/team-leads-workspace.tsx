@@ -1,9 +1,16 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
 
 type TeamMember = { id: string; name: string };
+type Product = { id: string; code: string; name: string };
+type Stage = { id: string; product_id: string; name: string; position: number };
+type ProductResolution = {
+  product_id: string;
+  resolution_id: string;
+  resolution_name: string;
+};
 
 type Preferences = {
   order: string[];
@@ -22,6 +29,9 @@ export function TeamLeadsWorkspace({
   teamMembers,
   selectedMemberId,
   view,
+  products,
+  stages,
+  productResolutions,
 }: {
   columns: LeadColumn[];
   leads: LeadRow[];
@@ -31,8 +41,10 @@ export function TeamLeadsWorkspace({
   teamMembers: TeamMember[];
   selectedMemberId: string | null;
   view: "focused" | "master";
+  products: Product[];
+  stages: Stage[];
+  productResolutions: ProductResolution[];
 }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const selectedMember = teamMembers.find((member) => member.id === selectedMemberId) ?? null;
   const focusedIds = new Set(focusedLeadIds);
@@ -44,7 +56,12 @@ export function TeamLeadsWorkspace({
     next.set("view", nextView);
     if (memberId) next.set("member", memberId);
     else next.delete("member");
-    router.push(`/dashboard/team-leads?${next.toString()}`);
+
+    // Team Leads is intentionally server-rendered: the selected member is
+    // authorised again before their assignments are read. A direct document
+    // navigation avoids retaining the previous RSC payload (which could make
+    // the selector appear to reset to the manager's own leads).
+    window.location.assign(`/dashboard/team-leads?${next.toString()}`);
   };
 
   return (
@@ -55,7 +72,7 @@ export function TeamLeadsWorkspace({
           {selectedMember ? `${selectedMember.name}'s ${view === "focused" ? "Focused Leads" : "Lead Master"}` : "Team Leads"}
         </h1>
         <p className="mt-1 text-xs text-slate-500">
-          {selectedMember ? "Viewing this team member's leads. Task details are view-only." : "Choose one of your team members to view their leads."}
+          {selectedMember ? "Viewing this team member's leads. You can manage their lead workflow from this table." : "Choose one of your team members to view their leads."}
         </p>
 
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -93,7 +110,7 @@ export function TeamLeadsWorkspace({
             leads={displayedLeads}
             assignedNames={assignedNames}
             preferences={preferences}
-            readOnly
+            editableConfiguration={{ products, stages, productResolutions }}
             showHeader={false}
           />
         </div>

@@ -133,6 +133,8 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
   const ambassadorColumns = visibleColumns.some((column) => column.field_key === "assigned_to")
     ? visibleColumns
     : [...visibleColumns, ...config.columns.filter((column) => column.field_key === "assigned_to").map((column) => ({ ...column, is_visible: true }))];
+  const resolutionNames = new Map(config.resolutions.map((resolution) => [resolution.id, resolution.name]));
+  const productResolutions = config.resolutionMappings.map((mapping) => ({ product_id: mapping.product_id, resolution_id: mapping.resolution_id, resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution" }));
   const filterHref = (owner: string, targetPage = 1) => {
     const query = new URLSearchParams();
     if (owner) query.set("owner", owner);
@@ -220,7 +222,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
       {ownerOptions.map((owner) => <Link key={owner.id} href={filterHref(owner.id)} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${ownerFilter === owner.id ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{owner.name}</Link>)}
       <Link href={filterHref("unassigned")} className={`rounded border px-3 py-1.5 text-xs font-extrabold ${ownerFilter === "unassigned" ? "border-red-600 bg-red-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>Unassigned</Link>
     </nav>}
-    {isAdmin ? <AdminAmbassadorManager rows={adminRecords} salesPeople={ownerOptions} detailColumns={config.columns} assignedNames={assignedNames} /> : <SalesAmbassadorTable rows={salesRows} columns={config.columns} assignedNames={assignedNames} showSalesPerson={isSalesManager} />}
+    {isAdmin ? <AdminAmbassadorManager rows={adminRecords} salesPeople={ownerOptions} detailColumns={config.columns} assignedNames={assignedNames} products={config.products} stages={config.stages} productResolutions={productResolutions} /> : <SalesAmbassadorTable rows={salesRows} columns={config.columns} assignedNames={assignedNames} showSalesPerson={isSalesManager} products={config.products} stages={config.stages} productResolutions={productResolutions} />}
     <nav aria-label="Ambassador pages" className="mt-4 flex items-center justify-end gap-3 text-sm">
       <span className="mr-auto text-slate-500">Page {page}</span>
       {page > 1 && <Link href={filterHref(activeOwnerFilter, page - 1)} className="font-bold text-red-700">Previous</Link>}

@@ -150,7 +150,7 @@ export function AdminLeadsMaster({ columns, sampleColumns, leads, assignedNames,
       </div>
       <p role="status" className="text-xs font-medium text-slate-500">Showing {filteredLeads.length} of {leads.length} leads on this page</p>
     </div>}
-    <div className="mt-3"><LeadsTable columns={columns} leads={filteredLeads} assignedNames={assignedNames} preferences={preferences} editableConfiguration={{ products, stages, productResolutions }} salesPersonOptions={assignmentUsers} selectedIds={selectedAssignmentIds} onSelectionChange={setSelectedAssignmentIds} showHeader={false} /></div>
+    <div className="mt-3"><LeadsTable columns={columns} leads={filteredLeads} assignedNames={assignedNames} preferences={preferences} editableConfiguration={{ products, stages, productResolutions }} salesPersonOptions={assignmentUsers} ambassadorOptions={ambassadors} selectedIds={selectedAssignmentIds} onSelectionChange={setSelectedAssignmentIds} showHeader={false} /></div>
   </section>;
 }
 

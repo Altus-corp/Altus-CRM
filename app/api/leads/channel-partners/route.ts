@@ -2,21 +2,40 @@ import { requireUser } from "@/app/lib/auth";
 import { isAmbassadorWorkspace } from "@/app/lib/roles";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 export async function POST(request: Request) {
   const user = await requireUser();
   const body = await request.json().catch(() => null);
   if (!Array.isArray(body?.leadIds) || body.leadIds.length > 100 || body.leadIds.some((id: unknown) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id))) return Response.json({ ok: false, error: "Invalid lead selection." }, { status: 400 });
   const supabase = await createClient();
-  const result = await supabase.from("leads").select("id, channel_partner_ids").in("id", body.leadIds);
+  const admin = createAdminClient();
+  const isTeamManager = user.roles.includes("sales_manager") && !user.roles.includes("admin");
+  if (isTeamManager) {
+    const permittedOwnerIds = [user.userId, ...(await getSalesManagerTeamMemberIds(user.userId))];
+    const { data: permittedAssignments, error: permittedAssignmentsError } = await admin
+      .from("lead_product_assignments")
+      .select("lead_id")
+      .in("lead_id", body.leadIds)
+      .in("assigned_to", permittedOwnerIds);
+    if (permittedAssignmentsError)
+      return Response.json({ ok: false, error: "Team lead access could not be verified." }, { status: 500 });
+    const permittedLeadIds = new Set((permittedAssignments ?? []).map((assignment) => assignment.lead_id));
+    if (body.leadIds.some((leadId: string) => !permittedLeadIds.has(leadId)))
+      return Response.json({ ok: false, error: "You can view only your team's leads." }, { status: 403 });
+  }
+  // Admin Lead Master already uses the privileged data client. Use the same
+  // client here so the post-save refresh cannot be hidden by an older RLS
+  // policy on `leads` while the relation itself was saved successfully.
+  const dataClient = isTeamManager || user.roles.includes("admin") ? admin : supabase;
+  const result = await dataClient.from("leads").select("id, channel_partner_ids").in("id", body.leadIds);
   const missingSelectionColumn = result.error?.code === "42703" || result.error?.code === "PGRST204";
   let leads = result.data;
   if (missingSelectionColumn) {
-    const fallback = await supabase.from("leads").select("id").in("id", body.leadIds);
+    const fallback = await dataClient.from("leads").select("id").in("id", body.leadIds);
     if (fallback.error) return Response.json({ ok: false, error: "Channel Partners could not be loaded." }, { status: 500 });
     leads = (fallback.data ?? []).map((lead) => ({ ...lead, channel_partner_ids: [] as string[] }));
   } else if (result.error) return Response.json({ ok: false, error: "Channel Partners could not be loaded." }, { status: 500 });
-  const admin = createAdminClient();
   const { data: roleRows, error: roleError } = await admin.from("user_roles").select("user_id").eq("role", "ambassador");
   if (roleError) return Response.json({ ok: false, error: "Ambassadors could not be loaded." }, { status: 500 });
   const currentIds = new Set((roleRows ?? []).map((role) => role.user_id));

@@ -9,7 +9,7 @@ export function SeniorAmbassadorSelect({ leadId, assignmentId, selected, options
   assignmentId: string;
   selected?: { id: string; name: string } | null;
   options: { id: string; name: string }[];
-  onSaved: () => void;
+  onSaved: (seniorAmbassadorId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(selected?.id ?? "");
@@ -25,7 +25,7 @@ export function SeniorAmbassadorSelect({ leadId, assignmentId, selected, options
     try {
       const result = await saveLeadSeniorAmbassador(form);
       if (!result.ok) { setError(result.message); return; }
-      onSaved();
+      onSaved(draft);
       setOpen(false);
     } catch {
       setError("Senior Ambassador could not be saved. Please retry.");

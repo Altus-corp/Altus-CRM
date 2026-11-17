@@ -16,8 +16,8 @@ export type ManagedUser = {
   isSuspended: boolean;
 };
 
-export function UsersTable({ users, transferUsers }: { users: ManagedUser[]; transferUsers: { id: string; name: string }[] }) {
-  const [search, setSearch] = useState("");
+export function UsersTable({ users, transferUsers, initialQuery = "" }: { users: ManagedUser[]; transferUsers: { id: string; name: string }[]; initialQuery?: string }) {
+  const [search, setSearch] = useState(initialQuery);
   const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filteredUsers = users.filter((user) => {
     const searchableText = [user.name, user.email, user.phone, ...user.roles.map((role) => ROLE_LABELS[role])].join(" ").toLowerCase();

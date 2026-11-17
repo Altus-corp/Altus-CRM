@@ -118,6 +118,12 @@ export default async function TeamLeadsPage({ searchParams }: { searchParams: Pr
   };
   const assignedNames = Object.fromEntries(teamMembers.map((member) => [member.id, member.name]));
   const focusedLeadIds = leads.filter((lead) => lead.focused_on === indiaToday()).map((lead) => lead.assignment_id);
+  const resolutionNames = new Map(sharedConfig.resolutions.map((resolution) => [resolution.id, resolution.name]));
+  const productResolutions = sharedConfig.resolutionMappings.map((mapping) => ({
+    product_id: mapping.product_id,
+    resolution_id: mapping.resolution_id,
+    resolution_name: resolutionNames.get(mapping.resolution_id) ?? "Unknown resolution",
+  }));
 
-  return <TeamLeadsWorkspace columns={sharedConfig.columns} leads={leads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} teamMembers={teamMembers} selectedMemberId={permittedMemberId} view={view} />;
+  return <TeamLeadsWorkspace columns={sharedConfig.columns} leads={leads} focusedLeadIds={focusedLeadIds} assignedNames={assignedNames} preferences={preferences} teamMembers={teamMembers} selectedMemberId={permittedMemberId} view={view} products={sharedConfig.products} stages={sharedConfig.stages} productResolutions={productResolutions} />;
 }

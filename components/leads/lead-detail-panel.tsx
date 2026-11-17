@@ -8,7 +8,7 @@ import { displayProductCode } from "@/app/lib/product-display";
 import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { completeLeadDetailColumns, storedDetailValue } from "@/app/lib/lead-detail-fields";
 import { LEAD_ADDRESS_COUNTRIES, leadAddressFieldKeyForColumn, locationCities, locationStates } from "@/app/lib/lead-address-fields";
-import { attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadDetails, updateLeadFollowUp, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
+import { addProductToLeadDetails, attachTranscriptToProduct, createLeadContact, createLeadNote, makeLeadContactPrimary, manuallyAssignLeads, syncLeadCallTranscripts, syncLeadTranscriptByCallId, updateLeadDetails, updateLeadFollowUp, updateLeadProductInline, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 import type { LeadColumn, LeadRow } from "./leads-table";
 import { ChannelPartnerSelect } from "./channel-partner-select";
 import { SeniorAmbassadorSelect } from "./senior-ambassador-select";
@@ -21,13 +21,14 @@ import { LeadNoteActivity } from "./lead-note-activity";
 type Activity = { id: string; activity_type: string; note: string | null; follow_up_at: string | null; created_at: string; metadata: Record<string, unknown> | null; actor?: string | null };
 type Tab = "activity" | "details" | "notes" | "follow-up" | "transcript" | "contacts";
 type DetailEditableConfiguration = {
+  products: { id: string; code: string; name: string }[];
   stages: { id: string; product_id: string; name: string }[];
   productResolutions: { product_id: string; resolution_id: string; resolution_name: string }[];
 };
 
 const activityLabels: Record<string, string> = { lead_created: "Lead added", assigned: "Lead assigned", product_added: "Product added", product_transferred: "Transferred to product", product_transfer_completed: "Product transfer completed", transcript_attached: "Transcript attached", details_updated: "Details updated", product_updated: "Product updated", stage_updated: "Stage updated", resolution_updated: "Call resolution updated", follow_up_scheduled: "Follow-up scheduled", follow_up_rescheduled: "Follow-up date updated", call_transcript_synced: "Call transcript saved", zoom_meeting_scheduled: "Zoom meeting scheduled", zoom_transcript_received: "Zoom transcript received", note: "Note added", call: "Call", video_call: "Video call", offline_meeting: "Offline meeting", whatsapp_message: "WhatsApp message", online_demo: "Online demo", offline_demo: "Offline demo", linkedin: "LinkedIn", online_meeting: "Online meeting", email: "Email" };
 
-export function LeadDetailPanel({ lead, columns, assignedNames, onClose, supplementalDetails = [], detailsExtra, detailConfiguration, initialTab = "activity", readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedNames: Record<string, string>; onClose: () => void; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; detailConfiguration?: DetailEditableConfiguration; initialTab?: Tab; readOnly?: boolean }) {
+export function LeadDetailPanel({ lead, columns, assignedNames, onClose, supplementalDetails = [], detailsExtra, detailConfiguration, salesPersonOptions, canManageAllDetails = false, initialTab = "activity", readOnly = false, onChannelPartnersSaved, onSeniorAmbassadorSaved }: { lead: LeadRow; columns: LeadColumn[]; assignedNames: Record<string, string>; onClose: () => void; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; detailConfiguration?: DetailEditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; canManageAllDetails?: boolean; initialTab?: Tab; readOnly?: boolean; onChannelPartnersSaved?: (leadId: string, ambassadorIds: string[]) => void; onSeniorAmbassadorSaved?: (leadId: string, seniorAmbassadorId: string) => void }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(lead.assignment_id);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -112,7 +113,7 @@ export function LeadDetailPanel({ lead, columns, assignedNames, onClose, supplem
       <main className="p-5">
         <label className="mb-4 flex max-w-sm items-center gap-3 rounded-xl border border-red-100 bg-white px-3 py-2 text-xs font-bold text-slate-600"><span className="shrink-0 text-red-600">Select product</span><select value={scopedLead.assignment_id} onChange={(event) => { setSelectedAssignmentId(event.target.value); setFollowUpAt(detailAssignments.find((assignment) => assignment.id === event.target.value)?.next_follow_up_at ?? null); }} className="min-w-0 flex-1 bg-transparent font-extrabold text-slate-800 outline-none">{detailAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{displayProductCode(assignment.product?.code)}</option>)}</select></label>
         {tab === "activity" && <ActivityTab activities={activities} loading={loading} assignedName={scopedAssignedName} lead={scopedLead} transcripts={transcripts.filter((item) => item.lead_product_assignment_id === scopedLead.assignment_id)} onSaved={() => setActivityVersion((version) => version + 1)} readOnly={readOnly} />}
-        {tab === "details" && <DetailsTab lead={scopedLead} columns={columns} assignedName={scopedAssignedName} supplementalDetails={supplementalDetails} detailsExtra={detailsExtra} detailConfiguration={detailConfiguration} contactVersion={activityVersion} onSaved={() => setActivityVersion((version) => version + 1)} readOnly={readOnly} />}
+        {tab === "details" && <DetailsTab lead={scopedLead} columns={columns} assignedName={scopedAssignedName} supplementalDetails={supplementalDetails} detailsExtra={detailsExtra} detailConfiguration={detailConfiguration} salesPersonOptions={salesPersonOptions} canManageAllDetails={canManageAllDetails} contactVersion={activityVersion} onSaved={() => setActivityVersion((version) => version + 1)} onChannelPartnersSaved={onChannelPartnersSaved} onSeniorAmbassadorSaved={onSeniorAmbassadorSaved} readOnly={readOnly} />}
         {tab === "notes" && <NotesTab leadId={lead.id} assignmentId={scopedLead.assignment_id} onSaved={() => setActivityVersion((version) => version + 1)} />}
         {tab === "follow-up" && <FollowUpTab leadId={lead.id} assignmentId={scopedLead.assignment_id} followUpAt={followUpAt} onSaved={(value) => { setFollowUpAt(value); setActivityVersion((version) => version + 1); }} />}
         {tab === "transcript" && <TranscriptTab leadId={lead.id} selectedAssignmentId={scopedLead.assignment_id} assignments={detailAssignments} transcripts={transcripts} onSaved={() => setActivityVersion((version) => version + 1)} />}
@@ -291,13 +292,13 @@ function BasicDetailsTab({ lead, columns, assignedName, supplementalDetails = []
   return <div><div className="flex items-center justify-between gap-3"><div><h3 className="text-base font-extrabold text-slate-900">Lead details</h3><p className="mt-1 text-xs text-slate-500">Lead information and custom fields.</p></div>{!readOnly && <button type="button" onClick={() => { setEditing((value) => !value); setMessage(""); }} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 hover:bg-red-50">{editing ? "Cancel" : "Edit details"}</button>}</div>{message && <p className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message === "Details saved." ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message}</p>}<form onSubmit={submit} className="mt-4"><dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{fields.map(({ column, value }) => <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt><dd className="mt-1">{editing && !readOnly && isEditableColumn(column) ? <DetailInput column={column} value={value} /> : <span className="whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{value || "—"}</span>}</dd></div>)}{supplementalDetails.map((field) => <div key={field.label} className="rounded-xl border border-red-100 bg-red-50/40 p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-red-500">{field.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{field.value || "—"}</dd></div>)}</dl>{editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Product, stage, resolution, assignments, and calculated fields remain managed in the Leads table.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving…" : "Save changes"}</button></div>}</form>{detailsExtra}</div>;
 }
 
-function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, detailConfiguration, contactVersion, onSaved, readOnly = false }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; detailConfiguration?: DetailEditableConfiguration; contactVersion: number; onSaved: () => void; readOnly?: boolean }) {
+function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], detailsExtra, detailConfiguration, salesPersonOptions, canManageAllDetails = false, contactVersion, onSaved, readOnly = false, onChannelPartnersSaved, onSeniorAmbassadorSaved }: { lead: LeadRow; columns: LeadColumn[]; assignedName?: string; supplementalDetails?: { label: string; value: string }[]; detailsExtra?: React.ReactNode; detailConfiguration?: DetailEditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; canManageAllDetails?: boolean; contactVersion: number; onSaved: () => void; readOnly?: boolean; onChannelPartnersSaved?: (leadId: string, ambassadorIds: string[]) => void; onSeniorAmbassadorSaved?: (leadId: string, seniorAmbassadorId: string) => void }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
   const fields = completeLeadDetailColumns(lead, columns).map((column) => ({ column, value: detailValue(lead, column, assignedName) }));
-  const editableFields = fields.filter(({ column }) => isEditableColumn(column));
+  const editableFields = fields.filter(({ column }) => isEditableColumn(column, canManageAllDetails));
   const savedAddressValue = (key: "country" | "state" | "city") => fields.find(({ column }) => leadAddressFieldKeyForColumn(column) === key)?.value ?? "";
   const [country, setCountry] = useState(() => savedAddressValue("country"));
   const [state, setState] = useState(() => savedAddressValue("state"));
@@ -350,17 +351,23 @@ function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], det
       <form onSubmit={submit} className="mt-4">
         <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {fields.map(({ column, value }) => {
-            const workflowDropdown = !readOnly && (
-              (isChannelPartnerColumn(column) && lead.channel_partner_editable) ||
-              (isSeniorAmbassadorColumn(column) && lead.senior_ambassador_editable) ||
-              ((column.field_key === "stage" || column.field_key === "call_resolution") && Boolean(detailConfiguration))
+            // Keep Details a read-only summary until the user explicitly
+            // chooses Edit details. This includes Ambassador and Senior
+            // Ambassador, so normal viewing shows their saved names instead
+            // of an empty "Select…" dropdown.
+            const workflowDropdown = editing && !readOnly && (
+              isChannelPartnerColumn(column) ||
+              isSeniorAmbassadorColumn(column) ||
+              ((column.field_key === "stage" || column.field_key === "call_resolution") && Boolean(detailConfiguration)) ||
+              (Boolean(detailConfiguration) && column.field_key === "product") ||
+              (canManageAllDetails && Boolean(detailConfiguration) && ["assigned_to", "next_follow_up"].includes(column.field_key))
             );
             return <div key={column.id} className="rounded-xl border border-slate-200 bg-white p-4">
               <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{column.label}</dt>
               <dd className="mt-1">
                 {workflowDropdown
-                  ? <DetailWorkflowDropdown lead={lead} column={column} configuration={detailConfiguration} onSaved={() => { onSaved(); router.refresh(); }} />
-                  : editing && !readOnly && isEditableColumn(column)
+                  ? <DetailWorkflowDropdown lead={lead} column={column} configuration={detailConfiguration} salesPersonOptions={salesPersonOptions} canManageAllDetails={canManageAllDetails} onChannelPartnersSaved={onChannelPartnersSaved} onSeniorAmbassadorSaved={onSeniorAmbassadorSaved} onSaved={() => { onSaved(); router.refresh(); }} />
+                  : editing && !readOnly && isEditableColumn(column, canManageAllDetails)
                     ? <AddressDetailInput column={column} value={value} country={country} state={state} city={city} onCountryChange={(value) => { setCountry(value); setState(""); setCity(""); }} onStateChange={(value) => { setState(value); setCity(""); }} onCityChange={setCity} />
                     : <DetailDisplayValue column={column} value={value} />}
               </dd>
@@ -369,24 +376,128 @@ function DetailsTab({ lead, columns, assignedName, supplementalDetails = [], det
           <SecondaryContactNames leadId={lead.id} assignmentId={lead.assignment_id} refreshVersion={contactVersion} />
           {supplementalDetails.map((field) => <div key={field.label} className="rounded-xl border border-red-100 bg-red-50/40 p-4"><dt className="text-[11px] font-bold uppercase tracking-wide text-red-500">{field.label}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-bold text-slate-800">{field.value || "—"}</dd></div>)}
         </dl>
-        {editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Product, stage, resolution, assignments, and calculated fields remain managed in the Leads table.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving..." : "Save changes"}</button></div>}
+        {editing && !readOnly && <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-4"><p className="mr-auto text-xs text-slate-500">Calculated and system-generated values remain protected. All editable lead fields and dropdowns can be updated here.</p><button type="submit" disabled={isPending} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isPending ? "Saving..." : "Save changes"}</button></div>}
       </form>
       {detailsExtra}
     </div>
   );
 }
 
-function DetailWorkflowDropdown({ lead, column, configuration, onSaved }: { lead: LeadRow; column: LeadColumn; configuration?: DetailEditableConfiguration; onSaved: () => void }) {
-  if (isChannelPartnerColumn(column) && lead.channel_partner_editable) {
-    return <ChannelPartnerSelect leadId={lead.id} assignmentId={lead.assignment_id} names={lead.channel_partner_name} options={lead.channel_partner_options ?? []} selectedIds={lead.channel_partner_ids ?? []} onSaved={() => onSaved()} />;
+function DetailWorkflowDropdown({ lead, column, configuration, salesPersonOptions, canManageAllDetails = false, onSaved, onChannelPartnersSaved, onSeniorAmbassadorSaved }: { lead: LeadRow; column: LeadColumn; configuration?: DetailEditableConfiguration; salesPersonOptions?: { id: string; name: string }[]; canManageAllDetails?: boolean; onSaved: () => void; onChannelPartnersSaved?: (leadId: string, ambassadorIds: string[]) => void; onSeniorAmbassadorSaved?: (leadId: string, seniorAmbassadorId: string) => void }) {
+  if (isChannelPartnerColumn(column)) {
+    return <ChannelPartnerSelect leadId={lead.id} assignmentId={lead.assignment_id} names={lead.channel_partner_name} options={lead.channel_partner_options ?? []} selectedIds={lead.channel_partner_ids ?? []} onSaved={(ambassadorIds) => { onChannelPartnersSaved?.(lead.id, ambassadorIds); onSaved(); }} />;
   }
-  if (isSeniorAmbassadorColumn(column) && lead.senior_ambassador_editable) {
-    return <SeniorAmbassadorSelect leadId={lead.id} assignmentId={lead.assignment_id} selected={lead.senior_ambassador} options={lead.senior_ambassador_options ?? []} onSaved={onSaved} />;
+  if (isSeniorAmbassadorColumn(column)) {
+    return <SeniorAmbassadorSelect leadId={lead.id} assignmentId={lead.assignment_id} selected={lead.senior_ambassador} options={lead.senior_ambassador_options ?? []} onSaved={(seniorAmbassadorId) => { onSeniorAmbassadorSaved?.(lead.id, seniorAmbassadorId); onSaved(); }} />;
   }
   if (!configuration) return null;
+  if (column.field_key === "product") return <DetailProductDropdown lead={lead} products={configuration.products} onSaved={onSaved} />;
+  if (canManageAllDetails && column.field_key === "assigned_to") return <DetailSalesPersonDropdown lead={lead} options={salesPersonOptions ?? []} onSaved={onSaved} />;
+  if (canManageAllDetails && column.field_key === "next_follow_up") return <DetailFollowUpDropdown lead={lead} onSaved={onSaved} />;
   if (column.field_key === "stage") return <DetailStageDropdown lead={lead} configuration={configuration} onSaved={onSaved} />;
   if (column.field_key === "call_resolution") return <DetailResolutionDropdown lead={lead} configuration={configuration} onSaved={onSaved} />;
   return null;
+}
+
+function DetailProductDropdown({ lead, products, onSaved }: { lead: LeadRow; products: DetailEditableConfiguration["products"]; onSaved: () => void }) {
+  const savedProductId = lead.product?.[0]?.id ?? "";
+  const [value, setValue] = useState(savedProductId);
+  const [additionalProductId, setAdditionalProductId] = useState("");
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => setValue(savedProductId), [savedProductId]);
+
+  const save = (productId: string) => startTransition(async () => {
+    const formData = new FormData();
+    formData.set("leadId", lead.id);
+    formData.set("assignmentId", lead.assignment_id);
+    formData.set("productId", productId);
+    setError("");
+    try {
+      await updateLeadProductInline(formData);
+      onSaved();
+    } catch (saveError) {
+      setValue(savedProductId);
+      setError(saveError instanceof Error ? saveError.message : "Unable to update the product.");
+    }
+  });
+
+  const addAnother = (productId: string) => startTransition(async () => {
+    const formData = new FormData();
+    formData.set("leadId", lead.id);
+    formData.set("sourceAssignmentId", lead.assignment_id);
+    formData.set("productId", productId);
+    setError("");
+    try {
+      await addProductToLeadDetails(formData);
+      setAdditionalProductId("");
+      onSaved();
+    } catch (saveError) {
+      setAdditionalProductId("");
+      setError(saveError instanceof Error ? saveError.message : "Unable to add this product.");
+    }
+  });
+
+  const addableProducts = products.filter((product) => product.id !== savedProductId && !lead.product_assignments.some((assignment) => assignment.product?.id === product.id));
+  return <div className="space-y-2"><select aria-label="Product" value={value} disabled={isPending || !products.length} onChange={(event) => { const productId = event.target.value; setValue(productId); if (productId) save(productId); }} className="h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50"><option value="" disabled>Select product</option>{products.map((product) => <option key={product.id} value={product.id}>{displayProductCode(product.code, product.name)}</option>)}</select><select aria-label="Add another product" value={additionalProductId} disabled={isPending || !addableProducts.length} onChange={(event) => { const productId = event.target.value; setAdditionalProductId(productId); if (productId) addAnother(productId); }} className="h-8 w-full rounded border border-dashed border-red-200 bg-red-50/40 px-2 text-xs font-bold text-red-600 outline-none focus:border-red-400 disabled:bg-slate-50 disabled:text-slate-400"><option value="">{addableProducts.length ? "+ Add another product" : "All products already added"}</option>{addableProducts.map((product) => <option key={product.id} value={product.id}>{displayProductCode(product.code, product.name)}</option>)}</select>{error && <p className="mt-1 text-[11px] font-bold text-red-600">{error}</p>}</div>;
+}
+
+function DetailSalesPersonDropdown({ lead, options, onSaved }: { lead: LeadRow; options: { id: string; name: string }[]; onSaved: () => void }) {
+  const savedAssigneeId = lead.assigned_to ?? "";
+  const [value, setValue] = useState(savedAssigneeId);
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => setValue(savedAssigneeId), [savedAssigneeId]);
+
+  const save = (assigneeId: string) => startTransition(async () => {
+    const formData = new FormData();
+    formData.set("assignmentId", lead.assignment_id);
+    formData.set("assigneeId", assigneeId);
+    setError("");
+    try {
+      await manuallyAssignLeads(formData);
+      onSaved();
+    } catch (saveError) {
+      setValue(savedAssigneeId);
+      setError(saveError instanceof Error ? saveError.message : "Unable to assign this lead.");
+    }
+  });
+
+  if (!options.length) return <span className="text-sm font-bold text-slate-500">Unassigned</span>;
+  return <div><select aria-label="Assigned sales person" value={value} disabled={isPending} onChange={(event) => { const assigneeId = event.target.value; setValue(assigneeId); if (assigneeId && assigneeId !== savedAssigneeId) save(assigneeId); }} className="h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50"><option value="" disabled>Choose sales person</option>{options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>{error && <p className="mt-1 text-[11px] font-bold text-red-600">{error}</p>}</div>;
+}
+
+function DetailFollowUpDropdown({ lead, onSaved }: { lead: LeadRow; onSaved: () => void }) {
+  const savedValue = toDateTimeLocal(lead.next_follow_up_at);
+  const [value, setValue] = useState(savedValue);
+  const [error, setError] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => setValue(savedValue), [savedValue]);
+
+  const save = () => {
+    if (!value) {
+      setError("Choose a follow-up date and time.");
+      return;
+    }
+    startTransition(async () => {
+      const formData = new FormData();
+      formData.set("leadId", lead.id);
+      formData.set("assignmentId", lead.assignment_id);
+      formData.set("followUpAt", value);
+      setError("");
+      try {
+        await updateLeadFollowUp(formData);
+        onSaved();
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "Unable to save the follow-up date.");
+      }
+    });
+  };
+
+  return <div className="flex flex-wrap gap-2"><input aria-label="Next follow-up" type="datetime-local" value={value} disabled={isPending} onChange={(event) => setValue(event.target.value)} className="h-9 min-w-0 flex-1 rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50" /><button type="button" disabled={isPending || !value || value === savedValue} onClick={save} className="h-9 rounded border border-red-200 bg-white px-2.5 text-xs font-extrabold text-red-600 hover:bg-red-50 disabled:opacity-50">{isPending ? "Saving..." : "Save"}</button>{error && <p className="basis-full text-[11px] font-bold text-red-600">{error}</p>}</div>;
 }
 
 function DetailStageDropdown({ lead, configuration, onSaved }: { lead: LeadRow; configuration: DetailEditableConfiguration; onSaved: () => void }) {
@@ -551,7 +662,7 @@ function TranscriptTab({ leadId, selectedAssignmentId, assignments, transcripts,
   return <section className="max-w-4xl"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="text-base font-extrabold text-slate-900">Unassigned transcripts</h3><p className="mt-1 text-xs text-slate-500">Attach a transcript to {selectedProduct}. Once attached it moves to the call in Activity, under View transcript.</p></div><button type="button" onClick={syncAll} disabled={isPending} className="h-9 rounded-lg border border-red-200 bg-white px-3 text-xs font-extrabold text-red-600 disabled:opacity-50">{isPending ? "Syncing..." : "Sync transcripts"}</button></div><form onSubmit={syncOne} className="mt-3 flex gap-2 rounded-xl border border-slate-200 bg-white p-3"><input value={callId} onChange={(event) => setCallId(event.target.value)} inputMode="numeric" placeholder="Altus call ID" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" /><button type="submit" disabled={isPending || !callId} className="h-9 rounded-lg border border-red-200 px-3 text-xs font-extrabold text-red-600 disabled:opacity-50">Sync call</button></form>{message && <p className="mt-3 text-xs font-bold text-emerald-700">{message}</p>}<div className="mt-4 space-y-3">{unassigned.length ? unassigned.map((transcript) => <article key={transcript.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-extrabold text-slate-700">Altus call #{transcript.altus_call_id}</p><button type="button" disabled={isPending} onClick={() => attach(transcript.id)} className="rounded border border-red-200 px-2 py-1 text-[10px] font-extrabold text-red-600 disabled:opacity-50">Attach to {selectedProduct}</button></div><pre className="mt-3 whitespace-pre-wrap font-sans text-sm leading-6 text-slate-600">{transcript.transcript_text}</pre></article>) : <p className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-xs text-slate-500">No unassigned transcripts. Attached transcripts are on their calls in Activity.</p>}</div></section>;
 }
 
-function DetailInput({ column, value }: { column: LeadColumn; value: string }) { const className = "mt-1 h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400"; if (column.field_type === "dropdown") return <select name={`field:${column.id}`} defaultValue={value} className={className}><option value="">Select</option>{(column.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}</select>; if (column.field_type === "checkbox") return <label className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><input name={`field:${column.id}`} type="checkbox" value="true" defaultChecked={value === "true"} className="h-4 w-4 rounded border-slate-300 accent-red-600" />Yes</label>; if (column.field_type === "textarea") return <textarea name={`field:${column.id}`} defaultValue={value} className="mt-1 min-h-20 w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400" />; return <input name={`field:${column.id}`} type={column.field_type === "date" ? "date" : column.field_type === "number" ? "number" : "text"} inputMode={column.field_type === "link" ? "url" : undefined} placeholder={column.field_type === "link" ? "https:// or www." : undefined} pattern={column.field_type === "link" ? "(https://|www\\.).+" : undefined} title={column.field_type === "link" ? "Start the link with https:// or www." : undefined} defaultValue={column.field_type === "date" ? dateInputValue(value) : value} className={className} />; }
+function DetailInput({ column, value }: { column: LeadColumn; value: string }) { const className = "mt-1 h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400"; if (column.field_type === "dropdown") return <select name={`field:${column.id}`} defaultValue={value} className={className}><option value="">Select</option>{(column.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}</select>; if (column.field_type === "checkbox") return <label className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><input name={`field:${column.id}`} type="checkbox" value="true" defaultChecked={value === "true"} className="h-4 w-4 rounded border-slate-300 accent-red-600" />Yes</label>; if (column.field_type === "textarea" || column.field_type === "long_text") return <textarea name={`field:${column.id}`} defaultValue={value} className="mt-1 min-h-20 w-full rounded border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400" />; return <input name={`field:${column.id}`} type={column.field_type === "date" ? "date" : column.field_type === "number" ? "number" : "text"} inputMode={column.field_type === "link" ? "url" : undefined} placeholder={column.field_type === "link" ? "https:// or www." : undefined} pattern={column.field_type === "link" ? "(https://|www\\.).+" : undefined} title={column.field_type === "link" ? "Start the link with https:// or www." : undefined} defaultValue={column.field_type === "date" ? dateInputValue(value) : value} className={className} />; }
 function AddressDetailInput({ column, value, country, state, city, onCountryChange, onStateChange, onCityChange }: { column: LeadColumn; value: string; country: string; state: string; city: string; onCountryChange: (value: string) => void; onStateChange: (value: string) => void; onCityChange: (value: string) => void }) {
   const field = leadAddressFieldKeyForColumn(column);
   const className = "mt-1 h-9 w-full rounded border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-red-400 disabled:cursor-not-allowed disabled:bg-slate-50";
@@ -569,7 +680,7 @@ function DetailDisplayValue({ column, value }: { column: LeadColumn; value: stri
 }
 function isLeadNumberColumn(column: LeadColumn) { return column.field_key === "lead_number" || ["lead no", "lead number"].includes(column.label.trim().toLowerCase()); }
 function isLeadAcquisitionDateColumn(column: LeadColumn) { return column.field_key === "lead_acquisition_date" || column.label.trim().toLowerCase() === "lead acquisition date"; }
-function isEditableColumn(column: LeadColumn) { return !isChannelPartnerColumn(column) && !isSeniorAmbassadorColumn(column) && !column.read_only && !column.computed_from?.length && !isLeadNumberColumn(column) && !isLeadAcquisitionDateColumn(column) && !["product", "stage", "call_resolution", "assigned_to", "next_follow_up", "created_at"].includes(column.field_key); }
+function isEditableColumn(column: LeadColumn, canManageAllDetails = false) { return !isChannelPartnerColumn(column) && !isSeniorAmbassadorColumn(column) && (!column.read_only || canManageAllDetails) && !column.computed_from?.length && !isLeadNumberColumn(column) && !isLeadAcquisitionDateColumn(column) && !["product", "stage", "call_resolution", "assigned_to", "next_follow_up", "created_at"].includes(column.field_key); }
 function detailValue(lead: LeadRow, column: LeadColumn, assignedName?: string) { if (isChannelPartnerColumn(column)) return lead.channel_partner_name ?? ""; if (isSeniorAmbassadorColumn(column)) return lead.senior_ambassador?.name ?? ""; if (column.computed_from?.length) return column.computed_from.map((field) => field === "first_name" ? lead.first_name : field === "last_name" ? lead.last_name : field === "email" ? lead.email : field === "phone" ? lead.phone : lead.custom_data?.[field]).filter((value): value is string | number => typeof value === "string" || typeof value === "number").join(" "); if (isLeadNumberColumn(column)) return lead.lead_number ? `L-${lead.lead_number}` : ""; if (isLeadAcquisitionDateColumn(column)) return formatCrmDate(lead.created_at); switch (column.field_key) { case "lead_name": return [lead.first_name, lead.last_name].filter(Boolean).join(" "); case "first_name": return lead.first_name; case "last_name": return lead.last_name ?? ""; case "email": return lead.email ?? ""; case "phone": return lead.phone ?? ""; case "product": return lead.product?.[0]?.name ?? lead.product?.[0]?.code ?? ""; case "stage": return lead.stage?.[0]?.name ?? ""; case "call_resolution": return lead.resolution?.[0]?.name ?? ""; case "assigned_to": return assignedName ?? ""; case "focused_on": return lead.focused_on ? formatCrmDate(lead.focused_on) : ""; case "last_called_on": case "last_called_at": return lead.last_called_at ? formatCrmDate(lead.last_called_at) : ""; case "next_follow_up": return lead.next_follow_up_at ? formatCrmDate(lead.next_follow_up_at) : ""; case "assigned_at": return lead.assigned_at ? formatCrmDate(lead.assigned_at) : ""; case "created_at": return formatCrmDate(lead.created_at); default: return storedDetailValue(lead.custom_data?.[column.field_key]); } }
 function dateInputValue(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10); }
 function FollowUpTab({ leadId, assignmentId, followUpAt, onSaved }: { leadId: string; assignmentId: string; followUpAt: string | null; onSaved: (value: string) => void }) {

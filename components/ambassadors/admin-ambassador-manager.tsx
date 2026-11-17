@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
 import { Download, FileSpreadsheet, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { createAmbassador, deleteAmbassadorRecords, importAmbassadors, updateAmbassadorDetails, type AmbassadorInput } from "@/app/dashboard/my-ambassador/actions";
 import type { LeadColumn, LeadRow } from "@/components/leads/leads-table";
@@ -96,9 +96,21 @@ function AmbassadorDetailsEditor({ record, salesPeople }: { record: AmbassadorRe
   </section>;
 }
 
-export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assignedNames }: { rows: AmbassadorRecord[]; salesPeople: SalesPerson[]; detailColumns: LeadColumn[]; assignedNames: Record<string, string> }) {
+export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assignedNames, products = [], stages = [], productResolutions = [] }: { rows: AmbassadorRecord[]; salesPeople: SalesPerson[]; detailColumns: LeadColumn[]; assignedNames: Record<string, string>; products?: { id: string; code: string; name: string }[]; stages?: { id: string; product_id: string; name: string }[]; productResolutions?: { product_id: string; resolution_id: string; resolution_name: string }[] }) {
   const [mode, setMode] = useState<"manual" | "bulk" | null>(null); const [editing, setEditing] = useState<AmbassadorRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<AmbassadorRecord | null>(null);
+  const [partnerDetail, setPartnerDetail] = useState<{ leadId: string; name: string | null; ids: string[]; options: { id: string; name: string }[]; editable: boolean; senior: { id: string; name: string } | null; seniorEditable: boolean } | null>(null);
+  const loadPartnerDetail = async (leadId: string) => {
+    try {
+      const response = await fetch("/api/leads/channel-partners", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadIds: [leadId] }), cache: "no-store" });
+      const data = await response.json() as { ok?: boolean; partners?: Record<string, string | null>; selected?: Record<string, string[]>; options?: { id: string; name: string }[]; editable?: boolean; seniors?: Record<string, { id: string; name: string } | null>; seniorEditable?: boolean };
+      if (!response.ok || !data.ok) return;
+      setPartnerDetail({ leadId, name: data.partners?.[leadId] ?? null, ids: data.selected?.[leadId] ?? [], options: data.options ?? [], editable: data.editable ?? false, senior: data.seniors?.[leadId] ?? null, seniorEditable: data.seniorEditable ?? false });
+    } catch { /* keep the previously loaded Ambassador selection on a transient fetch failure */ }
+  };
+  useEffect(() => {
+    if (detailRecord) void loadPartnerDetail(detailRecord.leadId);
+  }, [detailRecord]);
   const [file, setFile] = useState<File | null>(null); const [message, setMessage] = useState(""); const [pending, setPending] = useState(false);
   const [inlineMessage, setInlineMessage] = useState("");
   const [isSavingInline, startSavingInline] = useTransition();
@@ -251,11 +263,20 @@ export function AdminAmbassadorManager({ rows, salesPeople, detailColumns, assig
     {mode === "manual" && <Modal title="Add Ambassador" onClose={() => setMode(null)}><p className="mt-1 text-sm text-slate-500">First and Last Name are stored separately and displayed as Full Name.</p><AmbassadorForm value={emptyInput()} salesPeople={salesPeople} submitLabel="Create Ambassador" onCancel={() => setMode(null)} onSubmit={createAmbassador} /></Modal>}
     {editing && <Modal title={`Edit ${editing.fullName}`} onClose={() => setEditing(null)}><AmbassadorForm value={editing} salesPeople={salesPeople} submitLabel="Save changes" onCancel={() => setEditing(null)} onSubmit={(input) => updateAmbassadorDetails(editing.assignmentId, input)} /></Modal>}
     {mode === "bulk" && <Modal title="Bulk Import Ambassadors" onClose={() => setMode(null)}><p className="mt-1 text-sm text-slate-500">Download the template, complete the listed columns, and upload up to 500 records.</p><button type="button" onClick={downloadTemplate} className="mt-4 inline-flex items-center gap-2 text-xs font-extrabold text-red-600 underline"><Download className="h-4 w-4" />Download Excel template</button><form onSubmit={importFile} className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4"><FileSpreadsheet className="h-6 w-6 text-red-600" /><label className="mt-2 block text-xs font-bold text-slate-700">Excel file<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full text-xs" /></label>{message && <p className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">{message}</p>}<div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setMode(null)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-xs font-bold">Cancel</button><button disabled={pending} className="h-9 rounded-lg bg-[#d90000] px-4 text-xs font-extrabold text-white disabled:opacity-60">{pending ? "Importing…" : "Import records"}</button></div></form></Modal>}
-    {detailRecord && <LeadDetailPanel lead={toLeadRow(detailRecord)} columns={detailColumns} assignedNames={assignedNames} supplementalDetails={[
+    {detailRecord && <LeadDetailPanel lead={{
+      ...toLeadRow(detailRecord),
+      channel_partner_name: partnerDetail?.leadId === detailRecord.leadId ? partnerDetail.name : null,
+      channel_partner_ids: partnerDetail?.leadId === detailRecord.leadId ? partnerDetail.ids : [],
+      channel_partner_options: partnerDetail?.leadId === detailRecord.leadId ? partnerDetail.options : [],
+      channel_partner_editable: partnerDetail?.leadId === detailRecord.leadId && partnerDetail.editable,
+      senior_ambassador: partnerDetail?.leadId === detailRecord.leadId ? partnerDetail.senior : null,
+      senior_ambassador_options: partnerDetail?.leadId === detailRecord.leadId ? partnerDetail.options : [],
+      senior_ambassador_editable: partnerDetail?.leadId === detailRecord.leadId && partnerDetail.seniorEditable,
+    }} columns={detailColumns} assignedNames={assignedNames} supplementalDetails={[
       { label: "Commission", value: detailRecord.commission || "—" }, { label: "Commission Notes", value: detailRecord.commissionNotes || "—" }, { label: "Priority", value: detailRecord.priority || "—" },
       { label: "Agreement Status", value: detailRecord.agreementStatus || "—" }, { label: "Signed Agreement Link", value: detailRecord.signedAgreementLink || "—" }, { label: "Last Called On", value: formatDate(detailRecord.lastCalledOn || "") },
       { label: "Last Call Notes", value: detailRecord.lastCallNotes || "—" }, { label: "Remark", value: detailRecord.remark || "—" }, { label: "Manan Sir Notes", value: detailRecord.mananSirNotes || "—" },
       { label: "Target Leads", value: detailRecord.targetLeads || "0" }, { label: "Target Demo", value: detailRecord.targetDemo || "0" }, { label: "Target Proposals", value: detailRecord.targetProposals || "0" }, { label: "Target Sales", value: detailRecord.targetSales || "0" },
-    ]} detailsExtra={<AmbassadorDetailsEditor record={detailRecord} salesPeople={salesPeople} />} initialTab="details" onClose={() => setDetailRecord(null)} />}
+    ]} detailConfiguration={{ products, stages, productResolutions }} detailsExtra={<AmbassadorDetailsEditor record={detailRecord} salesPeople={salesPeople} />} initialTab="details" onClose={() => setDetailRecord(null)} onChannelPartnersSaved={() => void loadPartnerDetail(detailRecord.leadId)} onSeniorAmbassadorSaved={() => void loadPartnerDetail(detailRecord.leadId)} />}
   </>;
 }

@@ -25,14 +25,17 @@ type SearchResult = {
   email: string | null;
   product: string | null;
   stage: string | null;
+  type: "lead" | "ambassador";
 };
+type UserResult = { id: string; name: string; email: string | null; phone: string | null };
 
-export function LeadNavTools() {
+export function LeadNavTools({ isAdmin = false }: { isAdmin?: boolean }) {
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [userResults, setUserResults] = useState<UserResult[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [assignmentPopupsEnabled, setAssignmentPopupsEnabled] = useState(true);
   const [assignmentPopup, setAssignmentPopup] = useState<AssignmentPopup | null>(null);
@@ -82,6 +85,7 @@ export function LeadNavTools() {
     const timer = window.setTimeout(async () => {
       if (query.trim().length < 2) {
         setResults([]);
+        setUserResults([]);
         return;
       }
       const response = await fetch(
@@ -90,8 +94,12 @@ export function LeadNavTools() {
       );
       const payload = (await response.json().catch(() => null)) as {
         results?: SearchResult[];
+        users?: UserResult[];
       } | null;
-      if (response.ok) setResults(payload?.results ?? []);
+      if (response.ok) {
+        setResults(payload?.results ?? []);
+        setUserResults(payload?.users ?? []);
+      }
     }, 250);
     return () => window.clearTimeout(timer);
   }, [query]);
@@ -135,8 +143,8 @@ export function LeadNavTools() {
             setSearchOpen((open) => !open);
             setNotificationsOpen(false);
           }}
-          aria-label="Search my assigned leads"
-          title="Search my assigned leads"
+          aria-label={isAdmin ? "Search leads, Ambassadors, and users" : "Search my assigned leads and Ambassadors"}
+          title={isAdmin ? "Search leads, Ambassadors, and users" : "Search my assigned leads and Ambassadors"}
           className="grid h-9 w-9 place-items-center rounded-full text-[#182035] hover:bg-slate-100"
         >
           <Search className="h-4 w-4" />
@@ -149,7 +157,7 @@ export function LeadNavTools() {
                 ref={inputRef}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search your assigned leads..."
+                placeholder={isAdmin ? "Search leads, Ambassadors, and users..." : "Search your assigned leads and Ambassadors..."}
                 className="h-8 w-full text-sm font-medium outline-none"
               />
               <button
@@ -160,37 +168,62 @@ export function LeadNavTools() {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="max-h-72 overflow-y-auto py-1">
+            <div className="max-h-96 overflow-y-auto py-1">
               {query.trim().length < 2 ? (
                 <p className="px-2 py-5 text-center text-xs text-slate-400">
-                  Search by any lead detail, product, stage, or custom field.
+                  {isAdmin
+                    ? "Search by name, phone, email, product, stage, or role across the whole system."
+                    : "Search by any lead detail, product, stage, or custom field."}
                 </p>
-              ) : results.length ? (
-                results.map((result) => (
-                  <Link
-                    key={result.assignmentId}
-                    href="/dashboard/leads"
-                    onClick={() => setSearchOpen(false)}
-                    className="block rounded-lg px-2 py-2 hover:bg-red-50"
-                  >
-                    <p className="text-xs font-extrabold text-slate-800">
-                      {result.name}{" "}
-                      {result.product && (
-                        <span className="ml-1 text-red-600">
-                          · {result.product}
+              ) : results.length || userResults.length ? (
+                <>
+                  {results.map((result) => (
+                    <Link
+                      key={result.assignmentId}
+                      href={result.type === "ambassador" ? "/dashboard/my-ambassador" : "/dashboard/leads"}
+                      onClick={() => setSearchOpen(false)}
+                      className="block rounded-lg px-2 py-2 hover:bg-red-50"
+                    >
+                      <p className="text-xs font-extrabold text-slate-800">
+                        <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-500">
+                          {result.type === "ambassador" ? "Ambassador" : "Lead"}
                         </span>
-                      )}
-                    </p>
-                    <p className="mt-0.5 truncate text-[10px] text-slate-500">
-                      {[result.phone, result.email, result.stage]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                  </Link>
-                ))
+                        {result.name}{" "}
+                        {result.product && (
+                          <span className="ml-1 text-red-600">
+                            · {result.product}
+                          </span>
+                        )}
+                      </p>
+                      <p className="mt-0.5 truncate text-[10px] text-slate-500">
+                        {[result.phone, result.email, result.stage]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </Link>
+                  ))}
+                  {userResults.map((result) => (
+                    <Link
+                      key={result.id}
+                      href={`/dashboard/users?q=${encodeURIComponent(result.name)}`}
+                      onClick={() => setSearchOpen(false)}
+                      className="block rounded-lg px-2 py-2 hover:bg-red-50"
+                    >
+                      <p className="text-xs font-extrabold text-slate-800">
+                        <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-slate-500">
+                          User
+                        </span>
+                        {result.name}
+                      </p>
+                      <p className="mt-0.5 truncate text-[10px] text-slate-500">
+                        {[result.phone, result.email].filter(Boolean).join(" · ")}
+                      </p>
+                    </Link>
+                  ))}
+                </>
               ) : (
                 <p className="px-2 py-5 text-center text-xs text-slate-400">
-                  No assigned leads found.
+                  {isAdmin ? "No leads, Ambassadors, or users found." : "No assigned leads or Ambassadors found."}
                 </p>
               )}
             </div>

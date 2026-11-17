@@ -67,17 +67,16 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const partnerFocusByLead = new Map((partnerLinksResult.data ?? []).map((link) => [link.lead_id, link.focused_on]));
   const partnerLeadIds = [...partnerFocusByLead.keys()];
   const selectedOwnerId = selectedAssigneeId ?? selectedManagerMemberId;
-  // Keep Ambassador work out of the Admin Lead Master before pagination.
-  // Previously the page fetched the newest parent leads first and then hid
-  // Ambassador rows in `normalizedLeads`. A recent block of Ambassador
-  // records could therefore make the first table page appear empty despite
-  // many normal distributed leads existing below it.
+  // Admin Lead Master intentionally shows Ambassador work mixed in with
+  // normal leads. The DB query and the `normalizedLeads` filter below must
+  // stay in agreement on this (both include or both exclude Ambassador rows)
+  // so pagination never hides a filtered-out row behind a false page count.
   const isAdminLeadMaster = isAdmin && !showTeamLeads;
   const assignmentsJoin = selectedOwnerId || isAdminLeadMaster ? "!inner" : "";
   const leadDataClient = isAdmin ? adminDataClient! : isViewingManagerTeamMember ? teamAdmin! : supabase;
   const productJoin = isAdminLeadMaster ? "!inner" : "";
   let leadsPromise = leadDataClient.from("leads").select(`id, lead_number, first_name, last_name, email, phone, created_at, custom_data, assignments:lead_product_assignments${assignmentsJoin}(id, is_ambassador, assigned_to, assigned_at, focused_on, next_follow_up_at, is_new_inbound, product:lead_products${productJoin}(id, code, name), stage:lead_stages(name), resolution:lead_resolutions(name))`).order("created_at", { ascending: false }).range(offset, offset + pageSize);
-  if (isAdminLeadMaster) leadsPromise = leadsPromise.eq("assignments.is_ambassador", false).neq("assignments.product.code", "UNCATEGORIZED");
+  if (isAdminLeadMaster) leadsPromise = leadsPromise.neq("assignments.product.code", "UNCATEGORIZED");
   if (isAdminLeadMaster && searchQuery) {
     // Restrict special PostgREST filter characters while preserving useful
     // name, email, and phone searches. This runs before the page range.
@@ -156,7 +155,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     // Do Not Call work is deliberately kept out of normal Lead Master views.
     // A lead can still be visible here through any other active product assignment.
     const includeTeamAmbassadors = showTeamLeads && selectedWorkspaceView === "ambassador";
-    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace ? true : includeTeamAmbassadors ? item.is_ambassador : (!item.is_ambassador && !isDoNotCallResolution(item.resolution) && !isUncategorizedProduct(item.product)));
+    const assignments = (Array.isArray(lead.assignments) ? lead.assignments : []).filter((item) => ambassadorWorkspace ? true : includeTeamAmbassadors ? item.is_ambassador : (isAdminLeadMaster || !item.is_ambassador) && !isDoNotCallResolution(item.resolution) && !isUncategorizedProduct(item.product));
     const assignment = assignments[0];
     if (!assignment) return [];
     return [{
