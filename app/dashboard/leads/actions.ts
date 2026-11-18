@@ -4769,7 +4769,9 @@ export async function scheduleLeadGoogleMeet(
     revalidatePath("/dashboard/leads");
     return {
       ok: true,
-      message: "Google Meet created and Calendar invitation sent.",
+      message: meeting.autoRecordingAccepted
+        ? "Google Meet created and Calendar invitation sent. This meeting will record automatically."
+        : "Google Meet created and Calendar invitation sent. Google did not confirm auto-recording for this meeting — your Workspace plan may not support it.",
       meetUrl: meeting.meetUrl,
     };
   } catch (error) {
