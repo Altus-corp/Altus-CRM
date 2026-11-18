@@ -106,7 +106,7 @@ Enter this code on the Altus CRM password reset page. It expires automatically. 
   await transporter.sendMail({ from: smtp.from, to: email, subject, text });
 }
 
-export async function sendLeadMeetingInvitation({ email, name, topic, agenda, startTime, duration, joinUrl }: { email: string; name: string; topic: string; agenda: string; startTime: string; duration: number; joinUrl: string }) {
+export async function sendLeadMeetingInvitation({ email, name, topic, agenda, startTime, duration, joinUrl }: { email: string | string[]; name: string; topic: string; agenda: string; startTime: string; duration: number; joinUrl: string }) {
   const smtp = getSmtpConfig();
   const transporter = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.port === 465, auth: { user: smtp.user, pass: smtp.pass } });
   await transporter.sendMail({

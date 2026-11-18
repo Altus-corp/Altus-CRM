@@ -25,9 +25,10 @@ async function getGoogleCalendarAccessToken() {
   return result.access_token;
 }
 
-export async function createGoogleMeetEvent(input: { topic: string; description: string; startTime: string; duration: number; attendeeEmail: string }) {
+export async function createGoogleMeetEvent(input: { topic: string; description: string; startTime: string; duration: number; attendeeEmails: string[] }) {
   const accessToken = await getGoogleCalendarAccessToken();
   const endTime = new Date(new Date(input.startTime).getTime() + input.duration * 60_000).toISOString();
+  const attendees = [...new Set(input.attendeeEmails.map((email) => email.trim().toLowerCase()).filter(Boolean))].map((email) => ({ email }));
   const response = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -36,7 +37,7 @@ export async function createGoogleMeetEvent(input: { topic: string; description:
       description: input.description,
       start: { dateTime: input.startTime, timeZone: "Asia/Kolkata" },
       end: { dateTime: endTime, timeZone: "Asia/Kolkata" },
-      attendees: [{ email: input.attendeeEmail }],
+      attendees,
       conferenceData: { createRequest: { requestId: crypto.randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } } },
     }),
     cache: "no-store",
@@ -45,4 +46,18 @@ export async function createGoogleMeetEvent(input: { topic: string; description:
   const meetUrl = result.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video")?.uri;
   if (!response.ok || !result.id || !meetUrl) throw new Error(result.error?.message || "Google Calendar could not create the Meet link.");
   return { eventId: result.id, meetUrl, calendarUrl: result.htmlLink ?? null };
+}
+
+export async function getGoogleMeetRecordingUrl(eventId: string) {
+  const accessToken = await getGoogleCalendarAccessToken();
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  const event = await response.json() as { attachments?: { fileUrl?: string; title?: string; mimeType?: string }[]; error?: { message?: string } };
+  if (!response.ok) throw new Error(event.error?.message || "Could not check for the Meet recording.");
+  const recording = (event.attachments ?? []).find(
+    (attachment) => attachment.mimeType?.startsWith("video/") || attachment.title?.toLowerCase().includes("recording"),
+  );
+  return recording?.fileUrl ?? null;
 }

@@ -4491,6 +4491,12 @@ export async function scheduleLeadZoomMeeting(
   const startTime = String(formData.get("startTime") ?? "");
   const duration = Number(formData.get("duration") ?? 0);
   const startDate = new Date(startTime);
+  const extraEmails = [...new Set(
+    String(formData.get("extraEmails") ?? "")
+      .split(/[,\s]+/)
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
   if (
     !leadId ||
     !topic ||
@@ -4506,6 +4512,11 @@ export async function scheduleLeadZoomMeeting(
       ok: false,
       message:
         "Enter a title, valid meeting time, and duration between 5 and 480 minutes.",
+    };
+  if (extraEmails.length > 20 || extraEmails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))
+    return {
+      ok: false,
+      message: "Enter valid email addresses (up to 20), separated by commas.",
     };
 
   const { supabase, lead, userId } = await getEditableLead(
@@ -4557,10 +4568,11 @@ export async function scheduleLeadZoomMeeting(
       [leadDetails.first_name, leadDetails.last_name]
         .filter(Boolean)
         .join(" ") || "there";
+    const allInviteEmails = [...new Set([leadDetails.email, ...extraEmails])];
     let inviteMessage = "Invitation email sent.";
     try {
       await sendLeadMeetingInvitation({
-        email: leadDetails.email,
+        email: allInviteEmails,
         name,
         topic,
         agenda,
@@ -4580,7 +4592,7 @@ export async function scheduleLeadZoomMeeting(
         lead_id: lead.lead_id,
         lead_product_assignment_id: assignmentId,
         activity_type: "zoom_meeting_scheduled",
-        note: `Zoom meeting scheduled: ${topic}. ${inviteMessage}`,
+        note: `Zoom meeting scheduled: ${topic}. ${inviteMessage} Recipients: ${allInviteEmails.join(", ")}.`,
         metadata: {
           zoom_meeting_id: String(meeting.id),
           join_url: meeting.join_url,
@@ -4613,6 +4625,12 @@ export async function scheduleLeadGoogleMeet(
   const startTime = String(formData.get("startTime") ?? "");
   const duration = Number(formData.get("duration") ?? 0);
   const startDate = new Date(startTime);
+  const extraEmails = [...new Set(
+    String(formData.get("extraEmails") ?? "")
+      .split(/[,\s]+/)
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  )];
   if (
     !leadId ||
     !assignmentId ||
@@ -4630,6 +4648,11 @@ export async function scheduleLeadGoogleMeet(
       message:
         "Enter a title, valid meeting time, and duration between 5 and 480 minutes.",
     };
+  if (extraEmails.length > 20 || extraEmails.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))
+    return {
+      ok: false,
+      message: "Enter valid email addresses (up to 20), separated by commas.",
+    };
   const { supabase, lead, userId } = await getEditableLead(
     leadId,
     assignmentId,
@@ -4645,13 +4668,21 @@ export async function scheduleLeadGoogleMeet(
       message:
         "This lead needs an email address before sending a Google Calendar invitation.",
     };
+  const salesPersonIds = [...new Set([userId, lead.assigned_to].filter((id): id is string => Boolean(id)))];
+  const salesPersonAuthResults = await Promise.all(
+    salesPersonIds.map((id) => supabase.auth.admin.getUserById(id)),
+  );
+  const salesPersonEmails = salesPersonAuthResults
+    .map((result) => result.data.user?.email)
+    .filter((email): email is string => Boolean(email));
+  const allAttendeeEmails = [...new Set([leadDetails.email, ...salesPersonEmails, ...extraEmails])];
   try {
     const meeting = await createGoogleMeetEvent({
       topic,
       description,
       startTime: startDate.toISOString(),
       duration,
-      attendeeEmail: leadDetails.email,
+      attendeeEmails: allAttendeeEmails,
     });
     const { error: saveError } = await supabase
       .from("lead_google_meetings")
@@ -4674,7 +4705,7 @@ export async function scheduleLeadGoogleMeet(
         lead_id: lead.lead_id,
         lead_product_assignment_id: assignmentId,
         activity_type: "google_meet_scheduled",
-        note: `Google Meet scheduled: ${topic}. Calendar invitation sent to ${leadDetails.email}.`,
+        note: `Google Meet scheduled: ${topic}. Calendar invitation sent to ${allAttendeeEmails.join(", ")}.`,
         metadata: {
           google_event_id: meeting.eventId,
           meet_url: meeting.meetUrl,
