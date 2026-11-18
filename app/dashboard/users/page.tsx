@@ -41,6 +41,8 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
     return {
       id: user.id,
       name,
+      firstName: profile?.first_name ?? "",
+      lastName: profile?.last_name ?? "",
       email: user.email ?? "—",
       phone: profile?.phone ?? "—",
       roles: rolesByUserId.get(user.id) ?? [],

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { LeadsTable, type EditableConfiguration, type LeadColumn, type LeadRow } from "./leads-table";
+import { LeadsTable, leadMatchesSearch, type EditableConfiguration, type LeadColumn, type LeadRow } from "./leads-table";
 import { deleteLeads, manuallyAssignLeads } from "@/app/dashboard/leads/actions";
 import { setDndArchiveStatus } from "@/app/dashboard/dnd-master/actions";
 
@@ -16,7 +16,9 @@ export function DndMasterTable({ rows, columns, detailColumns, assignedNames, ed
   const router = useRouter();
   const [detailLead, setDetailLead] = useState<LeadRow | null>(null);
   const [selection, setSelectedIds] = useState<string[]>([]);
-  const visibleIds = new Set(rows.map((row) => row.lead.assignment_id));
+  const [search, setSearch] = useState("");
+  const filteredRows = rows.filter((row) => leadMatchesSearch(row.lead, search));
+  const visibleIds = new Set(filteredRows.map((row) => row.lead.assignment_id));
   const selectedIds = selection.filter((id) => visibleIds.has(id));
   const [isPending, startTransition] = useTransition();
   const [actionResult, setActionResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -66,7 +68,15 @@ export function DndMasterTable({ rows, columns, detailColumns, assignedNames, ed
         <button type="button" disabled={isPending || !selectedIds.length} onClick={() => manageSelected("delete")} className="h-8 rounded bg-[#d90000] px-3 text-xs font-extrabold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">Delete selected</button>
       </div>
     </div>}
-    <div className="mt-3"><LeadsTable columns={columns} detailColumns={detailColumns} leads={rows.map((row) => row.lead)} assignedNames={assignedNames} editableConfiguration={editableConfiguration} salesPersonOptions={salesPersonOptions} preferences={preferences} selectedIds={selectedIds} onSelectionChange={!readOnly && (reassignUsers.length > 0 || canManageLeads) ? setSelectedIds : undefined} showHeader={false} readOnly={readOnly} /></div>
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-white p-2 shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
+      <label className="flex h-8 min-w-[210px] flex-1 items-center gap-2 rounded border border-slate-200 px-2.5 text-[10px] text-slate-400">
+        Search
+        <input type="search" aria-label="Search leads" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone, lead number..." className="w-full bg-transparent text-xs text-slate-700 outline-none" />
+      </label>
+      {search && <button type="button" onClick={() => setSearch("")} className="h-8 rounded border border-slate-200 px-2.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50">Clear</button>}
+      <p role="status" className="text-xs font-medium text-slate-500">{filteredRows.length} of {rows.length} shown</p>
+    </div>
+    <div className="mt-3"><LeadsTable columns={columns} detailColumns={detailColumns} leads={filteredRows.map((row) => row.lead)} assignedNames={assignedNames} editableConfiguration={editableConfiguration} salesPersonOptions={salesPersonOptions} preferences={preferences} selectedIds={selectedIds} onSelectionChange={!readOnly && (reassignUsers.length > 0 || canManageLeads) ? setSelectedIds : undefined} showHeader={false} readOnly={readOnly} /></div>
     <div className="hidden mt-3 overflow-x-auto rounded-md bg-white shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
       <table className="w-full min-w-[900px] text-left text-xs">
         <thead className="bg-slate-50 text-[10px] font-extrabold uppercase tracking-wider text-slate-500"><tr>{["Lead No", "Name", "Phone", "Email", "Product", "Marked as", "Marked by", "Marked on", ...(reassignUsers.length ? ["Reassign"] : [])].map((heading) => <th key={heading} className="px-3 py-2.5">{heading}</th>)}</tr></thead>

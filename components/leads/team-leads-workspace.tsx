@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
+import { LeadsTable, leadMatchesSearch, type LeadColumn, type LeadRow } from "./leads-table";
 
 type TeamMember = { id: string; name: string };
 type Product = { id: string; code: string; name: string };
@@ -46,9 +47,10 @@ export function TeamLeadsWorkspace({
   productResolutions: ProductResolution[];
 }) {
   const searchParams = useSearchParams();
+  const [search, setSearch] = useState("");
   const selectedMember = teamMembers.find((member) => member.id === selectedMemberId) ?? null;
   const focusedIds = new Set(focusedLeadIds);
-  const displayedLeads = view === "focused" ? leads.filter((lead) => focusedIds.has(lead.assignment_id)) : leads;
+  const displayedLeads = (view === "focused" ? leads.filter((lead) => focusedIds.has(lead.assignment_id)) : leads).filter((lead) => leadMatchesSearch(lead, search));
 
   const updateRoute = (memberId: string, nextView = view) => {
     const next = new URLSearchParams(searchParams.toString());
@@ -104,6 +106,15 @@ export function TeamLeadsWorkspace({
       </header>
 
       {selectedMember ? (
+        <>
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-white p-2 shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
+          <label className="flex h-8 min-w-[210px] flex-1 items-center gap-2 rounded border border-slate-200 px-2.5 text-[10px] text-slate-400">
+            Search
+            <input type="search" aria-label="Search team member leads" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone, lead number..." className="w-full bg-transparent text-xs text-slate-700 outline-none" />
+          </label>
+          {search && <button type="button" onClick={() => setSearch("")} className="h-8 rounded border border-slate-200 px-2.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50">Clear</button>}
+          <p role="status" className="text-xs font-medium text-slate-500">{displayedLeads.length} of {leads.length} leads</p>
+        </div>
         <div className="mt-3">
           <LeadsTable
             columns={columns}
@@ -114,6 +125,7 @@ export function TeamLeadsWorkspace({
             showHeader={false}
           />
         </div>
+        </>
       ) : (
         <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-12 text-center">
           <p className="text-sm font-extrabold text-slate-700">Choose a team member</p>

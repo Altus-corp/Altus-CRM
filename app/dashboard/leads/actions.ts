@@ -4206,6 +4206,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
     next_follow_up_at?: string | null;
     focused_on?: null;
     stage_id?: string;
+    ringing_streak?: number;
   } = {
     latest_resolution_id: resolutionId,
   };
@@ -4221,6 +4222,19 @@ export async function updateLeadResolutionInline(formData: FormData) {
     .toLowerCase()
     .replace(/[,_-]+/g, " ")
     .replace(/\s+/g, " ");
+  // Five Ringing resolutions in a row (no other resolution in between) sends
+  // the lead back to Admin's unassigned pool, the same release used for
+  // Abandoned. Any other resolution breaks the streak back to zero.
+  const isRinging = normalizedResolution === "ringing";
+  const { data: currentAssignment, error: currentAssignmentError } = await supabase
+    .from("lead_product_assignments")
+    .select("ringing_streak")
+    .eq("id", assignmentId)
+    .single();
+  if (currentAssignmentError) throw new Error(currentAssignmentError.message);
+  const nextRingingStreak = isRinging ? (currentAssignment?.ringing_streak ?? 0) + 1 : 0;
+  const releasesForRingingStreak = isRinging && nextRingingStreak >= 5;
+  update.ringing_streak = releasesForRingingStreak ? 0 : nextRingingStreak;
   const requiresFollowUp =
     /follow\s*up/i.test(normalizedResolution) ||
     normalizedResolution === "verbal yes";
@@ -4291,8 +4305,9 @@ export async function updateLeadResolutionInline(formData: FormData) {
   // Status work remains assigned to its current owner. It is hidden from Lead Master,
   // but administrators and Sales Managers can reassign it from its status workspace.
   // Abandoned work returns to Admin's unassigned pool. The activity trail
-  // below preserves the CRM user who released it and the exact time.
-  const releasesAssignment = isAbandoned;
+  // below preserves the CRM user who released it and the exact time. Five
+  // consecutive Ringing resolutions releases it the same way.
+  const releasesAssignment = isAbandoned || releasesForRingingStreak;
   if (releasesAssignment) update.next_follow_up_at = null;
   // Status-work leads remain owned by the CRM user, but must immediately leave
   // the daily calling list. Lead Master visibility is handled by resolution
@@ -4375,10 +4390,11 @@ export async function updateLeadResolutionInline(formData: FormData) {
       lead_id: leadId,
       lead_product_assignment_id: assignmentId,
       activity_type: "resolution_updated",
-      note: `Activity resolution set to ${resolutionName}.${registeredStageName ? ` Moved to ${registeredStageName}.` : ""}${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
+      note: `Activity resolution set to ${resolutionName}.${registeredStageName ? ` Moved to ${registeredStageName}.` : ""}${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : releasesForRingingStreak ? " Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
       metadata: {
         resolution_id: resolutionId,
         released_to_admin_pool: releasesAssignment,
+        ringing_streak: update.ringing_streak,
       },
       created_by: userId,
     });
@@ -4390,8 +4406,8 @@ export async function updateLeadResolutionInline(formData: FormData) {
         lead_id: leadId,
         lead_product_assignment_id: assignmentId,
         activity_type: "lead_released",
-        note: `Released to Admin's unassigned pool after ${resolutionName}.`,
-        metadata: { resolution_id: resolutionId, released_by: userId },
+        note: releasesForRingingStreak ? "Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : `Released to Admin's unassigned pool after ${resolutionName}.`,
+        metadata: { resolution_id: resolutionId, released_by: userId, released_for_ringing_streak: releasesForRingingStreak },
         created_by: userId,
       });
     if (releaseActivityError) throw new Error(releaseActivityError.message);

@@ -8,6 +8,7 @@ export const requireUser = cache(async () => {
 
     const { data } = await supabase.auth.getClaims();
     const userId = data?.claims.sub;
+    const sessionIssuedAt = data?.claims.iat;
 
     if (!userId) {
         redirect("/login");
@@ -27,7 +28,7 @@ export const requireUser = cache(async () => {
         supabase.auth.getUser(),
         supabase
             .from("profiles")
-            .select("is_suspended, first_name, last_name, full_name")
+            .select("is_suspended, first_name, last_name, full_name, password_changed_at")
             .eq("id", userId)
             .single(),
         supabase
@@ -47,6 +48,20 @@ export const requireUser = cache(async () => {
     if (profileError || profile?.is_suspended) {
         await supabase.auth.signOut();
         redirect("/login?error=account-suspended");
+    }
+
+    // An admin changing this user's password does not revoke an already
+    // issued access token by itself (Supabase validates it by signature,
+    // not against the current password). Comparing this session's issued-at
+    // claim against the stored change time catches it on this user's very
+    // next request and forces them back to login instead of continuing
+    // silently on the old password's session.
+    if (profile?.password_changed_at && sessionIssuedAt) {
+        const passwordChangedAtSeconds = Math.floor(new Date(profile.password_changed_at).getTime() / 1000);
+        if (passwordChangedAtSeconds > sessionIssuedAt) {
+            await supabase.auth.signOut();
+            redirect("/login?error=password-changed");
+        }
     }
 
     if (error || !roles?.length) {

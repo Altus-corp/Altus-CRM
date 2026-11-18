@@ -22,6 +22,24 @@ export type LeadRow = { id: string; lead_number: number | null; assignment_id: s
 export type EditableConfiguration = { products: { id: string; code: string; name: string }[]; stages: { id: string; product_id: string; name: string }[]; productResolutions: { product_id: string; resolution_id: string; resolution_name: string }[] };
 type Preferences = { order: string[]; widths: Record<string, number>; frozen: string[]; hidden: string[]; layoutVersion?: number };
 
+// Shared free-text filter for every leads list (name, phone, email, lead
+// number, product/stage/resolution, and every custom field value), so each
+// workspace searches the same way instead of reimplementing its own subset.
+export function leadMatchesSearch(lead: LeadRow, term: string) {
+  const query = term.trim().toLowerCase();
+  if (!query) return true;
+  const values = [
+    lead.first_name,
+    lead.last_name,
+    lead.email,
+    lead.phone,
+    lead.lead_number ? `L-${lead.lead_number}` : "",
+    ...lead.product_assignments.flatMap((assignment) => [assignment.product?.code, assignment.product?.name, assignment.stage?.name, assignment.resolution?.name]),
+    ...Object.values(lead.custom_data ?? {}),
+  ].filter((value): value is string | number => typeof value === "string" || typeof value === "number");
+  return values.join(" ").toLowerCase().includes(query);
+}
+
 const activityColumn: LeadColumn = { id: "__activity__", field_key: "__activity__", label: "Activity", field_type: "system" };
 const normalColumnName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ");
 const isActivityColumn = (column: LeadColumn) => column.field_key === activityColumn.field_key;

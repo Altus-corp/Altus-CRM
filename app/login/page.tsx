@@ -15,6 +15,7 @@ const errorMessages: Record<string, string> = {
   "invalid-credentials": "Invalid email or password.",
   "not-authorized": "This account does not have a CRM role.",
   "account-suspended": "This account has been suspended. Contact an administrator.",
+  "password-changed": "Your password has been changed. Please log in again with your new password.",
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {

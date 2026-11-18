@@ -5,11 +5,14 @@ import { Search } from "lucide-react";
 import { ROLE_LABELS, type AppRole } from "@/app/lib/roles";
 import { toggleUserSuspension } from "./actions";
 import { DeleteUserDialog } from "./delete-user-dialog";
+import { EditUserModal } from "./edit-user-modal";
 import { UserRolesEditor } from "./user-roles-editor";
 
 export type ManagedUser = {
   id: string;
   name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   roles: AppRole[];
@@ -48,7 +51,7 @@ export function UsersTable({ users, transferUsers, initialQuery = "" }: { users:
                 <td className="whitespace-nowrap px-5 py-3.5 font-medium text-slate-600">{user.phone}</td>
                 <td className="px-5 py-3.5"><UserRolesEditor userId={user.id} name={user.name} roles={user.roles} /></td>
                 <td className="px-5 py-3.5"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${user.isSuspended ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{user.isSuspended ? "Suspended" : "Active"}</span></td>
-                <td className="px-5 py-3.5"><div className="flex justify-end gap-2"><form action={toggleUserSuspension}><input type="hidden" name="userId" value={user.id} /><input type="hidden" name="suspend" value={String(!user.isSuspended)} /><button className={`rounded-md border px-3 py-1.5 text-xs font-bold ${user.isSuspended ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-red-200 text-red-700 hover:bg-red-50"}`}>{user.isSuspended ? "Reactivate" : "Suspend"}</button></form><DeleteUserDialog user={{ id: user.id, name: user.name, email: user.email }} transferUsers={transferUsers} /></div></td>
+                <td className="px-5 py-3.5"><div className="flex justify-end gap-2"><EditUserModal user={user} /><form action={toggleUserSuspension}><input type="hidden" name="userId" value={user.id} /><input type="hidden" name="suspend" value={String(!user.isSuspended)} /><button className={`rounded-md border px-3 py-1.5 text-xs font-bold ${user.isSuspended ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-red-200 text-red-700 hover:bg-red-50"}`}>{user.isSuspended ? "Reactivate" : "Suspend"}</button></form><DeleteUserDialog user={{ id: user.id, name: user.name, email: user.email }} transferUsers={transferUsers} /></div></td>
               </tr>
             ))}
             {!filteredUsers.length && <tr><td colSpan={5} className="px-5 py-10 text-center font-medium text-slate-500">{terms.length ? "No users match your search." : "No users found."}</td></tr>}

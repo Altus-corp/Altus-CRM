@@ -20,11 +20,11 @@ export function CreateAmbassadorAccountModal() {
   }, [isOpen, isPending]);
 
   return <>
-    <button type="button" onClick={() => setIsOpen(true)} className="h-9 rounded-lg bg-[#d90000] px-4 text-xs font-extrabold text-white shadow-sm hover:bg-red-700">+ Add Ambassador</button>
+    <button type="button" onClick={() => setIsOpen(true)} className="h-9 rounded-lg bg-[#d90000] px-4 text-xs font-extrabold text-white shadow-sm hover:bg-red-700">+ Create Ambassador Account</button>
     {isOpen && <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-[2px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !isPending) setIsOpen(false); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="create-ambassador-account-title" className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
-          <div><p className="text-[10px] font-extrabold tracking-[0.14em] text-red-600">AMBASSADOR ACCOUNT</p><h2 id="create-ambassador-account-title" className="mt-1 text-xl font-extrabold text-slate-900">Add Ambassador</h2><p className="mt-1 text-sm text-slate-500">Create an Ambassador-only CRM login. Their temporary credentials will be sent by email.</p></div>
+          <div><p className="text-[10px] font-extrabold tracking-[0.14em] text-red-600">AMBASSADOR ACCOUNT</p><h2 id="create-ambassador-account-title" className="mt-1 text-xl font-extrabold text-slate-900">Create Ambassador Account</h2><p className="mt-1 text-sm text-slate-500">Create an Ambassador-only CRM login. Their temporary credentials will be sent by email.</p></div>
           <button type="button" onClick={() => setIsOpen(false)} disabled={isPending} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50"><X className="h-4 w-4" /></button>
         </div>
         <form action={action} className="mt-5 space-y-4">

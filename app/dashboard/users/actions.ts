@@ -251,6 +251,74 @@ export async function createUser(
   };
 }
 
+export type UpdateUserState = {
+  error?: string;
+  success?: string;
+};
+
+export async function updateUser(
+  _previousState: UpdateUserState,
+  formData: FormData,
+): Promise<UpdateUserState> {
+  await requireAdmin();
+
+  const userId = String(formData.get("userId") ?? "");
+  const firstName = String(formData.get("firstName") ?? "").trim();
+  const lastName = String(formData.get("lastName") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const phone = String(formData.get("phone") ?? "").trim();
+  const passwordMode = String(formData.get("passwordMode") ?? "none");
+  const manualPassword = String(formData.get("password") ?? "");
+
+  if (!isValidUserId(userId)) return { error: "Invalid user." };
+  if (!firstName || !lastName || !email || !phone) return { error: "Complete all required fields." };
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { error: "Enter a valid email address." };
+  if (!/^[+\d][\d\s()-]{6,19}$/.test(phone)) return { error: "Enter a valid phone number with country code." };
+  if (!["none", "manual", "generated"].includes(passwordMode)) return { error: "Choose a valid password option." };
+
+  const admin = createAdminClient();
+  const { data: target, error: targetError } = await admin.auth.admin.getUserById(userId);
+  if (targetError || !target.user) return { error: "This user could not be found." };
+
+  const fullName = `${firstName} ${lastName}`;
+  const changingPassword = passwordMode !== "none";
+  const password = passwordMode === "generated" ? generatePassword() : manualPassword;
+  if (changingPassword && !isValidPassword(password)) {
+    return { error: "Use at least 12 characters, including uppercase, lowercase, a number, and a symbol." };
+  }
+
+  const passwordChangedAt = new Date().toISOString();
+  const { error: authUpdateError } = await admin.auth.admin.updateUserById(userId, {
+    email,
+    user_metadata: { ...target.user.user_metadata, first_name: firstName, last_name: lastName, full_name: fullName, phone },
+    ...(changingPassword ? { password } : {}),
+  });
+  if (authUpdateError) return { error: authUpdateError.message || "Unable to update this user." };
+
+  const { error: profileError } = await admin
+    .from("profiles")
+    .update({
+      first_name: firstName,
+      last_name: lastName,
+      full_name: fullName,
+      phone,
+      ...(changingPassword ? { password_changed_at: passwordChangedAt } : {}),
+    })
+    .eq("id", userId);
+  if (profileError) return { error: "The account was updated, but the profile record could not be saved. Please retry." };
+
+  if (changingPassword) {
+    try {
+      await sendAccountCredentials({ email, password, fullName });
+    } catch {
+      return { success: `${fullName}'s details were saved and the password was changed, but the new credentials email could not be sent. Check the SMTP configuration and share the password manually.` };
+    }
+  }
+
+  revalidatePath("/dashboard/users");
+  return { success: changingPassword ? `${fullName}'s details were saved and a new password was set. Their new credentials were emailed, and any session signed in with the old password will be signed out.` : `${fullName}'s details were saved.` };
+}
+
 export async function updateUserRoles(
   _previousState: CreateUserState,
   formData: FormData,

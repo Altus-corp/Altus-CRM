@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LeadsTable, type LeadColumn, type LeadRow } from "./leads-table";
+import { LeadsTable, leadMatchesSearch, type LeadColumn, type LeadRow } from "./leads-table";
 import {
   createManualLead,
   importLeadsCsv,
@@ -102,11 +102,13 @@ export function SalesLeadsWorkspace({
     setSyncedUrlView(urlView);
     setView(urlView);
   }
+  const [search, setSearch] = useState("");
   const focusedIds = new Set(focusedLeadIds);
-  const displayedLeads =
+  const displayedLeads = (
     view === "focused"
       ? leads.filter((lead) => focusedIds.has(lead.assignment_id))
-      : leads;
+      : leads
+  ).filter((lead) => leadMatchesSearch(lead, search));
   const updateTeamView = (memberId: string, nextView = view) => {
     const next = new URLSearchParams(searchParams.toString());
     next.delete("page");
@@ -199,6 +201,13 @@ export function SalesLeadsWorkspace({
           {assignmentMessage && <p className={`mt-2 text-xs font-bold ${assignmentMessage.startsWith("Selected") ? "text-emerald-700" : "text-red-700"}`}>{assignmentMessage}</p>}
         </section>
       )}
+      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-white p-2 shadow-[0_3px_10px_rgba(42,55,80,0.05)]">
+        <label className="flex h-8 min-w-[210px] flex-1 items-center gap-2 rounded border border-slate-200 px-2.5 text-[10px] text-slate-400">
+          Search
+          <input type="search" aria-label="Search leads" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, email, phone, lead number..." className="w-full bg-transparent text-xs text-slate-700 outline-none" />
+        </label>
+        {search && <button type="button" onClick={() => setSearch("")} className="h-8 rounded border border-slate-200 px-2.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50">Clear</button>}
+      </div>
       <div className="mt-3">
         <LeadsTable
           columns={columns}
