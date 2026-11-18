@@ -428,7 +428,12 @@ export async function importLeadsCsv(
       message: "The file needs a header row and at least one lead.",
     };
   const headers = rows[0].map(normalizeHeader);
-  const supabase = await createClient();
+  // The permission checks above already gate who can import and whose name
+  // they can assign to, so writes use the admin client directly: the RLS
+  // select-policy on leads depends on the lead_product_assignments row an
+  // AFTER INSERT trigger creates, and that ordering isn't guaranteed to be
+  // visible yet when the RLS client's own INSERT ... RETURNING runs.
+  const supabase = createAdminClient();
   const [
     { data: products },
     { data: stages },
@@ -446,7 +451,7 @@ export async function importLeadsCsv(
     supabase
       .from("lead_table_columns")
       .select("field_key, label, source, field_type, computed_from"),
-    createAdminClient()
+    supabase
       .from("profiles")
       .select("id, first_name, last_name, full_name")
       .eq("is_suspended", false),
@@ -700,6 +705,7 @@ export async function importLeadsCsv(
           assigned_at: batch[batchIndex]?.assigneeId
             ? new Date().toISOString()
             : null,
+          focused_on: batch[batchIndex]?.assigneeId ? indiaToday() : null,
           assignment_origin: "import",
           created_by: userId,
         })),
@@ -726,6 +732,21 @@ export async function importLeadsCsv(
       const primaryAssignmentOwners = new Map(insertedLeads.map((lead, batchIndex) => [lead.id,
         importedAssignments?.find((assignment) => assignment.lead_id === lead.id && assignment.product_id === batch[batchIndex]?.lead.product_id)?.assigned_to ?? null,
       ]));
+      // The leads-table AFTER INSERT trigger creates the primary assignment
+      // without focused_on, so assigned imports would otherwise never show
+      // up in the assignee's Focused Leads until some other process touches
+      // the row.
+      const assignedPrimaryIds = insertedLeads
+        .filter((lead) => primaryAssignmentOwners.get(lead.id))
+        .map((lead) => primaryAssignmentIds.get(lead.id))
+        .filter((id): id is string => Boolean(id));
+      if (assignedPrimaryIds.length) {
+        const { error: focusError } = await supabase
+          .from("lead_product_assignments")
+          .update({ focused_on: indiaToday() })
+          .in("id", assignedPrimaryIds);
+        if (focusError) return { ok: false, message: focusError.message, imported: index, skipped };
+      }
       const { error: activityError } = await supabase
         .from("lead_activities")
         .insert(
