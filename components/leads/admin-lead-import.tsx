@@ -95,7 +95,7 @@ export function AdminLeadImport({ sampleColumns, products, resolutions, salesPeo
     setIsImporting(true); setMessage(null);
     try {
       const result = await importLeadsCsv(new FormData(form));
-      setMessage({ ok: result.ok, text: result.ok ? `${result.message} ${result.imported ?? 0} added${result.skipped ? `, ${result.skipped} skipped` : ""}.` : result.message });
+      setMessage({ ok: result.ok, text: result.ok ? `${result.message} ${result.imported ?? 0} added${result.duplicates ? `, ${result.duplicates} already in database` : ""}${result.skipped ? `, ${result.skipped} skipped` : ""}.` : result.message });
       if (result.ok) form.reset();
     } catch {
       setMessage({ ok: false, text: "The import could not be completed. Refresh the leads list before retrying." });

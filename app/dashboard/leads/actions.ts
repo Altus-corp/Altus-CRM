@@ -47,6 +47,7 @@ type ImportResult = {
   message: string;
   imported?: number;
   skipped?: number;
+  duplicates?: number;
 };
 
 // This non-UUID value cannot be mistaken for a real CRM user. It is accepted
@@ -551,6 +552,20 @@ export async function importLeadsCsv(
     assigneeId: string | null;
   }[] = [];
   let skipped = 0;
+  const duplicateDetails: string[] = [];
+  const seenPhones = new Set<string>();
+
+  const candidatePhones = [...new Set(
+    rows.slice(1)
+      .map((record) => fieldAt(record, "cell number", "cell_number", "phone", "phone number", "phone_number").replace(/\D/g, ""))
+      .filter((phone) => /^\d{10}$/.test(phone)),
+  )];
+  const { data: existingLeadsByPhone } = candidatePhones.length
+    ? await supabase.from("leads").select("first_name, last_name, phone_key").in("phone_key", candidatePhones)
+    : { data: [] as { first_name: string; last_name: string; phone_key: string }[] };
+  const existingLeadByPhone = new Map(
+    (existingLeadsByPhone ?? []).map((lead) => [lead.phone_key, lead]),
+  );
 
   for (const record of rows.slice(1)) {
     const firstName = fieldAt(
@@ -627,6 +642,16 @@ export async function importLeadsCsv(
       skipped += 1;
       continue;
     }
+    const existingLead = existingLeadByPhone.get(phone);
+    if (existingLead) {
+      duplicateDetails.push(`${[existingLead.first_name, existingLead.last_name].filter(Boolean).join(" ")} (${phone})`);
+      continue;
+    }
+    if (seenPhones.has(phone)) {
+      duplicateDetails.push(`${[firstName, lastName].filter(Boolean).join(" ")} (${phone}) — repeated in this file`);
+      continue;
+    }
+    seenPhones.add(phone);
     const productsForLead = selectedProducts as { id: string; code: string }[];
     const product = productsForLead[0];
     const stageName = fieldAt(record, "stage").toLowerCase();
@@ -684,9 +709,11 @@ export async function importLeadsCsv(
   if (!records.length)
     return {
       ok: false,
-      message:
-        "No valid rows found. Each row needs First Name, Last Name, a valid 10-digit Cell Number, an optional valid Sales Person, and valid Product codes. Blank Product values go to Uncategorized Leads.",
+      message: duplicateDetails.length
+        ? `No new leads found. All ${duplicateDetails.length} row(s) are already stored in the database: ${duplicateDetails.slice(0, 20).join(", ")}${duplicateDetails.length > 20 ? `, and ${duplicateDetails.length - 20} more` : ""}.`
+        : "No valid rows found. Each row needs First Name, Last Name, a valid 10-digit Cell Number, an optional valid Sales Person, and valid Product codes. Blank Product values go to Uncategorized Leads.",
       skipped,
+      duplicates: duplicateDetails.length,
     };
   for (let index = 0; index < records.length; index += 200) {
     const batch = records.slice(index, index + 200);
@@ -778,9 +805,12 @@ export async function importLeadsCsv(
   if (ambassadorImport) revalidatePath("/dashboard");
   return {
     ok: true,
-    message: "Leads imported successfully.",
+    message: duplicateDetails.length
+      ? `Leads imported. ${duplicateDetails.length} already existed in the database and were skipped: ${duplicateDetails.slice(0, 20).join(", ")}${duplicateDetails.length > 20 ? `, and ${duplicateDetails.length - 20} more` : ""}.`
+      : "Leads imported successfully.",
     imported: records.length,
     skipped,
+    duplicates: duplicateDetails.length,
   };
 }
 

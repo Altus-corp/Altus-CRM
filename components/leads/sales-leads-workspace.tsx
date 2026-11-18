@@ -601,7 +601,7 @@ function BulkLeadModal({
       const result = await importLeadsCsv(new FormData(event.currentTarget));
       setMessage(
         result.ok
-          ? `${result.message} ${result.imported ?? 0} added${result.skipped ? `, ${result.skipped} skipped` : ""}.`
+          ? `${result.message} ${result.imported ?? 0} added${result.duplicates ? `, ${result.duplicates} already in database` : ""}${result.skipped ? `, ${result.skipped} skipped` : ""}.`
           : result.message,
       );
       if (result.ok) {
