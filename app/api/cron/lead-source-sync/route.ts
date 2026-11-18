@@ -42,11 +42,12 @@ export async function GET(request: Request) {
     { source: "AltusCorp Ambassadors", run: syncAltusCorpAmbassadors },
   ];
 
-  const results: Array<SyncResult & { source: string }> = [];
-  for (const item of sources) {
-    const result = await item.run(adminRole.user_id);
-    results.push({ source: item.source, ...result });
-  }
+  const settled = await Promise.allSettled(sources.map((item) => item.run(adminRole.user_id)));
+  const results: Array<SyncResult & { source: string }> = settled.map((outcome, index) => {
+    const source = sources[index].source;
+    if (outcome.status === "fulfilled") return { source, ...outcome.value };
+    return { source, ok: false, message: outcome.reason instanceof Error ? outcome.reason.message : "Sync failed unexpectedly." };
+  });
 
   const imported = results.reduce((total, item) => total + (item.imported ?? 0), 0);
   const updated = results.reduce((total, item) => total + (item.updated ?? 0), 0);
