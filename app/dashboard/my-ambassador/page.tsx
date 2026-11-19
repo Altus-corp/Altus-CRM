@@ -10,6 +10,7 @@ import { AdminAmbassadorManager, type AmbassadorRecord } from "@/components/amba
 import { SalesAmbassadorTable, type SalesAmbassadorRow } from "@/components/ambassadors/sales-ambassador-table";
 import { AmbassadorExternalSync } from "@/components/ambassadors/ambassador-external-sync";
 import { CreateAmbassadorAccountModal } from "@/components/ambassadors/create-ambassador-account-modal";
+import { AmbassadorAddModal } from "@/components/ambassadors/ambassador-add-modal";
 
 export const instant = false;
 
@@ -104,7 +105,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
     .in("lead_id", leadIds).order("created_at") : { data: [], error: null };
   if (detailError) throw new Error("Unable to load complete Ambassador product details.");
   const ownerIds = [...new Set(assignments.map((item) => item.assigned_to).filter((id): id is string => Boolean(id)))];
-  const profileIds = isSalesManager ? visibleOwnerIds : ownerIds;
+  const profileIds = [...new Set([...(isSalesManager ? visibleOwnerIds : ownerIds), userId])];
   const [profilesResult, eligibleResult] = await Promise.all([
     isAdmin ? supabase.from("profiles").select("id, first_name, last_name, full_name, is_suspended") : profileIds.length ? ambassadorDataClient.from("profiles").select("id, first_name, last_name, full_name, is_suspended").in("id", profileIds) : Promise.resolve({ data: [], error: null }),
     isAdmin ? supabase.from("user_roles").select("user_id, role") : Promise.resolve({ data: [], error: null }),
@@ -201,7 +202,7 @@ export default async function MyAmbassadorPage({ searchParams }: { searchParams:
 
   return <section className="mx-auto max-w-[1500px]">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{isAdmin ? "Ambassador" : isSalesManager ? "My & Team Ambassadors" : "My Ambassador"}</h1>
-    <p className="mt-1 text-sm text-slate-500">{stageFilter === "pre-sales" ? "Ambassador-product opportunities marked Agreement Sent." : stageFilter === "onboarding-ambassador" ? "Signed or waived Ambassadors currently in onboarding." : isAdmin ? "Completed Ambassador agreements and their CRM owners. Only admins can reassign them." : isSalesManager ? "Ambassadors assigned to you and members of your configured sales teams." : "Your Ambassadors remain assigned to you. Contact an admin to request reassignment."}</p></div>{!isAdmin && <CreateAmbassadorAccountModal />}</div>
+    <p className="mt-1 text-sm text-slate-500">{stageFilter === "pre-sales" ? "Ambassador-product opportunities marked Agreement Sent." : stageFilter === "onboarding-ambassador" ? "Signed or waived Ambassadors currently in onboarding." : isAdmin ? "Completed Ambassador agreements and their CRM owners. Only admins can reassign them." : isSalesManager ? "Ambassadors assigned to you and members of your configured sales teams." : "Your Ambassadors remain assigned to you. Contact an admin to request reassignment."}</p></div>{!isAdmin && <div className="flex flex-wrap items-center gap-2"><AmbassadorAddModal /><CreateAmbassadorAccountModal /></div>}</div>
     {isAdmin && <AmbassadorExternalSync />}
     {isSalesManager && <form className="mt-4 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white p-3" aria-label="Filter team Ambassadors by sales person">
       {stageFilter && <input type="hidden" name="stage" value={stageFilter} />}

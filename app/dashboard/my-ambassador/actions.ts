@@ -292,7 +292,11 @@ function parseInput(value: AmbassadorInput) {
   const firstName = cleanText(value.firstName, 120);
   const lastName = cleanText(value.lastName, 120);
   const cellNumber = cleanText(value.cellNumber, 30).replace(/\D/g, "").slice(-10);
-  const email = cleanText(value.email, 254).toLowerCase();
+  // Excel/Word paste often leaves invisible Unicode whitespace (non-breaking
+  // space, zero-width space/joiner, BOM) inside the text, which looks correct
+  // but fails the regex below — strip it rather than reject a valid-looking
+  // email outright.
+  const email = cleanText(value.email, 254).toLowerCase().replace(/[ ​‌‍﻿]/g, "").trim();
   const salesPersonId = cleanText(value.salesPersonId, 36);
   const priorityText = cleanText(value.priority, 1);
   const priority = priorityText ? Number(priorityText) : null;
@@ -309,7 +313,7 @@ function parseInput(value: AmbassadorInput) {
     return number;
   };
   if (!firstName || !lastName || !/^\d{10}$/.test(cellNumber)) throw new Error("First Name, Last Name, and a valid 10-digit Cell Number are required.");
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Email must be a valid email address.");
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`Email "${email}" is not a valid email address.`);
   if (salesPersonId && !/^[0-9a-f-]{36}$/i.test(salesPersonId)) throw new Error("Choose a valid Sales Person.");
   if (priority !== null && ![1, 2, 3].includes(priority)) throw new Error("Priority must be 1, 2, or 3.");
   if (commission !== null && (!Number.isFinite(commission) || commission < 0)) throw new Error("Commission must be a valid positive amount.");
@@ -335,6 +339,18 @@ async function requireAdmin() {
   const user = await requireUser();
   if (!user.roles.includes("admin")) throw new Error("Only an admin can manage Ambassador records.");
   return user;
+}
+
+// Sales Managers and Sales Executives can create/import their own Ambassador
+// records through the same template admins use, but never assign Ambassador
+// ownership to anyone else — that still requires an admin.
+async function requireAmbassadorManager() {
+  const user = await requireUser();
+  const isAdmin = user.roles.includes("admin");
+  if (!isAdmin && !user.roles.some((role) => role === "sales_executive" || role === "sales_manager")) {
+    throw new Error("Only an admin, Sales Manager, or Sales Executive can manage Ambassador records.");
+  }
+  return { ...user, isAdmin };
 }
 
 export async function createAmbassadorAccount(
@@ -603,12 +619,15 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
   }
 }
 
-async function saveRecord(input: AmbassadorInput) {
-  const user = await requireAdmin();
+async function saveRecord(input: AmbassadorInput, actor?: { userId: string; isAdmin: boolean }) {
+  const user = actor ?? { ...(await requireAdmin()), isAdmin: true };
   const data = parseInput(input);
-  // This is an admin-only server action. Use the server admin client after
-  // verifying the caller so imports are not blocked by a browser RLS policy
-  // that may depend on the same assignment table being upserted.
+  // Sales Managers/Executives can only ever own what they import or create —
+  // the Sales Person column (or a manual form value) is ignored for them.
+  if (!user.isAdmin) data.salesPersonId = user.userId;
+  // This runs after the permission check above, so writes use the admin
+  // client to avoid being blocked by an RLS policy tied to the same
+  // assignment table being upserted here.
   const supabase = createAdminClient();
   const [{ data: product }, { data: assignee }] = await Promise.all([
     supabase.from("lead_products").select("id").eq("code", "AMBASSADOR").eq("is_active", true).maybeSingle(),
@@ -631,6 +650,15 @@ async function saveRecord(input: AmbassadorInput) {
       .order("assigned_at", { ascending: false, nullsFirst: false })
     : { data: [], error: null };
   if (existingAssignmentsError) throw new Error(existingAssignmentsError.message);
+  if (!user.isAdmin && leadId) {
+    const { data: existingAmbassadorAssignment } = await supabase
+      .from("lead_product_assignments")
+      .select("assigned_to")
+      .eq("lead_id", leadId).eq("product_id", product.id).eq("is_ambassador", true).eq("is_active", true).maybeSingle();
+    if (existingAmbassadorAssignment?.assigned_to && existingAmbassadorAssignment.assigned_to !== user.userId) {
+      throw new Error("This phone number already belongs to a different Ambassador. Ask an admin to reassign it.");
+    }
+  }
   const priorOwnerIds = [...new Set((existingAssignments ?? []).flatMap((assignment) => assignment.assigned_to ? [assignment.assigned_to] : []))];
   // If an administrator leaves Sales Person empty while converting an existing
   // lead, retain its current CRM owner rather than silently making it unassigned.
@@ -676,7 +704,7 @@ async function saveRecord(input: AmbassadorInput) {
   const activityRows = [
     {
       lead_id: leadId, lead_product_assignment_id: assignment.id, activity_type: "ambassador_record_saved",
-      note: `Ambassador record ${existing ? "updated" : "created"} by an administrator.`, created_by: user.userId,
+      note: `Ambassador record ${existing ? "updated" : "created"} by ${user.isAdmin ? "an administrator" : "a Sales Person"}.`, created_by: user.userId,
     },
     ...movedAssignmentIds.map((assignmentId) => ({
       lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "moved_to_ambassador",
@@ -695,17 +723,26 @@ async function saveRecord(input: AmbassadorInput) {
   return { ok: true, message: existing ? "Ambassador record updated." : "Ambassador record created." };
 }
 
-export async function createAmbassador(input: AmbassadorInput) {
-  try { return await saveRecord(input); } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to save Ambassador." }; }
+export async function createAmbassador(input: AmbassadorInput, actor?: { userId: string; isAdmin: boolean }) {
+  try { return await saveRecord(input, actor); } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to save Ambassador." }; }
+}
+
+// Manual single-record add for Sales Managers/Executives; always owned by
+// the caller, same as importAmbassadors.
+export async function createOwnAmbassador(input: AmbassadorInput) {
+  try {
+    const actor = await requireAmbassadorManager();
+    return await saveRecord(input, actor);
+  } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to save Ambassador." }; }
 }
 
 export async function importAmbassadors(rows: AmbassadorInput[]) {
   try {
-    await requireAdmin();
+    const actor = await requireAmbassadorManager();
     if (!Array.isArray(rows) || !rows.length || rows.length > 500) throw new Error("Upload between 1 and 500 Ambassador records at a time.");
     let imported = 0; let skipped = 0; const errors: string[] = [];
     for (const [index, row] of rows.entries()) {
-      const result = await createAmbassador(row);
+      const result = await createAmbassador(row, actor);
       if (result.ok) imported += 1; else { skipped += 1; if (errors.length < 3) errors.push(`Row ${index + 2}: ${result.message}`); }
     }
     return { ok: imported > 0, message: `${imported} Ambassador record${imported === 1 ? "" : "s"} imported${skipped ? `; ${skipped} skipped` : ""}.${errors.length ? ` ${errors.join(" ")}` : ""}` };
