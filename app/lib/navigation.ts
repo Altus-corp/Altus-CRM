@@ -55,6 +55,7 @@ const roleNavigation: DashboardNavItem[] = [
   { label: "Team", href: "/dashboard/team", roles: ["admin"] },
   { label: "Roles & permissions", href: "/dashboard/roles", roles: ["admin"] },
   { label: "Lead configuration", href: "/dashboard/lead-settings", roles: ["admin"] },
+  { label: "Geo Setting CRM", href: "/dashboard/geo-settings", roles: ["admin"] },
 
   // Role-specific tools follow the common CRM workflow above.
   { label: "Deals", href: "/dashboard/deals", roles: ["sales_manager"] },

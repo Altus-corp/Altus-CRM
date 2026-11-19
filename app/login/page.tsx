@@ -1,8 +1,6 @@
-import { login } from "./actions";
 import Link from "next/link";
-import { CircleHelp, LockKeyhole, Mail } from "lucide-react";
-import { PasswordField } from "@/components/auth/password-field";
-import { LoginSubmitButton } from "./login-submit-button";
+import { CircleHelp } from "lucide-react";
+import { LoginForm } from "./login-form";
 
 export const instant = false;
 
@@ -16,6 +14,8 @@ const errorMessages: Record<string, string> = {
   "not-authorized": "This account does not have a CRM role.",
   "account-suspended": "This account has been suspended. Contact an administrator.",
   "password-changed": "Your password has been changed. Please log in again with your new password.",
+  "geo-required": "This account can only sign in from an approved location. Allow location access in your browser and try again.",
+  "geo-outside": "This account can only sign in from an approved location, and you're currently outside it.",
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -39,19 +39,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             </section>
 
             <section className="flex min-h-[100svh] items-center justify-center px-5 py-7 sm:px-10 lg:h-full lg:min-h-0 lg:px-[clamp(3rem,8vw,9rem)] lg:py-5">
-                <form action={login} className="w-full max-w-[420px]">
-                    <p className="text-[11px] font-extrabold tracking-[0.18em] text-red-600">WELCOME BACK</p>
-                    <h2 className="mt-2 text-[clamp(1.8rem,2.6vw,2.35rem)] font-black tracking-[-0.055em] text-[#111a30]">Sign in to your account</h2>
-                    <p className="mt-2 text-sm font-medium text-slate-500">Use the email address on your CRM account.</p>
-                    {error && <p role="alert" className="mt-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{errorMessages[error] ?? "Unable to sign in."}</p>}
-                    <div className="mt-6 space-y-4">
-                        <label className="block text-[12px] font-extrabold text-slate-700">Email<span className="relative mt-2 block"><Mail aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input name="email" type="email" required autoComplete="email" placeholder="you@company.com" className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-10 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:bg-white focus:ring-4 focus:ring-red-50" /></span></label>
-                        <label className="block text-[12px] font-extrabold text-slate-700">Password<span className="relative mt-2 block"><LockKeyhole aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" /><PasswordField name="password" required autoComplete="current-password" placeholder="Enter your password" className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-10 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:bg-white focus:ring-4 focus:ring-red-50" /></span></label>
-                    </div>
-                    <LoginSubmitButton />
+                <div className="w-full max-w-[420px]">
+                    {error && <p role="alert" className="mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{errorMessages[error] ?? "Unable to sign in."}</p>}
+                    <LoginForm />
                     <Link href="/forgot-password" className="mt-4 flex min-h-12 items-center gap-3 rounded-xl border border-slate-200 px-4 py-2.5 text-left transition hover:border-red-200 hover:bg-red-50/40"><CircleHelp aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400" /><span><span className="block text-[12px] font-extrabold text-red-600">Forgot your password?</span><span className="mt-0.5 block text-[11px] font-medium text-slate-500">We’ll send a secure reset code to your email.</span></span></Link>
                     <div className="mt-5 border-t border-slate-200 pt-4 text-center text-[11px] font-medium text-slate-400">© {new Date().getFullYear()} Altus CRM</div>
-                </form>
+                </div>
             </section>
         </main>
     );

@@ -7,6 +7,7 @@ import { getDashboardNavigation } from "@/app/lib/navigation";
 import { createClient } from "@/app/lib/supabase/server";
 import { getLeadSharedConfig } from "@/app/lib/lead-shared-config";
 import { DashboardShell } from "./dashboard-shell";
+import { CrmAssistant } from "@/components/admin/crm-assistant";
 
 export const instant = false;
 
@@ -40,8 +41,11 @@ export default async function DashboardLayout({
   const todayAssignedLeads = Number(focusedCountResult.data?.assignment_count ?? focusedCountFallback?.count ?? 0);
 
   return (
-    <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} email={email} roleLabel={roleLabel} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads} products={sharedConfig?.products ?? []}>
-      {children}
-    </DashboardShell>
+    <>
+      <DashboardShell navigation={getDashboardNavigation(roles)} roles={roles} displayName={displayName} email={email} roleLabel={roleLabel} ambassadorOwnerLabel={ambassadorOwner?.label} ambassadorOwnerPhone={ambassadorOwner?.phone} todayAssignedLeads={todayAssignedLeads} products={sharedConfig?.products ?? []}>
+        {children}
+      </DashboardShell>
+      {roles.includes("admin") && <CrmAssistant />}
+    </>
   );
 }
