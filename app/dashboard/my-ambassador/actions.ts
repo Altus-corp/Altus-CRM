@@ -353,30 +353,20 @@ async function requireAmbassadorManager() {
   return { ...user, isAdmin };
 }
 
-export async function createAmbassadorAccount(
-  _previousState: CreateAmbassadorAccountState,
-  formData: FormData,
-): Promise<CreateAmbassadorAccountState> {
-  const actor = await requireUser();
-  if (!actor.roles.some((role) => role === "sales_executive" || role === "sales_manager")) {
-    return { error: "Only Sales Executives and Sales Managers can create Ambassador accounts." };
-  }
+async function createAmbassadorAccountFor(
+  actor: { userId: string },
+  input: { firstName: string; lastName: string; email: string; phone: string; password: string },
+): Promise<{ ok: boolean; message: string }> {
+  const firstName = cleanText(input.firstName, 120);
+  const lastName = cleanText(input.lastName, 120);
+  const email = cleanText(input.email, 254).toLowerCase();
+  const phone = normalizePhone(input.phone);
+  const password = input.password;
 
-  const firstName = cleanText(formData.get("firstName"), 120);
-  const lastName = cleanText(formData.get("lastName"), 120);
-  const email = cleanText(formData.get("email"), 254).toLowerCase();
-  const phone = normalizePhone(formData.get("phone"));
-  const passwordMode = cleanText(formData.get("passwordMode"), 20) || "manual";
-  const manualPassword = String(formData.get("password") ?? "");
-
-  if (!firstName || !lastName || !email || !phone) return { error: "Complete the Ambassador's name, email, and 10-digit mobile number." };
-  if (!/^\S+@\S+\.\S+$/.test(email)) return { error: "Enter a valid email address." };
-  if (!/^[0-9]{10}$/.test(phone)) return { error: "Enter a valid 10-digit mobile number." };
-
-  const password = passwordMode === "generated" ? generateAmbassadorPassword() : manualPassword;
-  if (!isValidAccountPassword(password)) {
-    return { error: "Use at least 12 characters, including uppercase, lowercase, a number, and a symbol." };
-  }
+  if (!firstName || !lastName || !email || !phone) return { ok: false, message: "Complete the Ambassador's name, email, and 10-digit mobile number." };
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { ok: false, message: "Enter a valid email address." };
+  if (!/^[0-9]{10}$/.test(phone)) return { ok: false, message: "Enter a valid 10-digit mobile number." };
+  if (!isValidAccountPassword(password)) return { ok: false, message: "Use at least 12 characters, including uppercase, lowercase, a number, and a symbol." };
 
   const admin = createAdminClient();
   const fullName = `${firstName} ${lastName}`;
@@ -387,7 +377,7 @@ export async function createAmbassadorAccount(
     app_metadata: { must_change_password: true },
     user_metadata: { first_name: firstName, last_name: lastName, full_name: fullName, phone },
   });
-  if (createError || !created.user) return { error: createError?.message ?? "Unable to create the Ambassador account." };
+  if (createError || !created.user) return { ok: false, message: createError?.message ?? "Unable to create the Ambassador account." };
 
   const ambassadorId = created.user.id;
   const cleanup = async () => {
@@ -400,7 +390,7 @@ export async function createAmbassadorAccount(
   ]);
   if (profileError || roleError) {
     await cleanup();
-    return { error: "The Ambassador account could not be prepared. Please try again." };
+    return { ok: false, message: "The Ambassador account could not be prepared. Please try again." };
   }
 
   // If this mobile number already belongs to an Ambassador record, retain that
@@ -421,7 +411,7 @@ export async function createAmbassadorAccount(
     : { data: [], error: null };
   if (ambassadorWorkError) {
     await cleanup();
-    return { error: "The Ambassador account was not created because the existing Ambassador record could not be linked." };
+    return { ok: false, message: "The Ambassador account was not created because the existing Ambassador record could not be linked." };
   }
 
   const relationshipManagerId = existingAmbassadorWork?.find((work) => work.assigned_to)?.assigned_to ?? actor.userId;
@@ -433,7 +423,7 @@ export async function createAmbassadorAccount(
   }, { onConflict: "ambassador_id" });
   if (managerError) {
     await cleanup();
-    return { error: "The Ambassador account was not created because its CRM owner could not be saved." };
+    return { ok: false, message: "The Ambassador account was not created because its CRM owner could not be saved." };
   }
 
   if (existingAmbassadorWork?.length) {
@@ -443,7 +433,7 @@ export async function createAmbassadorAccount(
       .in("id", existingAmbassadorWork.map((work) => work.id));
     if (linkError) {
       await cleanup();
-      return { error: "The Ambassador account was not created because its existing CRM record could not be linked." };
+      return { ok: false, message: "The Ambassador account was not created because its existing CRM record could not be linked." };
     }
   }
 
@@ -451,12 +441,54 @@ export async function createAmbassadorAccount(
     await sendAccountCredentials({ email, password, fullName });
   } catch {
     await cleanup();
-    return { error: "The Ambassador account was not created because the account email could not be sent. Check the SMTP configuration." };
+    return { ok: false, message: "The Ambassador account was not created because the account email could not be sent. Check the SMTP configuration." };
   }
 
   revalidatePath("/dashboard/my-ambassador");
   revalidatePath("/dashboard/leads");
-  return { success: `${fullName}'s Ambassador login was created and their temporary password was emailed.` };
+  return { ok: true, message: `${fullName}'s Ambassador login was created and their temporary password was emailed.` };
+}
+
+async function requireAccountCreator() {
+  const actor = await requireUser();
+  if (!actor.roles.some((role) => role === "sales_executive" || role === "sales_manager")) {
+    throw new Error("Only Sales Executives and Sales Managers can create Ambassador accounts.");
+  }
+  return actor;
+}
+
+export async function createAmbassadorAccount(
+  _previousState: CreateAmbassadorAccountState,
+  formData: FormData,
+): Promise<CreateAmbassadorAccountState> {
+  let actor;
+  try { actor = await requireAccountCreator(); } catch (error) { return { error: error instanceof Error ? error.message : "Not authorized." }; }
+
+  const firstName = cleanText(formData.get("firstName"), 120);
+  const lastName = cleanText(formData.get("lastName"), 120);
+  const email = cleanText(formData.get("email"), 254).toLowerCase();
+  const phone = normalizePhone(formData.get("phone"));
+  const passwordMode = cleanText(formData.get("passwordMode"), 20) || "manual";
+  const manualPassword = String(formData.get("password") ?? "");
+  const password = passwordMode === "generated" ? generateAmbassadorPassword() : manualPassword;
+
+  const result = await createAmbassadorAccountFor(actor, { firstName, lastName, email, phone, password });
+  return result.ok ? { success: result.message } : { error: result.message };
+}
+
+export async function importAmbassadorAccounts(
+  rows: { firstName: string; lastName: string; email: string; phone: string; password: string }[],
+) {
+  try {
+    const actor = await requireAccountCreator();
+    if (!Array.isArray(rows) || !rows.length || rows.length > 500) throw new Error("Upload between 1 and 500 Ambassador accounts at a time.");
+    let imported = 0; let skipped = 0; const errors: string[] = [];
+    for (const [index, row] of rows.entries()) {
+      const result = await createAmbassadorAccountFor(actor, row);
+      if (result.ok) imported += 1; else { skipped += 1; if (errors.length < 3) errors.push(`Row ${index + 2}: ${result.message}`); }
+    }
+    return { ok: imported > 0, message: `${imported} Ambassador account${imported === 1 ? "" : "s"} created${skipped ? `; ${skipped} skipped` : ""}.${errors.length ? ` ${errors.join(" ")}` : ""}` };
+  } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to import Ambassador accounts." }; }
 }
 
 type ExternalAmbassadorSyncResult = { ok: boolean; message: string; imported?: number; updated?: number; skipped?: number };
