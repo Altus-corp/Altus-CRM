@@ -13,6 +13,7 @@ import { ChannelPartnerSelect } from "./channel-partner-select";
 import { SeniorAmbassadorSelect } from "./senior-ambassador-select";
 import { isChannelPartnerColumn, isSeniorAmbassadorColumn } from "@/app/lib/channel-partner";
 import { ActivityColumn } from "./activity-column";
+import { ResolutionPicker } from "./resolution-picker";
 import { addNatureOfBusinessOption, addProductToMyLead, manuallyAssignLeads, saveLeadTablePreferences, updateLeadDetails, updateLeadResolutionInline, updateLeadStageInline } from "@/app/dashboard/leads/actions";
 
 const LeadDetailPanel = dynamic(() => import("./lead-detail-panel").then((module) => module.LeadDetailPanel), { ssr: false });
@@ -264,7 +265,7 @@ function InlineLeadField({ lead, column, assignedNames, configuration, salesPers
   }
   if ((column.field_key === "stage" || column.field_key === "call_resolution") && lead.product_assignments.length > 1) return <ProductScopedMenu key={lead.product_assignments.map((item) => `${item.id}:${item.stage?.name ?? ""}:${item.resolution?.name ?? ""}`).join("|")} lead={lead} kind={column.field_key === "stage" ? "stage" : "resolution"} configuration={configuration} />;
   if (column.field_key === "stage") { const stages = configuration.stages.filter((stage) => stage.product_id === productId); return <FieldSelect value={draftStageId} disabled={isPending || !productId || !stages.length} onChange={(value) => { setDraftStageId(value); save(updateLeadStageInline, "stageId", value); }} placeholder={productId ? "Select stage" : "Select product first"} options={stages.map((stage) => ({ value: stage.id, label: stage.name }))} error={saveError} />; }
-  if (column.field_key === "call_resolution") { const resolutions = configuration.productResolutions.filter((resolution) => resolution.product_id === productId); return <><FieldSelect value={draftResolutionId} disabled={isPending || !productId || !resolutions.length} onChange={(value) => { setDraftResolutionId(value); const selectedResolution = resolutions.find((resolution) => resolution.resolution_id === value); if (/follow[\s-]?up|verbal\s*yes/i.test(selectedResolution?.resolution_name ?? "")) setFollowUpResolutionId(value); else saveResolution(value); }} placeholder={productId ? "Select resolution" : "Select product first"} options={resolutions.map((resolution) => ({ value: resolution.resolution_id, label: resolution.resolution_name }))} error={saveError} wide />{followUpResolutionId && <FollowUpDateModal loading={isPending} onCancel={() => { setFollowUpResolutionId(null); setDraftResolutionId(serverResolutionId); }} onConfirm={(dateTime, note) => saveResolution(followUpResolutionId, dateTime, note)} />}</>; }
+  if (column.field_key === "call_resolution") { const resolutions = configuration.productResolutions.filter((resolution) => resolution.product_id === productId); return <div><ResolutionPicker value={draftResolutionId} disabled={isPending || !productId || !resolutions.length} onChoose={(value) => { setDraftResolutionId(value); const selectedResolution = resolutions.find((resolution) => resolution.resolution_id === value); if (/follow[\s-]?up|verbal\s*yes/i.test(selectedResolution?.resolution_name ?? "")) setFollowUpResolutionId(value); else saveResolution(value); }} placeholder={productId ? "Select resolution" : "Select product first"} options={resolutions.map((resolution) => ({ value: resolution.resolution_id, label: resolution.resolution_name }))} wide />{saveError && <p className="mt-1 max-w-[180px] whitespace-normal text-[9px] font-bold text-red-600">{saveError}</p>}{followUpResolutionId && <FollowUpDateModal loading={isPending} onCancel={() => { setFollowUpResolutionId(null); setDraftResolutionId(serverResolutionId); }} onConfirm={(dateTime, note) => saveResolution(followUpResolutionId, dateTime, note)} />}</div>; }
   return <LeadFieldValue lead={lead} column={column} assignedNames={assignedNames} />;
 }
 
@@ -442,10 +443,12 @@ function ProductScopedMenu({ lead, kind, configuration }: { lead: LeadRow; kind:
   const menu = open && menuPath === pathname && typeof document !== "undefined" ? createPortal(<div ref={menuRef} style={{ position: "fixed", left: position.left, top: position.top, zIndex: 150, width: 288 }} className="rounded-lg border border-slate-200 bg-white p-2 shadow-2xl">
     <p className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">{kind === "stage" ? "Stages" : "Call resolutions"} for each product</p>
     {rows.map((row) => <label key={row.assignment.id} className="block rounded px-2 py-1.5"><span className="text-xs font-extrabold text-slate-800">{displayProductCode(row.assignment.product?.code)}</span>
-      <select value={drafts[row.assignment.id] ?? row.serverValue} disabled={isPending || !row.options.length} onChange={(event) => choose(row.assignment.id, rows, event.target.value)} className="mt-1 h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50">
-        <option value="" disabled>{row.options.length ? `Select ${noun}` : `No ${noun}s configured`}</option>
-        {row.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select></label>)}
+      <div className="mt-1">{kind === "resolution"
+        ? <ResolutionPicker value={drafts[row.assignment.id] ?? row.serverValue} options={row.options} disabled={isPending} placeholder={row.options.length ? `Select ${noun}` : `No ${noun}s configured`} onChoose={(value) => choose(row.assignment.id, rows, value)} />
+        : <select value={drafts[row.assignment.id] ?? row.serverValue} disabled={isPending || !row.options.length} onChange={(event) => choose(row.assignment.id, rows, event.target.value)} className="h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-red-400 disabled:bg-slate-50">
+            <option value="" disabled>{row.options.length ? `Select ${noun}` : `No ${noun}s configured`}</option>
+            {row.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>}</div></label>)}
     {error && <p className="px-2 pb-1 text-[10px] font-bold text-red-600">{error}</p>}
   </div>, document.body) : null;
 

@@ -451,8 +451,8 @@ async function createAmbassadorAccountFor(
 
 async function requireAccountCreator() {
   const actor = await requireUser();
-  if (!actor.roles.some((role) => role === "sales_executive" || role === "sales_manager")) {
-    throw new Error("Only Sales Executives and Sales Managers can create Ambassador accounts.");
+  if (!actor.roles.some((role) => role === "admin" || role === "sales_executive" || role === "sales_manager")) {
+    throw new Error("Only an admin, Sales Manager, or Sales Executive can create Ambassador accounts.");
   }
   return actor;
 }

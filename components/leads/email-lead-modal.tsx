@@ -8,6 +8,7 @@ import { sendEmailToLead } from "@/app/dashboard/leads/actions";
 import { TemplatePicker } from "./template-picker";
 import { renderTemplate } from "@/app/lib/message-templates";
 import { displayProductCode } from "@/app/lib/product-display";
+import { VoiceDictationButton } from "./voice-dictation-button";
 
 export function EmailLeadModal({ leadId, assignments, initialAssignmentId, leadName, firstName, lastName, email, onClose, onSent }: { leadId: string; assignments: { id: string; code: string }[]; initialAssignmentId: string; leadName: string; firstName: string; lastName: string | null; email: string; onClose: () => void; onSent: () => void }) {
   const [assignmentId, setAssignmentId] = useState(initialAssignmentId);
@@ -36,7 +37,7 @@ export function EmailLeadModal({ leadId, assignments, initialAssignmentId, leadN
       {assignments.length > 1 && <label className="mt-3 block text-[11px] font-bold uppercase tracking-wide text-slate-400">Product<select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-slate-800 outline-none focus:border-red-400">{assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{displayProductCode(assignment.code)}</option>)}</select></label>}
       <TemplatePicker key={assignmentId} assignmentId={assignmentId} channel="email" values={{ firstName, lastName, product }} onPick={(templateSubject, templateBody) => { setSubject(templateSubject); setBody(templateBody); }} />
       <input value={subject} onChange={(event) => setSubject(event.target.value)} required maxLength={200} placeholder="Subject" className="mt-3 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-red-400" />
-      <textarea value={body} onChange={(event) => setBody(event.target.value)} required maxLength={10000} placeholder="Write your message..." className="mt-3 min-h-40 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-red-400" />
+      <div className="relative mt-3"><textarea value={body} onChange={(event) => setBody(event.target.value)} required maxLength={10000} placeholder="Write your message..." className="w-full rounded-lg border border-slate-200 px-3 py-2 pr-20 text-sm outline-none focus:border-red-400 min-h-40" /><VoiceDictationButton onResult={(text) => setBody((current) => (current ? `${current} ${text}` : text))} className="absolute right-2 top-2" /></div>
       {message && <p role="status" className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${message.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message.text} {!message.ok && message.text.includes("Settings") && <Link href="/dashboard/settings" className="underline">Open Settings</Link>}</p>}
       <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600">Cancel</button><button type="submit" disabled={isPending || !subject.trim() || !body.trim()} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-50">{isPending ? "Sending..." : "Send email"}</button></div>
     </form>

@@ -4258,6 +4258,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
     focused_on?: null;
     stage_id?: string;
     ringing_streak?: number;
+    stall_streak?: number;
   } = {
     latest_resolution_id: resolutionId,
   };
@@ -4275,17 +4276,24 @@ export async function updateLeadResolutionInline(formData: FormData) {
     .replace(/\s+/g, " ");
   // Five Ringing resolutions in a row (no other resolution in between) sends
   // the lead back to Admin's unassigned pool, the same release used for
-  // Abandoned. Any other resolution breaks the streak back to zero.
+  // Abandoned. Any other resolution breaks the streak back to zero. Ten
+  // consecutive resolutions from the "No Busy" / "Call Back" / "Call for
+  // Next" group do the same, counted together as one streak since they're
+  // all stall outcomes with no real progress.
   const isRinging = normalizedResolution === "ringing";
+  const isStallFamily = ["no busy", "call back", "call for next"].includes(normalizedResolution);
   const { data: currentAssignment, error: currentAssignmentError } = await supabase
     .from("lead_product_assignments")
-    .select("ringing_streak")
+    .select("ringing_streak, stall_streak")
     .eq("id", assignmentId)
     .single();
   if (currentAssignmentError) throw new Error(currentAssignmentError.message);
   const nextRingingStreak = isRinging ? (currentAssignment?.ringing_streak ?? 0) + 1 : 0;
   const releasesForRingingStreak = isRinging && nextRingingStreak >= 5;
   update.ringing_streak = releasesForRingingStreak ? 0 : nextRingingStreak;
+  const nextStallStreak = isStallFamily ? (currentAssignment?.stall_streak ?? 0) + 1 : 0;
+  const releasesForStallStreak = isStallFamily && nextStallStreak >= 10;
+  update.stall_streak = releasesForStallStreak ? 0 : nextStallStreak;
   const requiresFollowUp =
     /follow\s*up/i.test(normalizedResolution) ||
     normalizedResolution === "verbal yes";
@@ -4358,7 +4366,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
   // Abandoned work returns to Admin's unassigned pool. The activity trail
   // below preserves the CRM user who released it and the exact time. Five
   // consecutive Ringing resolutions releases it the same way.
-  const releasesAssignment = isAbandoned || releasesForRingingStreak;
+  const releasesAssignment = isAbandoned || releasesForRingingStreak || releasesForStallStreak;
   if (releasesAssignment) update.next_follow_up_at = null;
   // Status-work leads remain owned by the CRM user, but must immediately leave
   // the daily calling list. Lead Master visibility is handled by resolution
@@ -4441,11 +4449,12 @@ export async function updateLeadResolutionInline(formData: FormData) {
       lead_id: leadId,
       lead_product_assignment_id: assignmentId,
       activity_type: "resolution_updated",
-      note: `Activity resolution set to ${resolutionName}.${registeredStageName ? ` Moved to ${registeredStageName}.` : ""}${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : releasesForRingingStreak ? " Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
+      note: `Activity resolution set to ${resolutionName}.${registeredStageName ? ` Moved to ${registeredStageName}.` : ""}${isAbandoned ? " Released to Admin's unassigned pool and available in the Abandoned workspace." : releasesForRingingStreak ? " Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : releasesForStallStreak ? " Released to Admin's unassigned pool after 10 consecutive No Busy/Call Back/Call for Next resolutions." : isDoNotCall || isOldGraduate ? " It remains assigned and is available only in its status workspace." : ""}`,
       metadata: {
         resolution_id: resolutionId,
         released_to_admin_pool: releasesAssignment,
         ringing_streak: update.ringing_streak,
+        stall_streak: update.stall_streak,
       },
       created_by: userId,
     });
@@ -4457,8 +4466,8 @@ export async function updateLeadResolutionInline(formData: FormData) {
         lead_id: leadId,
         lead_product_assignment_id: assignmentId,
         activity_type: "lead_released",
-        note: releasesForRingingStreak ? "Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : `Released to Admin's unassigned pool after ${resolutionName}.`,
-        metadata: { resolution_id: resolutionId, released_by: userId, released_for_ringing_streak: releasesForRingingStreak },
+        note: releasesForRingingStreak ? "Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : releasesForStallStreak ? "Released to Admin's unassigned pool after 10 consecutive No Busy/Call Back/Call for Next resolutions." : `Released to Admin's unassigned pool after ${resolutionName}.`,
+        metadata: { resolution_id: resolutionId, released_by: userId, released_for_ringing_streak: releasesForRingingStreak, released_for_stall_streak: releasesForStallStreak },
         created_by: userId,
       });
     if (releaseActivityError) throw new Error(releaseActivityError.message);
