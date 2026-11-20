@@ -351,6 +351,10 @@ export function DashboardShell({
             {!isSidebarCollapsed && "Sign out"}
           </button>
           </form>
+          <Link href="/crm" title="New CRM" aria-label="New CRM" className={`flex w-full rounded-[16px] py-3 text-left text-sm font-bold text-slate-600 transition hover:bg-red-50 hover:text-red-700 ${isSidebarCollapsed ? "justify-center px-0" : "items-center gap-3 px-3"}`}>
+            <span className="text-lg">✨</span>
+            {!isSidebarCollapsed && "New CRM"}
+          </Link>
         </div>
       </aside>
 
@@ -390,6 +394,11 @@ export function DashboardShell({
                   Templates
                   <span className="ml-auto text-lg font-medium text-slate-400">›</span>
                 </Link>}
+                <Link href="/crm" onClick={() => setIsProfileMenuOpen(false)} className="flex min-h-10 items-center gap-3 rounded-xl px-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-red-700">
+                  <span className="text-lg">✨</span>
+                  New CRM
+                  <span className="ml-auto text-lg font-medium text-slate-400">›</span>
+                </Link>
                 <div className="my-2 border-t border-slate-200" />
                 <form action={signOut}><button className="flex min-h-10 w-full items-center gap-3 rounded-xl px-2.5 text-left text-sm font-extrabold text-red-700 transition hover:bg-red-50"><span className="text-lg">↪</span>Sign out</button></form>
               </div>}

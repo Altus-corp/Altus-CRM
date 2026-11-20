@@ -35,7 +35,7 @@ export function AdminCallingCard() {
   const perLead = data && data.assignedLeads ? (data.calls / data.assignedLeads).toFixed(1) : "—";
   const connectRate = data && data.calls ? Math.round((data.connected / data.calls) * 100) : 0;
 
-  return <section className="max-w-xl rounded-2xl border border-slate-100 bg-white p-5 shadow-sm" aria-label="Monthly calling overview">
+  return <section className="max-w-xl rounded-2xl border border-slate-100 bg- p-5 shadow-sm" aria-label="Monthly calling overview">
     <div className="flex items-start justify-between gap-3">
       <div><p className="text-[10px] font-extrabold tracking-[0.12em] text-red-600">THIS MONTH</p><h2 className="mt-0.5 text-lg font-extrabold tracking-[-0.03em] text-slate-900">Calls vs Assigned Leads</h2><p className="text-xs font-medium text-slate-500">{data?.monthLabel ?? "Loading…"}</p></div>
       <Link href="/dashboard/admin/call-report" className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-red-600 px-3.5 text-xs font-bold text-white transition hover:bg-red-700">View more <ArrowRight className="h-3.5 w-3.5" /></Link>
