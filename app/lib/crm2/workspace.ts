@@ -92,7 +92,7 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
   (tgtRes.data ?? []).forEach((t: Raw) => { targets[s(t.user_id)] = { demos: Number(t.demos) || undefined, references: Number(t.references_per_week) || undefined, ambassadors: Number(t.ambassadors) || undefined, callsPerDay: Number(t.calls_per_day) || undefined, leads: Number(t.leads) || undefined }; });
 
   /* assignments (lead × product) */
-  const sel = "id, lead_id, product_id, stage_id, latest_resolution_id, assigned_to, assigned_at, next_follow_up_at, focused_on, is_new_inbound, is_active, updated_at, lead:leads!inner(id, lead_number, first_name, last_name, email, phone, created_at, custom_data, lead_database, ambassador_imported_by, created_by)";
+  const sel = "id, lead_id, product_id, stage_id, latest_resolution_id, assigned_to, assigned_at, next_follow_up_at, focused_on, is_new_inbound, is_active, updated_at, ambassador_user_id, lead:leads!inner(id, lead_number, first_name, last_name, email, phone, created_at, custom_data, lead_database, ambassador_imported_by, created_by)";
   const asg = await pageAll<Raw>((from, to) => {
     let q = db.from("lead_product_assignments").select(sel).eq("is_active", true);
     if (isAmbassadorOnly) q = q.eq("lead.ambassador_imported_by", user.userId);
@@ -124,9 +124,16 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
    * set when an Ambassador submits a lead through their own login — check both. */
   const leadIdsForCp = [...new Set(asg.data.map((a) => s((a.lead as Raw)?.id)))];
   const cpByLead = new Map<string, string>();
+  type ContactRec = { firstName: string; lastName: string; phone: string; email: string };
+  const contactsByLead = new Map<string, ContactRec[]>();
   for (let i = 0; i < leadIdsForCp.length; i += 300) {
-    const { data } = await db.from("lead_channel_partners").select("lead_id, ambassador_id").in("lead_id", leadIdsForCp.slice(i, i + 300));
+    const batch = leadIdsForCp.slice(i, i + 300);
+    const [{ data }, { data: contactRows }] = await Promise.all([
+      db.from("lead_channel_partners").select("lead_id, ambassador_id").in("lead_id", batch),
+      db.from("lead_contacts").select("lead_id, first_name, last_name, phone, email").in("lead_id", batch),
+    ]);
     (data ?? []).forEach((r: Raw) => { if (!cpByLead.has(s(r.lead_id))) cpByLead.set(s(r.lead_id), s(r.ambassador_id)); });
+    (contactRows ?? []).forEach((r: Raw) => { const id = s(r.lead_id); const list = contactsByLead.get(id) ?? []; list.push({ firstName: s(r.first_name), lastName: s(r.last_name), phone: s(r.phone), email: s(r.email) }); contactsByLead.set(id, list); });
   }
   const buildRow = (a: Raw): LeadRow => {
     const L = (a.lead ?? {}) as Raw; const cd = (L.custom_data ?? {}) as Record<string, unknown>;
@@ -135,15 +142,23 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
     const p = prodById.get(s(a.product_id)); const last = lastCall.get(s(a.id)) ?? null; const cc = callCount.get(s(a.id)) ?? [0, 0];
     const name = [L.first_name, L.last_name].filter(Boolean).join(" ");
     const importer = cpByLead.get(s(L.id)) || s(L.ambassador_imported_by);
-    return {
+    const base = {
       id: s(a.id), leadId: s(L.id), no: s(L.lead_number), name: hidePii ? `Lead ${s(L.lead_number)}` : name, first: hidePii ? "" : s(L.first_name), last: hidePii ? "" : s(L.last_name),
       company: s(cd.company_name), phone: hidePii ? "" : s(L.phone), email: hidePii ? "" : s(L.email),
       product: p?.code ?? "UNCATEGORIZED", productId: p?.id ?? null, stage: stageById.get(s(a.stage_id)) ?? "—", stageId: a.stage_id ? s(a.stage_id) : null,
       resolution: res?.name ?? null, resolutionId: res?.id ?? null, bucket: res ? res.bucket : last ? "approach" : "new",
       owner: a.assigned_to ? s(a.assigned_to) : null, assignedAt: a.assigned_at ? s(a.assigned_at) : null, nextFollowUp: a.next_follow_up_at ? s(a.next_follow_up_at) : null,
       lastCalledAt: last, calls: cc[0], connected: cc[1], createdAt: s(L.created_at), source: s(L.lead_database).replace(/_/g, " "),
-      ambassador: importer && ambIds.has(importer) ? importer : null, isNew: !!a.is_new_inbound, focusedOn: a.focused_on ? s(a.focused_on) : null, custom,
+      ambassador: importer && ambIds.has(importer) ? importer : null, isNew: !!a.is_new_inbound, focusedOn: a.focused_on ? s(a.focused_on) : null,
+      ambassadorHasAccount: !!a.ambassador_user_id, custom,
     };
+    // Secondary contacts: same lead/assignment (same product, stage, resolution, owner, etc.) — only their own
+    // name, phone and email differ from the Primary (lead) row. Rendered as a child row under the lead in the table.
+    const contacts = hidePii ? [] : contactsByLead.get(s(L.id)) ?? [];
+    // id stays the same as the parent (it's the same real lead/assignment) so Call/Email/edit actions on a child
+    // row still act on the real record — React's own list key (not this field) is what the table uses for identity.
+    const extraRows: LeadRow[] = contacts.map((c) => ({ ...base, name: [c.firstName, c.lastName].filter(Boolean).join(" "), first: c.firstName, last: c.lastName, phone: c.phone, email: c.email, extraContacts: 0, extraRows: [] }));
+    return { ...base, extraContacts: extraRows.length, extraRows };
   };
   const rows: LeadRow[] = asg.data.map(buildRow);
 

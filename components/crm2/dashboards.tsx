@@ -24,7 +24,8 @@ function LeadList({ id, rows, title, group, sort, hideExtra = [] }: { id: string
   const cols = useMemo(() => leadCols(ctx.ws, ctx.canEdit, toast), [ctx.ws, ctx.canEdit, toast]);
   return <><DataTable<LeadRow> id={id} rows={rows} cols={cols} title={title} hidden={[...hiddenWithCustom(ctx.ws), ...hideExtra]} group={group ?? null} sort={sort ?? null} frozen={1} views={["table", "kanban", "cards", "calendar"]}
     kanban={{ key: (r) => r.bucket, cols: Object.values(BUCKET).map((b) => ({ k: b.key, label: b.label, tone: b.tone })) }} calendarKey={(r) => r.nextFollowUp} rowTone={leadTone}
-    onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} dupeKey={(r) => r.phone} exportName={title ?? "Leads"} card={leadCard(ctx.ws)} minHeight={280} />
+    onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} dupeKey={(r) => r.phone} exportName={title ?? "Leads"} card={leadCard(ctx.ws)} minHeight={280}
+    detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />
     {wa && <ShareWhatsApp title="Message" text={wa.map((r) => r.name).join(", ")} onClose={() => setWa(null)} />}</>;
 }
 export function ListWin({ title, rows, onClose }: { title: string; rows: LeadRow[]; onClose: () => void }) {

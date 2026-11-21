@@ -78,7 +78,7 @@ function Nav({ items, cur, pick }: { items: ReturnType<typeof sidebar>; cur: str
   const isOpen = (grp: string) => open.has(grp) || grp === curGroup;
   const toggle = (grp: string) => setOpen((s) => { const n = new Set(s); if (n.has(grp)) n.delete(grp); else n.add(grp); return n; });
   const out: ReactNode[] = []; let g: string | undefined; let bucket: ReactNode[] = [];
-  const flush = () => { if (g) { out.push(<div key={"grp" + g} className={`grp ${isOpen(g) ? "" : "closed"}`}><button className="ni grp-h" onClick={() => toggle(g!)}><Icon n="cards" /><span className="nl">{g}</span><Icon n="chevd" s="s" className="chev" /></button><div className="sub">{bucket}</div></div>); bucket = []; } };
+  const flush = () => { if (g) { const grp = g; out.push(<div key={"grp" + grp} className={`grp ${isOpen(grp) ? "" : "closed"}`}><button className="ni grp-h" onClick={() => toggle(grp)}><Icon n="cards" /><span className="nl">{grp}</span><Icon n="chevd" s="s" className="chev" /></button><div className="sub">{bucket}</div></div>); bucket = []; } };
   items.forEach((i) => {
     if (i.group !== g) { flush(); g = i.group; }
     const btn = <button key={i.id} className={`ni ${i.id === cur ? "on" : ""}`} onClick={() => pick(i.id)} title={i.label}>{i.icon && !i.group ? <Icon n={i.icon} /> : null}<span className="nl">{i.label}</span>{i.cnt != null && <span className="cnt">{fmt(i.cnt)}</span>}</button>;

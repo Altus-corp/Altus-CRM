@@ -89,6 +89,12 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .fchip:hover{border-color:#cfcfd4}
 .crm2 .fchip.on{border-color:var(--red);color:var(--red);background:var(--red-50)}
 .crm2 .fchip .x{margin-left:2px;opacity:.6}
+/* Embedded classic trigger buttons (e.g. Add/Create Ambassador) dropped into a filter-bar `trail` slot —
+ * override their own Tailwind classes so they read as a pill, matching the fchip/.btn.red convention. */
+.crm2 .trail-pill{display:inline-flex;align-items:center;gap:6px;flex:none}
+.crm2 .trail-pill button{height:29px!important;padding:0 10px!important;border-radius:8px!important;font-size:12px!important;font-weight:700!important;line-height:1!important;background:var(--red)!important;color:#fff!important;border:1px solid var(--red)!important;box-shadow:none!important;white-space:nowrap!important}
+.crm2 .trail-pill button:hover{background:var(--red-d)!important}
+.crm2 .trail-pill button svg{width:12px!important;height:12px!important}
 .crm2 .lsearch{display:flex;align-items:center;gap:6px;height:29px;border:1px solid var(--line);border-radius:8px;padding:0 9px;background:#fff;color:var(--muted);width:200px;flex:none}
 .crm2 .lsearch input{border:0;outline:0;flex:1;min-width:0;background:none;font-size:12px}
 .crm2 .clearall{color:var(--red);font-weight:700;font-size:11.5px;white-space:nowrap;padding:0 4px;flex:none}
@@ -156,6 +162,10 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .t td.edit{cursor:text}
 .crm2 .lname{font-weight:700;color:var(--ink);cursor:pointer}
 .crm2 .lname:hover{color:var(--red);text-decoration:underline}
+.crm2 .exp-badge{display:inline-flex;align-items:center;margin-left:6px;height:18px;padding:0 6px;border-radius:999px;border:1px solid var(--red-100);background:var(--red-50);color:var(--red);font-size:10.5px;font-weight:700;vertical-align:middle}
+.crm2 .exp-badge:hover,.crm2 .exp-badge.on{background:var(--red);border-color:var(--red);color:#fff}
+.crm2 tr.child-row td{background:var(--line-2)}
+.crm2 tr.child-row:hover td{background:var(--hover)}
 .crm2 .newtag{font-size:9px;font-weight:700;color:var(--red);background:var(--red-50);border-radius:5px;padding:1px 5px;margin-left:5px}
 .crm2 .cact{display:inline-flex;gap:6px;color:var(--faint)}
 .crm2 .cact .ic{width:14px;height:14px}
@@ -193,7 +203,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .fgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;padding:14px}
 .crm2 .fld{border:1px solid var(--line);border-radius:9px;padding:8px 10px}
 .crm2 .fld label{display:block;font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.6px;text-transform:uppercase;margin-bottom:3px}
-.crm2 .fld input,.crm2 .fld select{width:100%;border:0;outline:0;font-weight:700;background:none;padding:0}
+.crm2 .fld input,.crm2 .fld select,.crm2 .fld textarea{width:100%;border:0;outline:0;font-weight:700;background:none;padding:0;font-family:inherit;resize:vertical}
 .crm2 .fld.miss{border-color:#F1E3A6;background:#FCF5D9}
 .crm2 .fld.miss label{color:#6E5604}
 .crm2 .tl{padding:14px 18px}

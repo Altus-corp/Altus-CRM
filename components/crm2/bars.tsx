@@ -5,8 +5,9 @@ import { PERIODS, TONES } from "@/app/lib/crm2/config";
 import type { FilterDef, FilterState, Kpi } from "./leads";
 import { Icon, Popover, fmt, usePop } from "./ui";
 
-export function FilterBar<T>({ defs, rows, state, setState, q, setQ, lead }: { defs: FilterDef<T>[]; rows: T[]; state: FilterState; setState: (s: FilterState) => void; q: string; setQ: (q: string) => void; lead?: ReactNode }) {
+export function FilterBar<T>({ defs, rows, state, setState, q, setQ, lead, trail }: { defs: FilterDef<T>[]; rows: T[]; state: FilterState; setState: (s: FilterState) => void; q: string; setQ: (q: string) => void; lead?: ReactNode; trail?: ReactNode }) {
   const [min, setMin] = useState(false); const car = useRef<HTMLDivElement>(null); const pop = usePop();
+  const [searchOpen, setSearchOpen] = useState(false);
   const active = defs.filter((d) => { const v = state[d.k]; return v && ("period" in v || v.size > 0); });
   if (min) return <div className="bar can-hide"><button className="fchip" onClick={() => setMin(false)}><Icon n="funnel" s="s" /> Filters {active.length ? `(${active.length})` : ""} <Icon n="chevd" s="s" /></button></div>;
   const d = defs.find((x) => x.k === pop.key);
@@ -16,7 +17,9 @@ export function FilterBar<T>({ defs, rows, state, setState, q, setQ, lead }: { d
       return <button key={x.k} className={`fchip ${on ? "on" : ""}`} onClick={(e) => pop.open(e.currentTarget, x.k)}><Icon n={x.icon} s="s" />{lab}{on ? <span className="x" onClick={(e) => { e.stopPropagation(); const n = { ...state }; delete n[x.k]; setState(n); }}><Icon n="x" s="s" /></span> : <Icon n="chevd" s="s" />}</button>; })}</div>
     <button className="carr" onClick={() => car.current?.scrollBy({ left: 300, behavior: "smooth" })}><Icon n="chevr" s="s" /></button>
     {active.length > 0 && <button className="clearall" onClick={() => setState({})}>Clear all ({active.length})</button>}
-    <div className="lsearch"><Icon n="search" s="s" /><input placeholder="Search this table…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+    {trail}
+    {searchOpen || q ? <div className="lsearch"><Icon n="search" s="s" /><input autoFocus placeholder="Search this table…" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => { if (!q) setSearchOpen(false); }} /></div>
+      : <button className="sb" title="Search this table" onClick={() => setSearchOpen(true)}><Icon n="search" s="s" /></button>}
     <div className="secbtns"><button className="sb" title="Minimise" onClick={() => setMin(true)}><Icon n="min" s="s" /></button></div>
     {pop.anchor && d && <Popover anchor={pop.anchor} onClose={pop.close} width={260}><FilterPicker def={d} rows={rows} value={state[d.k]} onApply={(v) => { const n = { ...state }; if (v) n[d.k] = v; else delete n[d.k]; setState(n); pop.close(); }} /></Popover>}
   </div>;

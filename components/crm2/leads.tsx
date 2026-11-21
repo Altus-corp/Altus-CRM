@@ -21,7 +21,14 @@ export async function dialLead(leadId: string, assignmentId: string, number: str
   } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Unable to start the call." }; }
 }
 const salesPeople = (ws: Workspace) => ws.people.filter((p) => p.roles.some((r) => r === "sales_executive" || r === "sales_manager" || r === "consultant" || r === "admin"));
+/** Full sales-person list — for display and the "Sales person" filter chip, which anyone may use to filter what they already see. */
 export const ownerOpts = (ws: Workspace): Opt[] => salesPeople(ws).map((p) => ({ v: p.id, l: p.name }));
+/** Whether this viewer may reassign a lead's owner at all — matches manuallyAssignLeads' own server-side check
+ * (admin, or a sales_manager reassigning within their own team). Sales executives/consultants can't reassign. */
+export const canAssignOwner = (ws: Workspace) => ws.roles.includes("admin") || ws.roles.includes("sales_manager");
+/** Who a manager/admin may hand a lead to: admin -> any sales person; sales_manager -> their own team only
+ * (ws.scope is already [self, ...team]) — the server enforces the same scoping again regardless. */
+export const assignableOpts = (ws: Workspace): Opt[] => ws.roles.includes("admin") ? ownerOpts(ws) : salesPeople(ws).filter((p) => ws.scope.includes(p.id)).map((p) => ({ v: p.id, l: p.name }));
 const resTone = (ws: Workspace, r: LeadRow): Tone => (r.resolutionId ? BUCKET[ws.resolutions.find((x) => x.id === r.resolutionId)?.bucket ?? "approach"].tone : "lav");
 
 export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) => void): Col<LeadRow>[] {
@@ -37,7 +44,7 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
     { k: "stage", label: "Stage" },
     { k: "bucket", label: "Priority stage", text: (r) => BUCKET[r.bucket].label, val: (r) => BUCKET[r.bucket].weight, groupVal: (r) => BUCKET[r.bucket].label, groupTone: (r) => BUCKET[r.bucket].tone, render: (r) => <Pill tone={BUCKET[r.bucket].tone}>{BUCKET[r.bucket].label}</Pill> },
     { k: "resolution", label: "Call resolution", text: (r) => r.resolution ?? "Not called", groupTone: (r) => resTone(ws, r), render: (r) => (r.resolution ? <Pill tone={resTone(ws, r)}>{r.resolution}</Pill> : <span style={{ color: "var(--faint)" }}>Not called</span>), edit: e({ options: () => ws.resolutions.map((x) => ({ v: x.id, l: x.name, tone: BUCKET[x.bucket].tone })) }) },
-    { k: "owner", label: "Sales person", text: (r) => personName(ws, r.owner), render: (r) => (r.owner ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={personName(ws, r.owner)} photo={photoFor(ws, r.owner)} />{personName(ws, r.owner)}</span> : <span style={{ color: "var(--faint)" }}>Unassigned</span>), edit: e({ options: () => ownerOpts(ws) }) },
+    { k: "owner", label: "Sales person", text: (r) => personName(ws, r.owner), render: (r) => (r.owner ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={personName(ws, r.owner)} photo={photoFor(ws, r.owner)} />{personName(ws, r.owner)}</span> : <span style={{ color: "var(--faint)" }}>Unassigned</span>), edit: canEdit && canAssignOwner(ws) ? { options: () => assignableOpts(ws) } : undefined },
     { k: "lastCalledAt", label: "Last called", groupVal: (r) => (!r.lastCalledAt ? "Never called" : (daysSince(r.lastCalledAt) ?? 0) <= 3 ? "0–3 days" : (daysSince(r.lastCalledAt) ?? 0) <= 7 ? "4–7 days" : "8+ days"), render: (r) => { const d = daysSince(r.lastCalledAt); return <span style={{ color: d == null ? TONES.rose.ink : d > 7 ? TONES.butter.ink : undefined, fontWeight: d == null || d > 7 ? 700 : 400 }}>{ago(r.lastCalledAt)}</span>; } },
     { k: "notCalled", label: "Not called since assigned", num: true, group: false, val: (r) => (!r.lastCalledAt && r.assignedAt ? daysSince(r.assignedAt) : null), render: (r) => { const v = !r.lastCalledAt && r.assignedAt ? daysSince(r.assignedAt) : null; return v == null ? "—" : <b style={{ color: v > 3 ? TONES.rose.ink : TONES.butter.ink }}>{v} d</b>; } },
     { k: "nextFollowUp", label: "Next follow-up", edit: e({ type: "date" as const }), groupVal: (r) => { if (!r.nextFollowUp) return "No follow-up"; const d = -(daysSince(r.nextFollowUp) ?? 0); return d < 0 ? "Overdue" : d === 0 ? "Today" : d <= 7 ? "This week" : "Later"; }, render: (r) => { if (!r.nextFollowUp) return "—"; const d = -(daysSince(r.nextFollowUp) ?? 0); return <span style={{ color: d < 0 ? TONES.rose.ink : d === 0 ? TONES.peach.ink : undefined, fontWeight: d <= 0 ? 700 : 400 }}>{fdate(r.nextFollowUp)}{d < 0 ? ` · ${-d}d late` : d === 0 ? " · today" : ""}</span>; } },

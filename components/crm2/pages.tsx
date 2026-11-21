@@ -5,7 +5,12 @@ import { BUCKETS, BUCKET, TONES, dashesFor, type BucketKey, type Tone } from "@/
 import { indiaToday } from "@/app/lib/lead-event-schedule";
 import * as M from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
-import { v2ListUsers, v2SaveBucket, v2SaveHygieneRule, v2SaveTarget } from "@/app/crm/actions";
+import { v2ListMarketplace, v2ListUsers, v2SaveBucket, v2SaveHygieneRule, v2SaveTarget } from "@/app/crm/actions";
+import { LeadsManagementApi } from "@/components/marketplace/leads-management-api";
+import { AdminTeamsPage } from "./teams-board";
+import { AdminColumnsPage, AdminDropdownsPage, AdminLeadConfigPage, AdminProductsPage } from "./lead-config-board";
+import { CreateAmbassadorAccountModal } from "@/components/ambassadors/create-ambassador-account-modal";
+import { AmbassadorAddModal } from "@/components/ambassadors/ambassador-add-modal";
 import { displayProductCode } from "@/app/lib/product-display";
 import { APP_ROLES, ROLE_LABELS, type AppRole } from "@/app/lib/roles";
 import { toggleUserSuspension } from "@/app/dashboard/users/actions";
@@ -37,33 +42,32 @@ export function sidebar(ctx: Ctx, mod: string): NavItem[] {
     { id: "calls", label: "Call Log", icon: "phone" }, { id: "activity", label: "Activity Report", icon: "list" },
     { id: "classic-templates", label: "Message Templates", icon: "note" },
   ];
-  if (mod === "ambassadors") return [{ id: "mine", label: "My Ambassador", icon: "user", cnt: live.filter((r) => r.product === "AMBASSADOR").length }, ...(isAdmin ? [{ id: "all", label: "All Ambassadors", icon: "users", cnt: M.ambassadorIds(ws).length }] : []), { id: "leads", label: "Ambassador Leads", icon: "list", cnt: ws.rows.filter((r) => r.ambassador).length + ws.ambassadorManagedRows.length }, { id: "targets", label: "Targets & Actuals", icon: "target" }, { id: "classic-ambassadors", label: "Ambassador workspace (classic)", icon: "ext" }];
-  if (mod === "admin") return [{ id: "targets", label: "Targets Setup", icon: "target" }, { id: "users", label: "Users", icon: "user" }, { id: "classic-team", label: "Teams", icon: "users" }, { id: "classic-marketplace", label: "CRM Marketplace · API", icon: "key" }];
-  if (mod === "control") return [{ id: "buckets", label: "Stage Buckets", icon: "funnel" }, { id: "hygiene", label: "Hygiene Rules", icon: "db" }, { id: "colours", label: "Colour Legend", icon: "palette" }, { id: "classic-leadcfg", label: "Lead Configuration", icon: "sliders" }, { id: "classic-columns", label: "Columns", icon: "cols" }, { id: "classic-products", label: "Products & Stages", icon: "layers" }, { id: "classic-dropdowns", label: "Dropdowns", icon: "list" }, { id: "classic-smtp", label: "Email (SMTP)", icon: "mail" }];
+  if (mod === "ambassadors") return [{ id: "mine", label: "My Ambassador", icon: "user", cnt: live.filter((r) => r.product === "AMBASSADOR").length }, { id: "accounts", label: "Ambassador Accounts", icon: "key", cnt: live.filter((r) => r.product === "AMBASSADOR" && !r.ambassadorHasAccount).length }, ...(isAdmin ? [{ id: "all", label: "All Ambassadors", icon: "users", cnt: M.ambassadorIds(ws).length }] : []), { id: "leads", label: "Ambassador Leads", icon: "list", cnt: ws.rows.filter((r) => r.ambassador).length + ws.ambassadorManagedRows.length }, { id: "targets", label: "Targets & Actuals", icon: "target" }, { id: "classic-ambassadors", label: "Ambassador workspace (classic)", icon: "ext" }];
+  if (mod === "admin") return [{ id: "targets", label: "Targets Setup", icon: "target" }, { id: "users", label: "Users", icon: "user" }, { id: "team", label: "Teams", icon: "users" }, { id: "marketplace", label: "CRM Marketplace · API", icon: "key" }];
+  if (mod === "control") return [{ id: "buckets", label: "Stage Buckets", icon: "funnel" }, { id: "hygiene", label: "Hygiene Rules", icon: "db" }, { id: "colours", label: "Colour Legend", icon: "palette" }, { id: "leadcfg", label: "Lead Configuration", icon: "sliders" }, { id: "columns", label: "Columns management", icon: "cols" }, { id: "products", label: "Product management", icon: "layers" }, { id: "dropdowns", label: "Dropdown management", icon: "list" }, { id: "classic-smtp", label: "Email (SMTP)", icon: "mail" }];
   return [{ id: "overview", label: "Overview", icon: "info" }];
 }
 const CLASSIC: Record<string, [string, string]> = {
   "classic-templates": ["/dashboard/message-templates", "Message templates"], "classic-ambassadors": ["/dashboard/my-ambassador", "Ambassador workspace"],
-  "classic-team": ["/dashboard/team", "Teams"], "classic-marketplace": ["/dashboard/crm-market-place", "CRM Marketplace"],
-  "classic-leadcfg": ["/dashboard/lead-settings", "Lead configuration (round robin, distribution, weekly targets)"], "classic-columns": ["/dashboard/lead-settings?tab=columns", "Columns management"],
-  "classic-products": ["/dashboard/lead-settings?tab=products", "Products, stages & call resolutions"], "classic-dropdowns": ["/dashboard/lead-settings?tab=stages", "Dropdown management"], "classic-smtp": ["/dashboard/settings", "My email (SMTP) settings"],
+  "classic-smtp": ["/dashboard/settings", "My email (SMTP) settings"],
 };
 
 /* ---------- generic table page ---------- */
-function TablePage<T extends { id: string }>({ pid, rows, filters, kpis, table }: { pid: string; rows: T[]; filters: FilterDef<T>[]; kpis?: (rows: T[]) => Kpi<T>[]; table: (rows: T[], q: string) => ReactNode }) {
+function TablePage<T extends { id: string }>({ pid, rows, filters, kpis, table, trail }: { pid: string; rows: T[]; filters: FilterDef<T>[]; kpis?: (rows: T[]) => Kpi<T>[]; table: (rows: T[], q: string) => ReactNode; trail?: ReactNode }) {
   const [f, setF] = useState<FilterState>({}); const [q, setQ] = useState(""); const [k, setK] = useState<string | null>(null);
   const after = useMemo(() => applyFilters(rows, filters, f), [rows, filters, f]); const kp = kpis ? kpis(after) : []; const kk = kp.find((x) => x.k === k);
   const shown = kk?.test ? after.filter(kk.test) : after;
-  return <><FilterBar defs={filters} rows={rows} state={f} setState={setF} q={q} setQ={setQ} />{kp.length > 0 && <KpiBar kpis={kp} active={k} onPick={setK} />}<div key={pid} style={{ display: "contents" }}>{table(shown, q)}</div></>;
+  return <><FilterBar defs={filters} rows={rows} state={f} setState={setF} q={q} setQ={setQ} trail={trail} />{kp.length > 0 && <KpiBar kpis={kp} active={k} onPick={setK} />}<div key={pid} style={{ display: "contents" }}>{table(shown, q)}</div></>;
 }
-function LeadPage({ pid, rows, group, sort, kanbanStages }: { pid: string; rows: LeadRow[]; group?: string; sort?: { k: string; dir: 1 | -1 }; kanbanStages?: string[] }) {
+function LeadPage({ pid, rows, group, sort, kanbanStages, trail }: { pid: string; rows: LeadRow[]; group?: string; sort?: { k: string; dir: 1 | -1 }; kanbanStages?: string[]; trail?: ReactNode }) {
   const ctx = useCrm(); const toast = useToast(); const [wa, setWa] = useState<LeadRow[] | null>(null);
   const cols = useMemo(() => leadCols(ctx.ws, ctx.canEdit, toast), [ctx.ws, ctx.canEdit, toast]); const filters = useMemo(() => leadFilters(ctx.ws), [ctx.ws]);
   const kpis = kanbanStages ? (rs: LeadRow[]): Kpi<LeadRow>[] => [{ k: "all", n: rs.length, label: "Total", tone: "slate" }, ...kanbanStages.map((s, i) => ({ k: "st" + i, n: rs.filter((r) => r.stage === s).length, label: s, tone: (["lav", "sky", "peach", "butter", "mint"] as Tone[])[i % 5], test: (r: LeadRow) => r.stage === s })), { k: "overdue", n: rs.filter((r) => r.nextFollowUp && (M.daysSince(r.nextFollowUp) ?? 0) > 0).length, label: "Overdue follow-ups", tone: "rose", test: (r) => !!r.nextFollowUp && (M.daysSince(r.nextFollowUp) ?? 0) > 0 }] : (rs: LeadRow[]) => leadKpis(ctx.ws, rs);
   const stageCols = kanbanStages?.map((s, i) => ({ k: s, label: s, tone: (["lav", "sky", "peach", "butter", "mint"] as Tone[])[i % 5] }));
-  return <><TablePage pid={pid} rows={rows} filters={filters} kpis={kpis} table={(shown, q) => <DataTable<LeadRow> id={pid} rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ctx.ws)} group={group ?? null} sort={sort ?? null} frozen={2} views={["table", "kanban", "cards", "calendar"]}
+  return <><TablePage pid={pid} rows={rows} filters={filters} kpis={kpis} trail={trail} table={(shown, q) => <DataTable<LeadRow> id={pid} rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ctx.ws)} group={group ?? null} sort={sort ?? null} frozen={2} views={["table", "kanban", "cards", "calendar"]}
     kanban={stageCols ? { key: (r) => r.stage, cols: stageCols, onMove: (r, s) => { const st = ctx.ws.products.find((p) => p.code === r.product)?.stages.find((x) => x.name === s); if (st) leadEditor(ctx, toast)([r], { k: "stageId", label: "Stage" }, st.id).then(() => ctx.patchRows([r.id], { stage: s, stageId: st.id })); } } : { key: (r) => r.bucket, cols: BUCKETS.map((b) => ({ k: b.key, label: b.label, tone: b.tone })) }}
-    calendarKey={(r) => r.nextFollowUp} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} dupeKey={(r) => r.phone} exportName={pid} card={leadCard(ctx.ws)} />} />
+    calendarKey={(r) => r.nextFollowUp} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} dupeKey={(r) => r.phone} exportName={pid} card={leadCard(ctx.ws)}
+    detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />} />
     {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
 }
 
@@ -83,15 +87,22 @@ export function PageBody({ mod, page }: { mod: string; page: string }) {
     if (page === "activity") return null; // rendered as the Activity Resolution dashboard by the shell
   }
   if (mod === "ambassadors") {
-    if (page === "mine") return <LeadPage pid="amb-mine" rows={live.filter((r) => r.product === "AMBASSADOR")} sort={{ k: "score", dir: -1 }} />;
+    if (page === "mine") return <LeadPage pid="amb-mine" rows={live.filter((r) => r.product === "AMBASSADOR")} sort={{ k: "score", dir: -1 }} trail={<span className="trail-pill">{ws.roles.includes("admin") ? <CreateAmbassadorAccountModal /> : <><AmbassadorAddModal /><CreateAmbassadorAccountModal /></>}</span>} />;
+    if (page === "accounts") return <AmbassadorAccountsPage />;
     if (page === "all" && ws.roles.includes("admin")) return <AmbassadorTable />;
     if (page === "leads") return <LeadPage pid="amb-leads" rows={[...ws.rows.filter((r) => r.ambassador), ...ws.ambassadorManagedRows]} group="ambassador" />;
   }
   if (mod === "admin" && page === "targets") return <TargetsSetup />;
   if (mod === "admin" && page === "users") return <AdminUsersPage />;
+  if (mod === "admin" && page === "marketplace") return <AdminMarketplacePage />;
+  if (mod === "admin" && page === "team") return <AdminTeamsPage />;
   if (mod === "control" && page === "buckets") return <BucketsPage />;
   if (mod === "control" && page === "hygiene") return <HygienePage />;
   if (mod === "control" && page === "colours") return <ColoursPage />;
+  if (mod === "control" && page === "leadcfg") return <AdminLeadConfigPage />;
+  if (mod === "control" && page === "columns") return <AdminColumnsPage />;
+  if (mod === "control" && page === "products") return <AdminProductsPage />;
+  if (mod === "control" && page === "dropdowns") return <AdminDropdownsPage />;
   return <Center tone="lav" icon="info" title="Coming soon" text="This module's slot is reserved in the top bar, so the layout will not change when it ships." />;
 }
 const Center = ({ tone, icon, title, text, children }: { tone: Tone; icon: string; title: string; text: string; children?: ReactNode }) => <div className="soonbox"><div className="tile" style={{ ...toneStyle(tone), padding: 28, alignItems: "center", gap: 10, textAlign: "center" }}><Icon n={icon} s="l" /><span className="tv">{title}</span><span className="ts">{text}</span>{children}</div></div>;
@@ -104,6 +115,20 @@ function CallLog() {
   const kpis = (rs: CallRow[]): Kpi<CallRow>[] => [{ k: "all", n: rs.length, label: "Calls", tone: "slate" }, { k: "c", n: rs.filter((r) => r.c === "Connected").length, label: "Connected", tone: "mint", test: (r) => r.c === "Connected" }, { k: "nc", n: rs.filter((r) => r.c !== "Connected").length, label: "Not connected", tone: "rose", test: (r) => r.c !== "Connected" }, { k: "o", n: rs.filter((r) => r.out === "Outgoing").length, label: "Outgoing", tone: "sky", test: (r) => r.out === "Outgoing" }, { k: "m", n: Math.round(rs.reduce((s, r) => s + r.d, 0) / 60), label: "Talk minutes", tone: "sage" }];
   const cols: Col<CallRow>[] = [{ k: "t", label: "Called at", render: (r) => fdt(r.t), groupVal: (r) => r.t.slice(0, 10) }, { k: "person", label: "Sales person" }, { k: "lead", label: "Lead", group: false }, { k: "product", label: "Product" }, { k: "out", label: "Direction" }, { k: "c", label: "Status", render: (r) => <Pill tone={r.c === "Connected" ? "mint" : "rose"}>{r.c}</Pill> }, { k: "d", label: "Duration (s)", num: true, group: false }];
   return <TablePage pid="calls" rows={rows} filters={filters} kpis={kpis} table={(shown, q) => <DataTable<CallRow> id="sales-calls" rows={shown} q={q} cols={cols} group="t" rowTone={(r) => (r.c === "Connected" ? "mint" : "rose")} exportName="Call log" />} />;
+}
+/** Ambassador leads (product === AMBASSADOR) with whether each already has a CRM login — same scope as "My
+ * Ambassador" (self / own team / everyone, via ws.rows), plus an account-status column and filter so it's
+ * easy to find which Ambassadors still need Create Ambassador Account run for them. */
+function AmbassadorAccountsPage() {
+  const ctx = useCrm(); const toast = useToast(); const { ws } = ctx;
+  const [wa, setWa] = useState<LeadRow[] | null>(null);
+  const rows = useMemo(() => ws.rows.filter((r) => M.isLive(r) && r.product === "AMBASSADOR"), [ws.rows]);
+  const cols = useMemo((): Col<LeadRow>[] => [...leadCols(ws, ctx.canEdit, toast), { k: "acct", label: "Account", group: false, text: (r) => (r.ambassadorHasAccount ? "Has account" : "No account"), render: (r) => <Pill tone={r.ambassadorHasAccount ? "mint" : "rose"}>{r.ambassadorHasAccount ? "Has account" : "No account"}</Pill> }], [ws, ctx.canEdit, toast]);
+  const filters = useMemo((): FilterDef<LeadRow>[] => [...leadFilters(ws), { k: "acct", label: "Account", icon: "key", get: (r) => (r.ambassadorHasAccount ? "yes" : "no"), opts: () => [{ v: "no", l: "No account yet" }, { v: "yes", l: "Has account" }] }], [ws]);
+  const kpis = (rs: LeadRow[]): Kpi<LeadRow>[] => [{ k: "all", n: rs.length, label: "Ambassadors", tone: "slate" }, { k: "noacct", n: rs.filter((r) => !r.ambassadorHasAccount).length, label: "No account yet", tone: "rose", test: (r) => !r.ambassadorHasAccount }, { k: "acct", n: rs.filter((r) => r.ambassadorHasAccount).length, label: "Has account", tone: "mint", test: (r) => r.ambassadorHasAccount }];
+  return <><TablePage pid="amb-accounts" rows={rows} filters={filters} kpis={kpis} trail={<span className="trail-pill">{ws.roles.includes("admin") ? <CreateAmbassadorAccountModal /> : <><AmbassadorAddModal /><CreateAmbassadorAccountModal /></>}</span>}
+    table={(shown, q) => <DataTable<LeadRow> id="amb-accounts" rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} exportName="Ambassador accounts" card={leadCard(ws)} />} />
+    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
 }
 type AmbRow = { id: string; name: string; leads30: number; leadsAll: number; hot: number; demos30: number; tLeads: number; tDemos: number };
 function AmbassadorTable() {
@@ -157,6 +182,18 @@ function AdminUsersPage() {
     <KpiBar kpis={kp} active={k} onPick={setK} />
     <DataTable<ManagedUser> id="admin-users" rows={shown} q={q} cols={userCols(data.transferUsers)} frozen={1} views={["table", "cards"]} exportName="Users" />
   </>;
+}
+/** Same Leads Management API key UI as /dashboard/crm-market-place, embedded here (same server actions, no backend changes). */
+function AdminMarketplacePage() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof v2ListMarketplace>> | null>(null);
+  const [error, setError] = useState(""); const [gen, setGen] = useState(0);
+  useEffect(() => { let live = true; v2ListMarketplace().then((d) => live && setData(d)).catch((e) => live && setError(e instanceof Error ? e.message : "Unable to load the marketplace.")); return () => { live = false; }; }, [gen]);
+  if (error) return <Center tone="rose" icon="info" title="Could not load CRM Marketplace" text={error} />;
+  if (!data) return <div className="empty">Loading…</div>;
+  return <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: "flex", justifyContent: "flex-end" }}><button className="btn" onClick={() => setGen((g) => g + 1)} title="Reload — a created/paused/edited key doesn't appear here until you refresh"><Icon n="refresh" s="s" /> Refresh</button></div>
+    <LeadsManagementApi apiKeys={data.apiKeys} databaseReady={data.databaseReady} apiActivityLogs={data.apiActivityLogs} auditReady={data.auditReady} />
+  </div>;
 }
 type BRow = { id: string; name: string; bucket: BucketKey; leads: number };
 function BucketsPage() {

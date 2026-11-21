@@ -23,6 +23,9 @@ export type TableProps<T extends { id: string }> = {
   views?: View[]; kanban?: { key: (r: T) => string; cols: { k: string; label: string; tone: Tone }[]; onMove?: (r: T, k: string) => void };
   calendarKey?: (r: T) => string | null; rowTone?: (r: T) => Tone; onOpen?: (r: T, list: T[]) => void; bulk?: BulkAction<T>[];
   onEdit?: (rows: T[], col: Col<T>, value: string) => Promise<void> | void; q?: string; dupeKey?: (r: T) => string; exportName?: string; card?: (r: T) => ReactNode; minHeight?: number;
+  /** A "+N" badge next to the first column — click to expand child rows beneath it, same columns as the parent
+   * row (e.g. a lead's secondary contacts: same product/stage/etc., only name/phone/email differ). */
+  detail?: { count: (r: T) => number; rows: (r: T) => T[] };
 };
 /** Local search text for tables that do not receive `q` directly (e.g. dashboard tables). */
 export const TableQCtx = createContext("");
@@ -48,6 +51,8 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
   const set = (x: Partial<Prefs>) => setPrefs((s) => ({ ...s, ...x }));
   const [sort, setSort] = useState(p.sort ?? null); const [page, setPage] = useState(1); const [sel, setSel] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); const [dupes, setDupes] = useState(false); const [min, setMin] = useState(false); const [maxed, setMaxed] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [win, setWin] = useState<null | "transpose" | "email" | "whatsapp">(null); const [mShow, setMShow] = useState(20);
   const dragCol = useRef<string | null>(null);
 
@@ -134,16 +139,21 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
       {all.length > pageRows.length ? <button className="btn more" onClick={() => setMShow((n) => n + 30)}>Show more · {pageRows.length} of {all.length}</button> : <div className="empty" style={{ padding: 12 }}>{all.length} records</div>}</>;
   } else {
     const gr = groups(pageRows);
-    const tr = (r: T) => { const tn = p.rowTone?.(r); return (
-      <tr key={r.id} className={`${sel.has(r.id) ? "sel" : ""} ${tn ? "lb" : ""}`} style={tn ? ({ ["--lbc" as string]: TONES[tn].mk }) : undefined} onDoubleClick={() => p.onOpen?.(r, all)}>
+    const childTr = (child: T, parentId: string, idx: number) => <tr key={parentId + ":c" + idx} className="child-row" onDoubleClick={() => p.onOpen?.(child, all)}>
+      <td className="c0 frz" style={{ left: 0 }} />
+      {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}>{i === 0 ? <span className="lname" style={{ paddingLeft: 18 }}>{cell(c, child)}</span> : cell(c, child)}</td>)}</tr>;
+    const tr = (r: T): ReactNode[] => { const tn = p.rowTone?.(r); const dCount = p.detail?.count(r) ?? 0; const isOpen = expanded.has(r.id);
+      const main = <tr key={r.id} className={`${sel.has(r.id) ? "sel" : ""} ${tn ? "lb" : ""}`} style={tn ? ({ ["--lbc" as string]: TONES[tn].mk }) : undefined} onDoubleClick={() => p.onOpen?.(r, all)}>
         <td className="c0 frz" style={{ left: 0 }}><input type="checkbox" className="cb" checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></td>
         {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""} ${c.edit ? "edit" : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}
-          onClick={(e) => { if (i === 0) return p.onOpen?.(r, all); if (c.edit) pop.open(e.currentTarget, `cell:${r.id}:${c.k}`); }}>{i === 0 ? <span className="lname">{cell(c, r)}</span> : cell(c, r)}</td>)}</tr>); };
+          onClick={(e) => { if (i === 0) return p.onOpen?.(r, all); if (c.edit) pop.open(e.currentTarget, `cell:${r.id}:${c.k}`); }}>{i === 0 ? <span className="lname">{cell(c, r)}{dCount > 0 && <button type="button" className={`exp-badge ${isOpen ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); toggleExpanded(r.id); }} title={`${dCount} more contact${dCount > 1 ? "s" : ""}`}>+{dCount}</button>}</span> : cell(c, r)}</td>)}</tr>;
+      const children = p.detail && isOpen ? p.detail.rows(r).map((child, idx) => childTr(child, r.id, idx)) : [];
+      return [main, ...children]; };
     body = <table className="t"><thead><tr><th className="c0 frz" style={{ left: 0 }} />
       {cols.map((c, i) => { const s = sort?.k === c.k; return <th key={c.k} draggable onDragStart={() => (dragCol.current = c.k)} onDragOver={(e) => e.preventDefault()} onDrop={() => { const f = dragCol.current; if (!f || f === c.k) return; const o = order.filter((k) => k !== f); o.splice(o.indexOf(c.k), 0, f); set({ order: o }); }}
         className={`${c.num ? "num" : ""} ${s ? "sorted" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""}`} style={{ ...(fz[c.k] != null ? { left: fz[c.k] } : {}), ...(c.w ? { minWidth: c.w } : {}) }}>
         <span className="h" onClick={() => setSort(!s ? { k: c.k, dir: 1 } : sort!.dir === 1 ? { k: c.k, dir: -1 } : null)}>{c.label} <span className="srt">{s ? (sort!.dir > 0 ? "▲" : "▼") : "↕"}</span></span></th>; })}</tr></thead>
-      <tbody>{gr ? [...gr.g.entries()].flatMap(([k, rs]) => [<tr key={"g" + k} className="grp" onClick={() => setCollapsed((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; })}><td className="c0 frz" style={{ left: 0 }}>{collapsed.has(k) ? "▸" : "▾"}</td><td colSpan={cols.length}>{gr.gc.label}: {gr.gc.groupTone ? <Pill tone={gr.gc.groupTone(rs[0])}>{k}</Pill> : k} <span className="gc">{gr.counts.get(k)} records</span></td></tr>, ...(collapsed.has(k) ? [] : rs.map(tr))]) : pageRows.map(tr)}</tbody></table>;
+      <tbody>{gr ? [...gr.g.entries()].flatMap(([k, rs]) => [<tr key={"g" + k} className="grp" onClick={() => setCollapsed((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; })}><td className="c0 frz" style={{ left: 0 }}>{collapsed.has(k) ? "▸" : "▾"}</td><td colSpan={cols.length}>{gr.gc.label}: {gr.gc.groupTone ? <Pill tone={gr.gc.groupTone(rs[0])}>{k}</Pill> : k} <span className="gc">{gr.counts.get(k)} records</span></td></tr>, ...(collapsed.has(k) ? [] : rs.flatMap(tr))]) : pageRows.flatMap(tr)}</tbody></table>;
   }
 
   /* ---------- popovers ---------- */

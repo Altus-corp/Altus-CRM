@@ -34,6 +34,13 @@ export type LeadRow = {
   ambassador: string | null; // leads.ambassador_imported_by
   isNew: boolean;
   focusedOn: string | null; // lead_product_assignments.focused_on — the day this lead is in the assignee's daily call list
+  /** Only meaningful when product === "AMBASSADOR": whether this Ambassador lead already has a CRM login
+   * (lead_product_assignments.ambassador_user_id, set once Create Ambassador Account matches them by phone). */
+  ambassadorHasAccount: boolean;
+  extraContacts: number; // lead_contacts rows for this lead (secondary contacts beyond the lead's own Primary contact)
+  /** One synthetic row per secondary contact — same product/stage/resolution/owner/etc. as this row, only
+   * name/phone/email differ. Rendered as child rows under this lead in the table when expanded. */
+  extraRows: LeadRow[];
   custom: Record<string, string>;
 };
 export type CallEv = { u: string; t: string; c: boolean; out: boolean; d: number; a: string | null };
