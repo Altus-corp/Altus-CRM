@@ -1,7 +1,7 @@
 "use client";
 // Sidebars per module + every page. Table pages = filter bar → KPI chips → table (≈80% of the screen).
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { BUCKETS, BUCKET, TONES, dashesFor, type BucketKey, type Tone } from "@/app/lib/crm2/config";
+import { BUCKETS, BUCKET, TONES, dashesFor, primaryRole, type BucketKey, type Tone } from "@/app/lib/crm2/config";
 import { indiaToday } from "@/app/lib/lead-event-schedule";
 import * as M from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
@@ -18,12 +18,12 @@ import { UserModal } from "@/app/dashboard/users/user-modal";
 import { EditUserModal } from "@/app/dashboard/users/edit-user-modal";
 import { DeleteUserDialog } from "@/app/dashboard/users/delete-user-dialog";
 import { UserRolesEditor } from "@/app/dashboard/users/user-roles-editor";
-import type { ManagedUser } from "@/app/dashboard/users/users-table";
+import type { V2ManagedUser } from "@/app/crm/actions";
 import { useCrm, type Ctx } from "./context";
 import { DataTable, ShareWhatsApp, type Col } from "./DataTable";
 import { FilterBar, KpiBar } from "./bars";
 import { applyFilters, hiddenWithCustom, leadBulk, leadCard, leadCols, leadEditor, leadFilters, leadKpis, leadTone, type FilterDef, type FilterState, type Kpi } from "./leads";
-import { Avatar, Icon, Pill, fdt, toneStyle, useToast } from "./ui";
+import { Avatar, Icon, Pill, Popover, fdt, toneStyle, usePop, useToast } from "./ui";
 
 export type NavItem = { id: string; label: string; icon?: string; cnt?: number; group?: string };
 export function sidebar(ctx: Ctx, mod: string): NavItem[] {
@@ -42,7 +42,7 @@ export function sidebar(ctx: Ctx, mod: string): NavItem[] {
     { id: "calls", label: "Call Log", icon: "phone" }, { id: "activity", label: "Activity Report", icon: "list" },
     { id: "classic-templates", label: "Message Templates", icon: "note" },
   ];
-  if (mod === "ambassadors") return [{ id: "mine", label: "My Ambassador", icon: "user", cnt: live.filter((r) => r.product === "AMBASSADOR").length }, { id: "accounts", label: "Ambassador Accounts", icon: "key", cnt: live.filter((r) => r.product === "AMBASSADOR" && !r.ambassadorHasAccount).length }, ...(isAdmin ? [{ id: "all", label: "All Ambassadors", icon: "users", cnt: M.ambassadorIds(ws).length }] : []), { id: "leads", label: "Ambassador Leads", icon: "list", cnt: ws.rows.filter((r) => r.ambassador).length + ws.ambassadorManagedRows.length }, { id: "targets", label: "Targets & Actuals", icon: "target" }, { id: "classic-ambassadors", label: "Ambassador workspace (classic)", icon: "ext" }];
+  if (mod === "ambassadors") return [{ id: "dashboard", label: "Dashboard", icon: "home" }, { id: "mine", label: "My Ambassador", icon: "user", cnt: live.filter((r) => r.product === "AMBASSADOR").length }, { id: "accounts", label: "Ambassador Accounts", icon: "key", cnt: live.filter((r) => r.product === "AMBASSADOR" && !r.ambassadorHasAccount).length }, ...(isAdmin ? [{ id: "all", label: "All Ambassadors", icon: "users", cnt: M.ambassadorIds(ws).length }] : []), { id: "leads", label: "Ambassador Leads", icon: "list", cnt: ws.rows.filter((r) => r.ambassador).length + ws.ambassadorManagedRows.length }, { id: "targets", label: "Targets & Actuals", icon: "target" }, { id: "classic-ambassadors", label: "Ambassador workspace (classic)", icon: "ext" }];
   if (mod === "admin") return [{ id: "targets", label: "Targets Setup", icon: "target" }, { id: "users", label: "Users", icon: "user" }, { id: "team", label: "Teams", icon: "users" }, { id: "marketplace", label: "CRM Marketplace · API", icon: "key" }];
   if (mod === "control") return [{ id: "buckets", label: "Stage Buckets", icon: "funnel" }, { id: "hygiene", label: "Hygiene Rules", icon: "db" }, { id: "colours", label: "Colour Legend", icon: "palette" }, { id: "leadcfg", label: "Lead Configuration", icon: "sliders" }, { id: "columns", label: "Columns management", icon: "cols" }, { id: "products", label: "Product management", icon: "layers" }, { id: "dropdowns", label: "Dropdown management", icon: "list" }, { id: "classic-smtp", label: "Email (SMTP)", icon: "mail" }];
   return [{ id: "overview", label: "Overview", icon: "info" }];
@@ -87,6 +87,7 @@ export function PageBody({ mod, page }: { mod: string; page: string }) {
     if (page === "activity") return null; // rendered as the Activity Resolution dashboard by the shell
   }
   if (mod === "ambassadors") {
+    if (page === "dashboard") return <AmbassadorDashboardPage />;
     if (page === "mine") return <LeadPage pid="amb-mine" rows={live.filter((r) => r.product === "AMBASSADOR")} sort={{ k: "score", dir: -1 }} trail={<span className="trail-pill">{ws.roles.includes("admin") ? <CreateAmbassadorAccountModal /> : <><AmbassadorAddModal /><CreateAmbassadorAccountModal /></>}</span>} />;
     if (page === "accounts") return <AmbassadorAccountsPage />;
     if (page === "all" && ws.roles.includes("admin")) return <AmbassadorTable />;
@@ -130,6 +131,45 @@ function AmbassadorAccountsPage() {
     table={(shown, q) => <DataTable<LeadRow> id="amb-accounts" rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} exportName="Ambassador accounts" card={leadCard(ws)} />} />
     {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
 }
+/** Ambassador Module → Dashboard: Agreement Signed/Waived + Pitched counts among this viewer's Ambassadors
+ * (same scope as My Ambassador — self / self+team / everyone, via ws.rows), plus — for admin/manager only —
+ * a per-sales-person breakdown of how many Ambassadors each of them has. */
+function AmbassadorDashboardPage() {
+  const ctx = useCrm(); const toast = useToast(); const { ws } = ctx;
+  const [wa, setWa] = useState<LeadRow[] | null>(null);
+  const rows = useMemo(() => ws.rows.filter((r) => r.product === "AMBASSADOR"), [ws.rows]);
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const is = (r: LeadRow, label: string) => !!r.resolution && norm(r.resolution) === norm(label);
+  const kpis = (rs: LeadRow[]): Kpi<LeadRow>[] => [
+    { k: "all", n: rs.length, label: "All Ambassadors", tone: "slate" },
+    { k: "signed", n: rs.filter((r) => is(r, "Agreement Signed/ Waived")).length, label: "Agreement Signed/ Waived", tone: "mint", test: (r) => is(r, "Agreement Signed/ Waived") },
+    { k: "pitched", n: rs.filter((r) => is(r, "Pitched")).length, label: "Pitched", tone: "aqua", test: (r) => is(r, "Pitched") },
+  ];
+  const cols = useMemo(() => leadCols(ws, ctx.canEdit, toast), [ws, ctx.canEdit, toast]);
+  // Looked up by label, not a hardcoded field_key, since custom column keys carry a random suffix
+  // (e.g. "demo_given_8afb13") assigned when the column was created in Control Panel → Columns management.
+  const demoCol = ws.columns.find((c) => norm(c.label) === "demogiven");
+  const filters = useMemo((): FilterDef<LeadRow>[] => (demoCol ? [{ k: "demo", label: "Demo Given", icon: "video", get: (r) => r.custom[demoCol.key] || "none", opts: () => [{ v: "Yes", l: "Yes" }, { v: "No", l: "No" }, { v: "none", l: "Not set" }] }] : []), [demoCol]);
+  const breakdown = useMemo(() => {
+    const byOwner = new Map<string, number>();
+    rows.forEach((r) => { if (r.owner) byOwner.set(r.owner, (byOwner.get(r.owner) ?? 0) + 1); });
+    return [...byOwner.entries()].map(([id, n]) => ({ id, person: M.personName(ws, id), n })).sort((a, b) => b.n - a.n);
+  }, [rows, ws]);
+  const showBreakdown = ctx.role === "admin" || ctx.role === "sales_manager";
+  const [ownerSel, setOwnerSel] = useState<string | null>(null);
+  return <><TablePage pid="amb-dashboard" rows={rows} filters={filters} kpis={kpis}
+    trail={showBreakdown ? <AmbassadorsPerPersonPick breakdown={breakdown} value={ownerSel} onChange={setOwnerSel} /> : undefined}
+    table={(shown, q) => <DataTable<LeadRow> id="amb-dash-t" rows={ownerSel ? shown.filter((r) => r.owner === ownerSel) : shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} exportName="Ambassador dashboard" card={leadCard(ws)} detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />} />
+    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
+}
+/** "Ambassadors per sales person" as a dropdown chip instead of an always-open panel — pick a person to filter the table to just their Ambassadors. */
+function AmbassadorsPerPersonPick({ breakdown, value, onChange }: { breakdown: { id: string; person: string; n: number }[]; value: string | null; onChange: (id: string | null) => void }) {
+  const ctx = useCrm(); const pop = usePop(); const sel = breakdown.find((b) => b.id === value);
+  return <><button className={`fchip ${value ? "on" : ""}`} onClick={(e) => pop.open(e.currentTarget, "amb-per-person")}><Icon n="users" s="s" />{sel ? `${sel.person} (${sel.n})` : "Ambassadors per sales person"}<Icon n="chevd" s="s" /></button>
+    {pop.anchor && <Popover anchor={pop.anchor} onClose={pop.close} width={260}><div className="ph">Ambassadors per sales person</div>
+      {breakdown.length === 0 ? <div className="empty" style={{ padding: 10 }}>No ambassadors yet</div> : breakdown.map((b) => <button key={b.id} className={`pi ${value === b.id ? "on" : ""}`} onClick={() => { onChange(value === b.id ? null : b.id); pop.close(); }} style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={b.person} photo={M.photoFor(ctx.ws, b.id)} /><span style={{ flex: 1, textAlign: "left" }}>{b.person}</span><Pill tone="sky">{b.n}</Pill></button>)}
+      {value && <button className="btn sm" style={{ width: "100%", marginTop: 6 }} onClick={() => { onChange(null); pop.close(); }}>Clear</button>}</Popover>}</>;
+}
 type AmbRow = { id: string; name: string; leads30: number; leadsAll: number; hot: number; demos30: number; tLeads: number; tDemos: number };
 function AmbassadorTable() {
   const { ws } = useCrm();
@@ -147,29 +187,42 @@ function TargetsSetup() {
     onEdit={async (rs, col, v) => { const val = Math.max(0, Math.round(Number(v) || 0)); for (const r of rs) { const res = await v2SaveTarget(r.id, { [col.k]: val }); if (!res.ok) return toast(res.message); } setRows((all) => all.map((x) => (rs.some((r) => r.id === x.id) ? { ...x, [col.k]: val } : x))); toast(`Saved for ${rs.length}`); }} />;
 }
 const roleTone = (role?: AppRole): Tone => (role === "admin" ? "rose" : role === "sales_manager" ? "sky" : role === "sales_executive" ? "mint" : role === "consultant" ? "aqua" : role === "ambassador" ? "peach" : "lav");
-function userCols(transferUsers: { id: string; name: string }[]): Col<ManagedUser>[] {
+/** First ambassador's name + a "+N" badge — click it to expand the rest of the list below, in place. */
+function AmbassadorsCell({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (!names.length) return <span style={{ color: "var(--faint)" }}>—</span>;
+  return <div>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{names[0]}
+      {names.length > 1 && <button type="button" className={`exp-badge ${open ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} title={`${names.length - 1} more`}>+{names.length - 1}</button>}
+    </span>
+    {open && <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>{names.slice(1).map((n) => <span key={n} style={{ color: "var(--muted)", fontSize: 11.5 }}>{n}</span>)}</div>}
+  </div>;
+}
+function userCols(transferUsers: { id: string; name: string }[]): Col<V2ManagedUser>[] {
   return [
     { k: "name", label: "User", w: 220, group: false, text: (r) => `${r.name} ${r.email}`, render: (r) => <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Avatar name={r.name} /><span><b>{r.name}</b><div style={{ color: "var(--muted)", fontSize: 11.5 }}>{r.email}</div></span></span> },
     { k: "phone", label: "Phone", group: false },
-    { k: "roles", label: "Role", text: (r) => r.roles.map((x) => ROLE_LABELS[x]).join(", ") || "No role", groupVal: (r) => ROLE_LABELS[r.roles[0]] ?? "No role", groupTone: (r) => roleTone(r.roles[0]), render: (r) => <UserRolesEditor userId={r.id} name={r.name} roles={r.roles} /> },
+    { k: "roles", label: "Role", text: (r) => r.roles.map((x) => ROLE_LABELS[x]).join(", ") || "No role", groupVal: (r) => ROLE_LABELS[primaryRole(r.roles)] ?? "No role", groupTone: (r) => roleTone(primaryRole(r.roles)), render: (r) => <UserRolesEditor userId={r.id} name={r.name} roles={r.roles} /> },
+    { k: "salesPerson", label: "Sales person", text: (r) => r.salesPersonName ?? "", groupVal: (r) => (r.roles.includes("ambassador") ? r.salesPersonName ?? "Unassigned" : "—"), render: (r) => !r.roles.includes("ambassador") ? <span style={{ color: "var(--faint)" }}>—</span> : r.salesPersonName ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={r.salesPersonName} />{r.salesPersonName}</span> : <span style={{ color: "var(--faint)" }}>Unassigned</span> },
+    { k: "ambassadors", label: "Ambassadors assigned", group: false, text: (r) => (r.ambassadorNames ?? []).join(", "), render: (r) => <AmbassadorsCell names={r.ambassadorNames ?? []} /> },
     { k: "status", label: "Status", text: (r) => (r.isSuspended ? "Suspended" : "Active"), groupVal: (r) => (r.isSuspended ? "Suspended" : "Active"), groupTone: (r) => (r.isSuspended ? "rose" : "mint"), render: (r) => <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Pill tone={r.isSuspended ? "rose" : "mint"}>{r.isSuspended ? "Suspended" : "Active"}</Pill><form action={toggleUserSuspension}><input type="hidden" name="userId" value={r.id} /><input type="hidden" name="suspend" value={String(!r.isSuspended)} /><button className="btn sm">{r.isSuspended ? "Reactivate" : "Suspend"}</button></form></span> },
     { k: "actions", label: "", w: 90, group: false, render: (r) => <span className="cact" onClick={(ev) => ev.stopPropagation()}><EditUserModal user={r} /><DeleteUserDialog user={{ id: r.id, name: r.name, email: r.email }} transferUsers={transferUsers} /></span> },
   ];
 }
-function userFilters(): FilterDef<ManagedUser>[] {
+function userFilters(): FilterDef<V2ManagedUser>[] {
   return [
-    { k: "role", label: "Role", icon: "user", get: (r) => r.roles[0] ?? "none", opts: () => [{ v: "none", l: "No role" }, ...APP_ROLES.map((x) => ({ v: x, l: ROLE_LABELS[x] }))] },
+    { k: "role", label: "Role", icon: "user", get: (r) => primaryRole(r.roles) ?? "none", opts: () => [{ v: "none", l: "No role" }, ...APP_ROLES.map((x) => ({ v: x, l: ROLE_LABELS[x] }))] },
     { k: "status", label: "Status", icon: "info", get: (r) => (r.isSuspended ? "suspended" : "active"), opts: () => [{ v: "active", l: "Active" }, { v: "suspended", l: "Suspended" }] },
   ];
 }
-const userKpis = (rs: ManagedUser[]): Kpi<ManagedUser>[] => [
+const userKpis = (rs: V2ManagedUser[]): Kpi<V2ManagedUser>[] => [
   { k: "all", n: rs.length, label: "Total", tone: "slate" },
   { k: "active", n: rs.filter((r) => !r.isSuspended).length, label: "Active", tone: "mint", test: (r) => !r.isSuspended },
   { k: "suspended", n: rs.filter((r) => r.isSuspended).length, label: "Suspended", tone: "rose", test: (r) => r.isSuspended },
 ];
 /** Same Add / Edit / Suspend / Delete user flows as /dashboard/users, embedded here (same server actions, no backend changes) — filter bar + KPI chips + table match the rest of the v2 UI. */
 function AdminUsersPage() {
-  const [data, setData] = useState<{ users: ManagedUser[]; transferUsers: { id: string; name: string }[] } | null>(null);
+  const [data, setData] = useState<{ users: V2ManagedUser[]; transferUsers: { id: string; name: string }[] } | null>(null);
   const [error, setError] = useState(""); const [gen, setGen] = useState(0);
   const [f, setF] = useState<FilterState>({}); const [q, setQ] = useState(""); const [k, setK] = useState<string | null>(null);
   useEffect(() => { let live = true; v2ListUsers().then((d) => live && setData(d)).catch((e) => live && setError(e instanceof Error ? e.message : "Unable to load users.")); return () => { live = false; }; }, [gen]);
@@ -180,7 +233,7 @@ function AdminUsersPage() {
   return <>
     <FilterBar defs={filters} rows={data.users} state={f} setState={setF} q={q} setQ={setQ} lead={<><button className="btn" onClick={() => setGen((g) => g + 1)} title="Reload — a created/edited/suspended/deleted user doesn't appear until refreshed"><Icon n="refresh" s="s" /></button><UserModal /></>} />
     <KpiBar kpis={kp} active={k} onPick={setK} />
-    <DataTable<ManagedUser> id="admin-users" rows={shown} q={q} cols={userCols(data.transferUsers)} frozen={1} views={["table", "cards"]} exportName="Users" />
+    <DataTable<V2ManagedUser> id="admin-users" rows={shown} q={q} cols={userCols(data.transferUsers)} frozen={1} views={["table", "cards"]} exportName="Users" />
   </>;
 }
 /** Same Leads Management API key UI as /dashboard/crm-market-place, embedded here (same server actions, no backend changes). */

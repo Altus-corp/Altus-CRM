@@ -34,11 +34,37 @@ export const DEFAULT_RESOLUTION_BUCKETS: Record<string, BucketKey> = {
   "not interested": "lost", lost: "lost", dnd: "lost", "wrong number": "lost", "junk lead": "lost", "meeting cancelled": "lost", abandoned: "lost", cancelled: "lost", "old, graduate": "lost",
 };
 
+/** Reporting-only grouping of Call Resolution values into named cards (Reports dashboard). Independent of
+ * BUCKET/DEFAULT_RESOLUTION_BUCKETS above — this never affects the priority-stage/kanban logic, just reporting. */
+export type ReportGroupKey = "registered" | "tentative" | "callfollow" | "notinterested" | "pastattended" | "ringing" | "wrongnumber" | "pitched" | "proposalsent";
+// Matched against lead_resolutions by a punctuation/case/space-insensitive normalizer (see M.reportGroups), so
+// listing one spelling here also catches "Follow up"/"Follow Up"/"Followup"-style duplicate rows automatically.
+// Different *wording* for the same real-world outcome (e.g. "Number Busy" vs "No Busy") still needs its own entry.
+export const REPORT_GROUPS: { key: ReportGroupKey; label: string; tone: Tone; resolutions: string[] }[] = [
+  { key: "registered", label: "Registered/Next/Verbal Yes", tone: "mint", resolutions: ["registered", "registered for next", "verbal yes"] },
+  { key: "tentative", label: "Tentative/for Next", tone: "butter", resolutions: ["tentative", "tentative for next"] },
+  { key: "callfollow", label: "Call for Next/Follow Ups", tone: "peach", resolutions: ["call for next", "follow up"] },
+  { key: "notinterested", label: "Not Interested/DND", tone: "rose", resolutions: ["not interested", "dnd"] },
+  // "Past Attended" has no separate resolution row of its own — confirmed it's the same thing as Old Graduate.
+  { key: "pastattended", label: "Past Attended/Old Graduate", tone: "lav", resolutions: ["old graduate"] },
+  { key: "ringing", label: "Ringing/No Busy/Call Back", tone: "sky", resolutions: ["no busy", "number busy", "ringing", "ringing/did not pick", "call back"] },
+  { key: "wrongnumber", label: "Wrong Number", tone: "slate", resolutions: ["wrong number"] },
+  { key: "pitched", label: "Pitched/Demo Given", tone: "aqua", resolutions: ["pitched", "demo given", "demo done", "demo scheduled", "redemo done"] },
+  { key: "proposalsent", label: "Proposal sent/ Agreement Sent", tone: "butter", resolutions: ["proposal sent", "agreement sent"] },
+];
+
+// Calendar-aware date filter — actual boundaries (IST) are computed by M.periodRange(key), not a fixed day count,
+// since several of these (weeks/months/quarters/year) are real calendar ranges, not "last N days from now".
 export const PERIODS = [
-  { key: "1", label: "Today", days: 1 }, { key: "3", label: "3 days", days: 3 }, { key: "7", label: "7 days", days: 7 },
-  { key: "10", label: "10 days", days: 10 }, { key: "15", label: "15 days", days: 15 }, { key: "22", label: "22 days", days: 22 },
-  { key: "30", label: "30 days", days: 30 }, { key: "range", label: "Date range", days: 45 },
+  { key: "today", label: "Today" }, { key: "yesterday", label: "Yesterday" },
+  { key: "d7", label: "Last 7 days" }, { key: "d10", label: "Last 10 days" }, { key: "d15", label: "Last 15 days" },
+  { key: "d30", label: "Last 30 days" }, { key: "d60", label: "Last 60 days" },
+  { key: "thisweek", label: "This week" }, { key: "lastweek", label: "Last week (Mon–Sun)" },
+  { key: "thismonth", label: "This Month" }, { key: "lastmonth", label: "Last Month" },
+  { key: "thisquarter", label: "This Quarter" }, { key: "lastquarter", label: "Last Quarter" },
+  { key: "lastyear", label: "Last Year" },
 ] as const;
+export type PeriodKey = (typeof PERIODS)[number]["key"];
 
 export type ModuleDef = { id: string; label: string; icon: string; soon?: boolean; ext?: string; roles?: AppRole[] };
 export const MODULES: ModuleDef[] = [
@@ -73,6 +99,7 @@ export const DASHES: DashDef[] = [
   { id: "assignments", label: "Leads Assigned per Sales Person", icon: "layers", tone: "lav", roles: [...MGMT, "marketing_manager"] },
   { id: "hygiene", label: "Data Hygiene", icon: "db", tone: "aqua", roles: [...SALES, "marketing_manager"] },
   { id: "resolution", label: "Activity Resolution", icon: "list", tone: "slate", roles: SALES },
+  { id: "reports", label: "Reports", icon: "list", tone: "sage", roles: SALES },
   { id: "funnel", label: "Conversion Funnel", icon: "funnel", tone: "sky", roles: [...MGMT, "marketing_manager"] },
   { id: "sources", label: "Lead Sources", icon: "megaphone", tone: "sage", roles: [...MGMT, "marketing_manager", "marketing_executive"] },
   { id: "speed", label: "Speed to Lead", icon: "clock", tone: "butter", roles: MGMT },

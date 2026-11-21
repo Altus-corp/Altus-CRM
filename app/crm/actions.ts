@@ -102,26 +102,38 @@ export async function v2ShareEmail(input: { to: string; subject: string; text: s
 }
 
 /* ---------- Admin Panel · Users (same read as app/dashboard/users/page.tsx, so the classic Add/Edit/Suspend/Delete user modals can be embedded here unchanged) ---------- */
-export async function v2ListUsers(): Promise<{ users: ManagedUser[]; transferUsers: { id: string; name: string }[] }> {
+export type V2ManagedUser = ManagedUser & { salesPersonId: string | null; salesPersonName: string | null; ambassadorNames: string[] };
+export async function v2ListUsers(): Promise<{ users: V2ManagedUser[]; transferUsers: { id: string; name: string }[] }> {
   await requireAdmin();
   const admin = createAdminClient();
   const { data: authData, error: authError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (authError) throw new Error("Unable to load users.");
   const userIds = authData.users.map((u) => u.id);
-  const [{ data: profiles }, { data: userRoles }] = await Promise.all([
+  const [{ data: profiles }, { data: userRoles }, { data: relManagers }] = await Promise.all([
     userIds.length ? admin.from("profiles").select("id, first_name, last_name, full_name, phone, is_suspended").in("id", userIds) : Promise.resolve({ data: [] }),
     userIds.length ? admin.from("user_roles").select("user_id, role").in("user_id", userIds) : Promise.resolve({ data: [] }),
+    // Which CRM sales person is the relationship manager for an Ambassador — same table the "Ambassador Accounts"/"My Ambassador" reads use.
+    userIds.length ? admin.from("ambassador_relationship_managers").select("ambassador_id, crm_user_id").in("ambassador_id", userIds) : Promise.resolve({ data: [] }),
   ]);
   const profileById = new Map((profiles ?? []).map((p) => [p.id, p]));
   const rolesByUserId = new Map<string, AppRole[]>();
   (userRoles ?? []).forEach((item) => { const existing = rolesByUserId.get(item.user_id) ?? []; existing.push(item.role as AppRole); rolesByUserId.set(item.user_id, existing); });
+  const salesPersonByAmbassador = new Map((relManagers ?? []).map((r) => [r.ambassador_id as string, r.crm_user_id as string]));
+  const ambassadorIdsByCrmUser = new Map<string, string[]>();
+  (relManagers ?? []).forEach((r) => { const list = ambassadorIdsByCrmUser.get(r.crm_user_id as string) ?? []; list.push(r.ambassador_id as string); ambassadorIdsByCrmUser.set(r.crm_user_id as string, list); });
   const users: ManagedUser[] = authData.users.map((user) => {
     const profile = profileById.get(user.id);
     const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || profile?.full_name || user.email || "Unnamed user";
     return { id: user.id, name, firstName: profile?.first_name ?? "", lastName: profile?.last_name ?? "", email: user.email ?? "—", phone: profile?.phone ?? "—", roles: rolesByUserId.get(user.id) ?? [], isSuspended: profile?.is_suspended ?? false };
   });
+  const nameById = new Map(users.map((u) => [u.id, u.name]));
+  const usersOut: V2ManagedUser[] = users.map((u) => {
+    const spId = u.roles.includes("ambassador") ? salesPersonByAmbassador.get(u.id) ?? null : null;
+    const ambassadorNames = (ambassadorIdsByCrmUser.get(u.id) ?? []).map((id) => nameById.get(id) ?? "Unknown").sort();
+    return { ...u, salesPersonId: spId, salesPersonName: spId ? nameById.get(spId) ?? "Unknown" : null, ambassadorNames };
+  });
   const transferUsers = users.filter((u) => !u.isSuspended && u.roles.some((r) => ["sales_executive", "sales_manager", "consultant"].includes(r))).map((u) => ({ id: u.id, name: u.name }));
-  return { users, transferUsers };
+  return { users: usersOut, transferUsers };
 }
 
 /* ---------- Admin Panel · CRM Marketplace (same read as app/dashboard/crm-market-place/page.tsx) ---------- */

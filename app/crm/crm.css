@@ -23,7 +23,10 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .ic.l{width:18px;height:18px}
 .crm2 .app{display:flex;flex-direction:column;height:100vh}
 .crm2 .modbar-wrap{position:relative;z-index:40}
-.crm2 .modbar{display:flex;align-items:center;gap:2px;padding:0 14px;height:0;overflow:hidden;background:#fff;border-bottom:1px solid transparent;transition:height .25s ease,border-color .25s}
+.crm2 .modbar{display:flex;align-items:center;gap:2px;padding:0 14px;height:0;overflow-x:auto;overflow-y:hidden;background:#fff;border-bottom:1px solid transparent;transition:height .25s ease,border-color .25s}
+.crm2 .modbar::-webkit-scrollbar{height:4px}
+.crm2 .modbar::-webkit-scrollbar-thumb{background:#ddd;border-radius:4px}
+.crm2 .mod,.crm2 .modbar .logo{flex:none}
 .crm2 .modbar.open{height:44px;border-bottom-color:var(--line)}
 .crm2 .modbar .logo{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--red);margin-right:10px;font-size:14px;letter-spacing:.3px}
 .crm2 .mod{display:flex;align-items:center;gap:6px;padding:7px 11px;border-radius:8px;color:var(--ink-2);white-space:nowrap;font-size:12.5px}
@@ -81,7 +84,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .rolesw select{border:0;background:none;font-weight:700;color:var(--ink);outline:0}
 .crm2 .bar{display:flex;align-items:center;gap:6px;flex:none;min-width:0}
 .crm2 .bar.boxed{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:6px 8px}
-.crm2 .carousel{flex:1;display:flex;gap:6px;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;min-width:0}
+.crm2 .carousel{flex:0 1 auto;display:flex;gap:6px;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;min-width:0}
 .crm2 .carousel::-webkit-scrollbar{display:none}
 .crm2 .carr{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);flex:none}
 .crm2 .carr:hover{background:var(--line-2)}

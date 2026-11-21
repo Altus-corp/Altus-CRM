@@ -25,7 +25,7 @@ export function CrmApp({ initial, initialRoute }: { initial: Workspace; initialR
 function Shell({ initial, initialRoute }: { initial: Workspace; initialRoute: Route }) {
   const toast = useToast();
   const [ws, setWs] = useState(initial); const role = primaryRole(ws.roles);
-  const [route, setRoute] = useState<Route>(initialRoute); const [product, setProduct] = useState("ALL"); const [period, setPeriod] = useState("7");
+  const [route, setRoute] = useState<Route>(initialRoute); const [product, setProduct] = useState("ALL"); const [period, setPeriod] = useState("today");
   const [lead, setLead] = useState<{ row: LeadRow; list: LeadRow[] } | null>(null); const [listWin, setListWin] = useState<{ title: string; rows: LeadRow[] } | null>(null);
   const [focus, setFocus] = useState(false); const [sideMini, setSideMini] = useState(false); const [sheet, setSheet] = useState<null | "modules" | "sections">(null); const [adding, setAdding] = useState(false);
   const canEdit = ws.roles.some((r) => r === "admin" || r === "sales_manager" || r === "sales_executive" || r === "consultant");
@@ -139,13 +139,13 @@ function DashArea({ dashId, lockDash, onList }: { dashId: string; lockDash: bool
   const strip = useRef<HTMLDivElement>(null); const dashes = dashesFor(ws.roles); const d = DASHES.find((x) => x.id === dashId) ?? dashes[0];
   const users = ws.scope.filter((u) => !people.size || people.has(u));
   const leads = useMemo(() => { let ls = ws.rows.filter((r) => ctx.product === "ALL" || r.product === ctx.product); if (people.size) ls = ls.filter((r) => r.owner && people.has(r.owner)); if (f.source && !("period" in f.source) && f.source.size) ls = ls.filter((r) => (f.source as Set<string>).has(r.source)); return ls; }, [ws.rows, ctx.product, people, f]);
-  const days = PERIODS.find((p) => p.key === ctx.period)?.days ?? 7; const periodLabel = PERIODS.find((p) => p.key === ctx.period)?.label ?? "7 days";
-  const x: DX = { ctx, users, leads, days, periodLabel, listWin: onList, goDash: (id) => ctx.go({ module: "dashboards", page: id }) };
-  const tc = M.callingReport(ws, users, 1); const tg = M.targets(ws, users, 7);
+  const range = M.periodRange(ctx.period); const days = M.rangeDays(range); const periodLabel = PERIODS.find((p) => p.key === ctx.period)?.label ?? "Today";
+  const x: DX = { ctx, users, leads, range, days, periodLabel, listWin: onList, goDash: (id) => ctx.go({ module: "dashboards", page: id }) };
+  const tc = M.callingReport(ws, users, M.periodRange("today")); const tg = M.targets(ws, users, M.periodRange("d7"));
   const kp: Kpi<LeadRow>[] = [{ k: "c", n: tc.reduce((s, r) => s + r.calls, 0), label: "Calls today", tone: "slate" }, { k: "cn", n: tc.reduce((s, r) => s + r.connected, 0), label: "Connected today", tone: "mint" }, { k: "hot", n: leads.filter((l) => l.bucket === "closing" || l.bucket === "negotiation").length, label: "Closing + negotiation", tone: "butter" }, { k: "fu", n: leads.filter((l) => M.isLive(l) && l.nextFollowUp && (M.daysSince(l.nextFollowUp) ?? 0) > 0).length, label: "Overdue follow-ups", tone: "rose" }, { k: "nc", n: leads.filter((l) => l.owner && !l.lastCalledAt && M.isLive(l)).length, label: "Never called", tone: "lav" }, { k: "dm", n: tg.reduce((s, r) => s + r.demos, 0), label: `Demos this week / ${tg.reduce((s, r) => s + r.demosT, 0)}`, tone: "sky" }, { k: "nw", n: leads.filter((l) => M.inDays(l.createdAt, 1)).length, label: "New leads today", tone: "lav" }];
   const kpiGo: Record<string, () => void> = { c: () => x.goDash("calling"), cn: () => x.goDash("calling"), dm: () => x.goDash("targets"), nw: () => x.goDash(dashes.some((q) => q.id === "assignments") ? "assignments" : "ageing"), hot: () => onList("Closing + negotiation", leads.filter((l) => l.bucket === "closing" || l.bucket === "negotiation")), fu: () => onList("Overdue follow-ups", leads.filter((l) => M.isLive(l) && l.nextFollowUp && (M.daysSince(l.nextFollowUp) ?? 0) > 0)), nc: () => onList("Never called", leads.filter((l) => l.owner && !l.lastCalledAt && M.isLive(l))) };
   const idx = dashes.findIndex((q) => q.id === d.id);
-  const periods = <div className="strip" style={{ gap: 3, flex: "0 1 auto", minWidth: 0 }}>{PERIODS.map((p) => <button key={p.key} className={`stab ${ctx.period === p.key ? "on" : ""}`} onClick={() => ctx.setPeriod(p.key)}>{p.label}</button>)}<PeoplePick people={people} setPeople={setPeople} /></div>;
+  const periods = <div className="strip" style={{ gap: 3, flex: "0 1 auto", minWidth: 0 }}><PeriodPick value={ctx.period} onChange={ctx.setPeriod} /><PeoplePick people={people} setPeople={setPeople} /></div>;
   return <TableQCtx.Provider value={q}>
     <FilterBar defs={DASH_FILTERS} rows={ws.rows} state={f} setState={setF} q={q} setQ={setQ} lead={periods} />
     <KpiBar kpis={kp} active={null} onPick={(k) => k && kpiGo[k]?.()} />
@@ -158,6 +158,13 @@ function DashArea({ dashId, lockDash, onList }: { dashId: string; lockDash: bool
       <span className="secbtns"><button className="sb" title="Minimise" onClick={() => setMin((v) => !v)}><Icon n="min" s="s" /></button><button className="sb" title="Maximise" onClick={() => setMax((v) => !v)}><Icon n="max" s="s" /></button></span></div>
       <div className="card-b" style={{ display: "flex", flexDirection: "column", gap: 10, padding: 10 }}><DashboardBody id={d.id} x={x} /></div></div>
   </TableQCtx.Provider>;
+}
+/** Date filter — defaults to Today; opens a dropdown of calendar-aware ranges (PERIODS, see M.periodRange). */
+function PeriodPick({ value, onChange }: { value: string; onChange: (k: string) => void }) {
+  const pop = usePop(); const label = PERIODS.find((p) => p.key === value)?.label ?? "Today";
+  return <><button className="fchip on" onClick={(e) => pop.open(e.currentTarget, "period")}><Icon n="cal" s="s" />{label}<Icon n="chevd" s="s" /></button>
+    {pop.anchor && <Popover anchor={pop.anchor} onClose={pop.close} width={220}><div className="ph">Date</div>
+      {PERIODS.map((p) => <button key={p.key} className={`pi ${value === p.key ? "on" : ""}`} onClick={() => { onChange(p.key); pop.close(); }}>{p.label}</button>)}</Popover>}</>;
 }
 function PeoplePick({ people, setPeople }: { people: Set<string>; setPeople: (s: Set<string>) => void }) {
   const ctx = useCtx(); const pop = usePop(); const opts = ownerOpts(ctx.ws).filter((o) => ctx.ws.scope.includes(o.v));
