@@ -96,7 +96,7 @@ export async function v2SaveHygieneRule(rule: { field_key: string; label: string
   const { error } = await supabase.from("crm_hygiene_rules").upsert({ ...rule, updated_at: new Date().toISOString() });
   return error ? { ok: false, message: error.message } : { ok: true, message: "Hygiene rule saved" };
 }
-export async function v2SaveTarget(userId: string, patch: Partial<{ demos: number; references_per_week: number; ambassadors: number; calls_per_day: number; leads: number }>): Promise<ActionResult> {
+export async function v2SaveTarget(userId: string, patch: Partial<{ demos: number; references_per_week: number; ambassadors: number; calls_per_day: number; leads: number; meetings: number; focused_calls: number; product_targets: Record<string, number> }>): Promise<ActionResult> {
   await requireAdmin(); const supabase = await createClient();
   const { error } = await supabase.from("crm_targets").upsert({ user_id: userId, ...patch, updated_at: new Date().toISOString() });
   return error ? { ok: false, message: error.message } : { ok: true, message: "Target saved" };

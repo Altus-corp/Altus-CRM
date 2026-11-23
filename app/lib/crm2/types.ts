@@ -44,9 +44,11 @@ export type LeadRow = {
   custom: Record<string, string>;
 };
 export type CallEv = { u: string; t: string; c: boolean; out: boolean; d: number; a: string | null };
-export type MeetEv = { u: string; t: string; kind: string; leadId: string; upcoming: boolean };
-export type SimpleEv = { u: string; t: string };
-export type TargetSet = { demos?: number; references?: number; ambassadors?: number; callsPerDay?: number; leads?: number };
+/** `sentAt` is when the Zoom/Meet invite was created (the link-send date) — `t` (start time) is when the call itself
+ * happens, and still drives "done vs upcoming" for the demos/meetings count already in use elsewhere. */
+export type MeetEv = { u: string; t: string; sentAt: string; kind: string; leadId: string; upcoming: boolean };
+export type SimpleEv = { u: string; t: string; leadId?: string; name?: string };
+export type TargetSet = { demos?: number; references?: number; ambassadors?: number; callsPerDay?: number; leads?: number; meetings?: number; focusedCalls?: number; products?: Record<string, number> };
 export type HygieneRule = { key: string; label: string; fromBucket: BucketKey; weight: number };
 
 export type Workspace = {

@@ -2,7 +2,7 @@
 // Lead columns, filters, KPI chips and bulk actions — shared by every lead table and dashboard list.
 import { useState, type ReactNode } from "react";
 import { BUCKET, BUCKETS, TONES, type Tone } from "@/app/lib/crm2/config";
-import { daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
+import { customRange, daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
 import { v2AddProduct, v2UpdateField } from "@/app/crm/actions";
 import { displayProductCode } from "@/app/lib/product-display";
@@ -149,9 +149,9 @@ export function leadFilters(ws: Workspace): FilterDef<LeadRow>[] {
     { k: "hyg", label: "Data hygiene", icon: "db", get: (r) => (missingFields(ws, r).length ? "incomplete" : "complete"), opts: () => [{ v: "incomplete", l: "Has empty fields" }, { v: "complete", l: "Complete" }] },
   ];
 }
-export type FilterState = Record<string, Set<string> | { period: string }>;
+export type FilterState = Record<string, Set<string> | { period: string; from?: string; to?: string }>;
 export function applyFilters<T>(rows: T[], defs: FilterDef<T>[], f: FilterState) {
-  return rows.filter((r) => defs.every((d) => { const v = f[d.k]; if (!v) return true; if ("period" in v) return inRange(d.get(r), periodRange(v.period)); return v.size === 0 || v.has(String(d.get(r))); }));
+  return rows.filter((r) => defs.every((d) => { const v = f[d.k]; if (!v) return true; if ("period" in v) return inRange(d.get(r), v.period === "custom" ? customRange(v.from ?? "", v.to ?? "") : periodRange(v.period)); return v.size === 0 || v.has(String(d.get(r))); }));
 }
 export type Kpi<T> = { k: string; n: number; label: string; tone: Tone; test?: (r: T) => boolean };
 export function leadKpis(ws: Workspace, rows: LeadRow[]): Kpi<LeadRow>[] {

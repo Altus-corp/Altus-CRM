@@ -1,13 +1,15 @@
 "use client";
 // Altus CRM v2 — every dashboard. Same Workspace rows, same metrics, one panel at a time (no scrolling).
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { BUCKET, PERIODS, TONES, type Tone } from "@/app/lib/crm2/config";
+import { BUCKET, PERIODS, PRODUCT_TARGET_RESOLUTIONS, TONES, type Tone } from "@/app/lib/crm2/config";
 import * as M from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
 import { useCrm, type Ctx } from "./context";
+import { v2SaveTarget } from "@/app/crm/actions";
 import { DataTable, ShareWhatsApp, type Col } from "./DataTable";
+import { FilterBar } from "./bars";
 import { Bars, Donut, Gap, HStack, Legend, PctBar, Spark, type Series } from "./charts";
-import { hiddenWithCustom, leadBulk, leadBulkAddValue, leadCard, leadCols, leadEditor, leadTone } from "./leads";
+import { applyFilters, hiddenWithCustom, leadBulk, leadBulkAddValue, leadCard, leadCols, leadEditor, leadFilters, leadTone, type FilterState } from "./leads";
 import { displayProductCode } from "@/app/lib/product-display";
 import { Avatar, Icon, Pill, Tiles, Win, cap, fdate, fdt, fmt, money, toneStyle, useToast } from "./ui";
 
@@ -19,10 +21,10 @@ const S = (pairs: [string, Tone][]): Series[] => pairs.map(([n, tone]) => ({ n, 
 const person = (ws: Workspace, k = "person"): Col<R> => ({ k, label: "Person", group: false, render: (r) => <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={String(r[k])} photo={M.photoFor(ws, r.id)} /><b>{String(r[k])}</b></span> });
 const num = (k: string, label: string, render?: (r: R) => ReactNode): Col<R> => ({ k, label, num: true, group: false, val: (r) => Number(r[k]), render });
 
-function LeadList({ id, rows, title, group, sort, hideExtra = [] }: { id: string; rows: LeadRow[]; title?: string; group?: string; sort?: { k: string; dir: 1 | -1 }; hideExtra?: string[] }) {
+function LeadList({ id, rows, title, group, sort, hideExtra = [], q }: { id: string; rows: LeadRow[]; title?: string; group?: string; sort?: { k: string; dir: 1 | -1 }; hideExtra?: string[]; q?: string }) {
   const ctx = useCrm(); const toast = useToast(); const [wa, setWa] = useState<LeadRow[] | null>(null);
   const cols = useMemo(() => leadCols(ctx.ws, ctx.canEdit, toast), [ctx.ws, ctx.canEdit, toast]);
-  return <><DataTable<LeadRow> id={id} rows={rows} cols={cols} title={title} hidden={[...hiddenWithCustom(ctx.ws), ...hideExtra]} group={group ?? null} sort={sort ?? null} frozen={1} views={["table", "kanban", "cards", "calendar"]}
+  return <><DataTable<LeadRow> id={id} rows={rows} cols={cols} title={title} q={q} hidden={[...hiddenWithCustom(ctx.ws), ...hideExtra]} group={group ?? null} sort={sort ?? null} frozen={1} views={["table", "kanban", "cards", "calendar"]}
     kanban={{ key: (r) => r.bucket, cols: Object.values(BUCKET).map((b) => ({ k: b.key, label: b.label, tone: b.tone })) }} calendarKey={(r) => r.nextFollowUp} rowTone={leadTone}
     onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} dupeKey={(r) => r.phone} exportName={title ?? "Leads"} card={leadCard(ctx.ws)} minHeight={280}
     detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />
@@ -66,18 +68,117 @@ D.ranking = (x) => {
     <DataTable<R> id="d-rank" title="Score = 30% closures · 20% demos · 15% connects · 15% references · 10% ambassadors · 10% follow-up discipline" exportName="Sales ranking" rows={rows as unknown as R[]} sort={{ k: "rank", dir: 1 }} frozen={2}
       cols={[num("rank", "#"), person(x.ctx.ws), num("score", "Score /100", (r) => <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span className="bar-in" style={{ width: 80 }}><i style={{ width: `${r.score}%`, background: TONES.sage.mk }} /></span><b>{String(r.score)}</b></span>), num("closures", "Closing-stage leads"), num("demos", "Demos", (r) => <PctBar a={Number(r.demos)} t={Number(r.demosT)} />), num("connected", "Connected calls"), num("refs", "References", (r) => <PctBar a={Number(r.refs)} t={Number(r.refsT)} />), num("ambs", "Ambassadors", (r) => <PctBar a={Number(r.ambs)} t={Number(r.ambT)} />), num("discipline", "Follow-up discipline", (r) => `${r.discipline}%`)]} /></>;
 };
+/** One row per (person, target type) — same 5 plain columns for everything, instead of a wide sheet
+ * with 3 columns per target type. Grouped by person in the table so it's still easy to scan per-person. */
+type TRow2 = { id: string; personId: string; person: string; metric: string; kind: string; target: number; actual: number; daily: number; gap: number };
+type DetailItem = { label: string; sub?: string; date: string };
+/** The leads/calls/meetings behind a target row's Actual/Daily-avg count — same filters metrics.ts uses to
+ * compute that count, just returning the underlying rows instead of a total. */
+function targetDetail(ws: Workspace, range: M.DateRange, personId: string, kind: string): DetailItem[] {
+  const leadFor = (leadId?: string) => (leadId ? ws.rows.find((r) => r.leadId === leadId)?.name : undefined);
+  if (kind === "demos") return ws.meetings.filter((e) => e.u === personId && !e.upcoming && M.inRange(e.t, range)).map((e) => ({ label: leadFor(e.leadId) ?? "Lead", sub: e.kind, date: e.t }));
+  if (kind === "meet") return ws.meetings.filter((e) => e.u === personId && M.inRange(e.sentAt, range)).map((e) => ({ label: leadFor(e.leadId) ?? "Lead", sub: e.kind, date: e.sentAt }));
+  if (kind === "refs") return ws.references.filter((e) => e.u === personId && M.inRange(e.t, range)).map((e) => ({ label: e.name ?? "Lead", date: e.t }));
+  if (kind === "amb") return ws.ambAppointed.filter((e) => e.u === personId && M.inRange(e.t, range)).map((e) => ({ label: e.name ?? "Lead", date: e.t }));
+  if (kind === "fcalls") { const focusedIds = new Set(ws.rows.filter((r) => r.focusedOn).map((r) => r.id)); return ws.calls.filter((c) => c.u === personId && c.a && focusedIds.has(c.a) && M.inRange(c.t, range)).map((c) => ({ label: ws.rows.find((r) => r.id === c.a)?.name ?? "Lead", sub: c.c ? "Connected" : "Not connected", date: c.t })); }
+  if (kind.startsWith("prod:")) { const code = kind.slice(5); const names = new Set((PRODUCT_TARGET_RESOLUTIONS[code] ?? []).map(M.normResolution)); return ws.rows.filter((l) => l.owner === personId && l.product === code && l.resolution && names.has(M.normResolution(l.resolution)) && M.inRange(l.lastCalledAt, range)).map((l) => ({ label: l.name, sub: l.resolution ?? undefined, date: l.lastCalledAt ?? "" })); }
+  return [];
+}
+function TargetDetailModal({ title, items, onClose }: { title: string; items: DetailItem[]; onClose: () => void }) {
+  return <Win small title={`${title} (${items.length})`} onClose={onClose}><div className="win-b" style={{ padding: 10, display: "flex", flexDirection: "column", gap: 2, overflow: "auto" }}>
+    {items.length === 0 && <div className="empty">Nothing in this period yet.</div>}
+    {[...items].sort((a, b) => +new Date(b.date) - +new Date(a.date)).map((it, i) => <div key={i} className="tli"><span className="tdot" style={{ background: TONES.slate.mk }} /><div><b>{it.label}</b>{it.sub ? ` · ${it.sub}` : ""}<div style={{ color: "var(--muted)", fontSize: 11.5 }}>{fdt(it.date)}</div></div></div>)}
+  </div></Win>;
+}
 function Targets(x: DX) {
-  const ctx = useCrm(); const isAmb = ctx.role === "ambassador"; const [tab, setTab] = useState(isAmb ? "amb" : "sales");
+  const ctx = useCrm(); const isAmb = ctx.role === "ambassador"; const isAdmin = ctx.ws.roles.includes("admin"); const [tab, setTab] = useState(isAmb ? "amb" : "sales"); const [editPerson, setEditPerson] = useState<{ id: string; name: string } | null>(null);
+  const [detail, setDetail] = useState<{ title: string; items: DetailItem[] } | null>(null);
   const sales = M.targets(ctx.ws, x.users, x.range), amb = M.ambTargets(ctx.ws, x.range, isAmb ? ctx.ws.me : undefined); const sum = (rs: R[], k: string) => rs.reduce((s, r) => s + Number(r[k]), 0);
+  const prod = M.productActivityTargets(ctx.ws, x.users, x.range); const prodByUser = new Map(prod.rows.map((r) => [r.id, r.byCode]));
   const tiles = tab === "sales" ? [["Demos / meetings / pitches", sum(sales, "demos"), sum(sales, "demosT")], ["References", sum(sales, "refs"), sum(sales, "refsT")], ["Ambassadors appointed", sum(sales, "ambs"), sum(sales, "ambT")], ["People on all targets", sales.filter((r) => r.demosGap >= 0 && r.refsGap >= 0 && r.ambGap >= 0).length, sales.length]] as const : [["Ambassador demos", sum(amb, "demos"), sum(amb, "demosT")], ["Ambassador leads", sum(amb, "leads"), sum(amb, "leadsT")], ["On demo target", amb.filter((r) => r.demosGap >= 0).length, amb.length]] as const;
-  return <><div className="bar" style={{ flex: "none" }}>{!isAmb && <button className={`stab ${tab === "sales" ? "on" : ""}`} onClick={() => setTab("sales")}><Icon n="trend" s="s" /> Sales team</button>}<button className={`stab ${tab === "amb" ? "on" : ""}`} onClick={() => setTab("amb")}><Icon n="users" s="s" /> Ambassadors</button><span className="sample" style={{ marginLeft: "auto" }}>Weekly targets scaled to {x.periodLabel}</span></div>
-    <Tiles items={tiles.map(([l, a, t]) => ({ label: l, value: `${a} / ${t}`, sub: a - t >= 0 ? `+${a - t} surplus` : `${a - t} deficit`, tone: a >= t ? "sage" : "rose", icon: "target" }))} />
-    {tab === "sales" ? <DataTable<R> id="d-tg-s" title="Demos 3/wk · References 15/wk · Ambassadors 3/wk" exportName={`Targets ${x.periodLabel}`} rows={sales as unknown as R[]} frozen={1} rowTone={(r) => (Number(r.demosGap) + Number(r.refsGap) + Number(r.ambGap) >= 0 ? "sage" : "rose")}
-      cols={[person(x.ctx.ws), num("demos", "Demos / meetings / pitches", (r) => <PctBar a={Number(r.demos)} t={Number(r.demosT)} />), num("demosGap", "Demo gap", (r) => <Gap g={Number(r.demosGap)} />), num("refs", "References", (r) => <PctBar a={Number(r.refs)} t={Number(r.refsT)} />), num("refsGap", "Reference gap", (r) => <Gap g={Number(r.refsGap)} />), num("ambs", "Ambassadors appointed", (r) => <PctBar a={Number(r.ambs)} t={Number(r.ambT)} />), num("ambGap", "Ambassador gap", (r) => <Gap g={Number(r.ambGap)} />)]} />
+  const targetRows: TRow2[] = sales.flatMap((r): TRow2[] => {
+    const row = (suffix: string, metric: string, kind: string, target: number, actual: number, gap: number): TRow2 => ({ id: `${r.id}-${suffix}`, personId: r.id, person: r.person, metric, kind, target, actual, daily: +(actual / x.days).toFixed(1), gap });
+    const base = [
+      row("demos", "Demos / meetings / pitches · wk", "demos", r.demosT, r.demos, r.demosGap),
+      row("refs", "References · wk", "refs", r.refsT, r.refs, r.refsGap),
+      row("amb", "Ambassadors appointed · wk", "amb", r.ambT, r.ambs, r.ambGap),
+      row("meet", "Meetings scheduled (link sent) · wk", "meet", r.meetingsT, r.meetingsSent, r.meetingsGap),
+      row("fcalls", "Calls on Focused Leads · per day", "fcalls", r.focusedCallsT, r.focusedCalls, r.focusedCallsGap),
+    ];
+    const products = prod.codes.map((c) => { const v = prodByUser.get(r.id)?.[c] ?? { raw: 0, actual: 0, target: 0, gap: 0 }; return row(`p-${c}`, `${displayProductCode(c)} activity · wk`, `prod:${c}`, v.target, v.actual, v.gap); });
+    return [...base, ...products];
+  });
+  const openDetail = (r: TRow2) => setDetail({ title: `${r.metric} · ${r.person}`, items: targetDetail(ctx.ws, x.range, r.personId, r.kind) });
+  const clickableNum = (n: number, r: TRow2) => <button type="button" className="btn ghost sm" style={{ padding: "0 6px" }} onClick={() => openDetail(r)}>{n}</button>;
+  return <><div className="bar" style={{ flex: "none" }}>{!isAmb && <button className={`stab ${tab === "sales" ? "on" : ""}`} onClick={() => setTab("sales")}><Icon n="trend" s="s" /> Sales team</button>}<button className={`stab ${tab === "amb" ? "on" : ""}`} onClick={() => setTab("amb")}><Icon n="users" s="s" /> Ambassadors</button><span className="sample" style={{ marginLeft: "auto" }}>Weekly targets scaled to {x.periodLabel}{isAdmin && tab === "sales" ? " · admin: click a person to set their targets" : ""}</span></div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 14px 10px" }}>{tiles.map(([l, a, t]) => <Pill key={l} tone={a >= t ? "sage" : "rose"}>{l} · {a}/{t} · {a - t >= 0 ? `+${a - t} surplus` : `${a - t} deficit`}</Pill>)}</div>
+    {tab === "sales" ? <DataTable<TRow2> id="d-tg-s" title={`One row per person per target type — group by Person to scan one at a time${isAdmin ? ". Click a person to set their targets." : ""}`} exportName={`Targets ${x.periodLabel}`} rows={targetRows} group="person" frozen={2} rowTone={(r) => (r.gap >= 0 ? "sage" : "rose")}
+      cols={[{ k: "person", label: "Person", group: false, render: (r) => isAdmin
+        ? <button className="pi" style={{ padding: 0, border: 0, background: "none", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditPerson({ id: r.personId, name: r.person })}><Avatar name={r.person} photo={M.photoFor(ctx.ws, r.personId)} /><b>{r.person}</b></button>
+        : <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={r.person} photo={M.photoFor(ctx.ws, r.personId)} /><b>{r.person}</b></span> },
+        { k: "metric", label: "Target type", group: false },
+        { k: "target", label: "Target", num: true, group: false, val: (r) => r.target },
+        { k: "daily", label: "Daily avg", num: true, group: false, val: (r) => r.daily, render: (r) => clickableNum(r.daily, r) },
+        { k: "actual", label: "Actual (this period)", num: true, group: false, val: (r) => r.actual, render: (r) => <button type="button" onClick={() => openDetail(r)} style={{ padding: 0, border: 0, background: "none", cursor: "pointer", width: "100%" }} title="See the leads/calls behind this number"><PctBar a={r.actual} t={r.target} /></button> },
+        { k: "gap", label: "Gap", num: true, group: false, val: (r) => r.gap, render: (r) => <Gap g={r.gap} /> }]} />
       : <DataTable<R> id="d-tg-a" title="Ambassadors · Demos 3/wk · Leads 10/wk" exportName="Ambassador targets" rows={amb as unknown as R[]} frozen={1} rowTone={(r) => (Number(r.demosGap) + Number(r.leadsGap) >= 0 ? "sage" : "rose")}
-        cols={[person(x.ctx.ws), num("demos", "Demos / meetings / pitches", (r) => <PctBar a={Number(r.demos)} t={Number(r.demosT)} />), num("demosGap", "Demo gap", (r) => <Gap g={Number(r.demosGap)} />), num("leads", "Leads added", (r) => <PctBar a={Number(r.leads)} t={Number(r.leadsT)} />), num("leadsGap", "Lead gap", (r) => <Gap g={Number(r.leadsGap)} />)]} />}</>;
+        cols={[person(x.ctx.ws), num("demos", "Demos / meetings / pitches", (r) => <PctBar a={Number(r.demos)} t={Number(r.demosT)} />), num("demosGap", "Demo gap", (r) => <Gap g={Number(r.demosGap)} />), num("leads", "Leads added", (r) => <PctBar a={Number(r.leads)} t={Number(r.leadsT)} />), num("leadsGap", "Lead gap", (r) => <Gap g={Number(r.leadsGap)} />)]} />}
+    {editPerson && <PersonTargetsModal personId={editPerson.id} personName={editPerson.name} prodCodes={prod.codes} onClose={() => setEditPerson(null)} onSaved={() => ctx.refresh()} />}
+    {detail && <TargetDetailModal title={detail.title} items={detail.items} onClose={() => setDetail(null)} />}</>;
 }
 D.targets = (x) => <Targets {...x} />;
+type Cadence = "daily" | "weekly" | "monthly";
+const CADENCES: [Cadence, string][] = [["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"]];
+/** Converts a number entered in `cadence` to the stored base cadence ("weekly" for every target except
+ * Focused-lead calls, which is stored "daily") — so admin can type "100 a month" and it just works. */
+const toBaseCadence = (value: number, cadence: Cadence, base: "daily" | "weekly") => {
+  const perDay = cadence === "daily" ? value : cadence === "weekly" ? value / 7 : value / 30;
+  return Math.max(0, Math.round(base === "daily" ? perDay : perDay * 7));
+};
+type Entry = { value: number; unit: Cadence };
+const TargetRow = ({ label, entry, onChange }: { label: string; entry: Entry; onChange: (e: Entry) => void }) => <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 100px", gap: 8, alignItems: "center" }}>
+  <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink-2)" }}>{label}</span>
+  <input type="number" min={0} value={entry.value} onChange={(e) => onChange({ ...entry, value: Math.max(0, Math.round(Number(e.target.value) || 0)) })} style={{ height: 30, border: "1px solid var(--line)", borderRadius: 6, padding: "0 8px", fontSize: 13, textAlign: "right" }} />
+  <select value={entry.unit} onChange={(e) => onChange({ ...entry, unit: e.target.value as Cadence })} style={{ height: 30, border: "1px solid var(--line)", borderRadius: 6, fontSize: 12.5 }}>{CADENCES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+</div>;
+function PersonTargetsModal({ personId, personName, prodCodes, onClose, onSaved }: { personId: string; personName: string; prodCodes: string[]; onClose: () => void; onSaved: () => void }) {
+  const { ws } = useCrm(); const toast = useToast(); const t = ws.targets[personId] ?? {};
+  const [demos, setDemos] = useState<Entry>({ value: t.demos ?? 3, unit: "weekly" });
+  const [refs, setRefs] = useState<Entry>({ value: t.references ?? 15, unit: "weekly" });
+  const [amb, setAmb] = useState<Entry>({ value: t.ambassadors ?? 3, unit: "weekly" });
+  const [meet, setMeet] = useState<Entry>({ value: t.meetings ?? 3, unit: "weekly" });
+  const [fcalls, setFcalls] = useState<Entry>({ value: t.focusedCalls ?? 20, unit: "daily" });
+  const [products, setProducts] = useState<Record<string, Entry>>(() => Object.fromEntries(prodCodes.map((c) => [c, { value: t.products?.[c] ?? 0, unit: "weekly" as Cadence }])));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const res = await v2SaveTarget(personId, {
+      demos: toBaseCadence(demos.value, demos.unit, "weekly"),
+      references_per_week: toBaseCadence(refs.value, refs.unit, "weekly"),
+      ambassadors: toBaseCadence(amb.value, amb.unit, "weekly"),
+      meetings: toBaseCadence(meet.value, meet.unit, "weekly"),
+      focused_calls: toBaseCadence(fcalls.value, fcalls.unit, "daily"),
+      product_targets: Object.fromEntries(prodCodes.map((c) => [c, toBaseCadence(products[c].value, products[c].unit, "weekly")])),
+    });
+    setBusy(false); toast(res.message);
+    if (res.ok) { onSaved(); onClose(); }
+  };
+  return <Win small title={`Targets · ${personName}`} onClose={onClose}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+    <p style={{ margin: 0, fontSize: 11.5, color: "var(--muted)" }}>Enter each target in whichever cadence is easiest — daily, weekly or monthly — it&apos;s converted automatically.</p>
+    <TargetRow label="Demos / meetings / pitches" entry={demos} onChange={setDemos} />
+    <TargetRow label="References" entry={refs} onChange={setRefs} />
+    <TargetRow label="Ambassadors appointed" entry={amb} onChange={setAmb} />
+    <TargetRow label="Meetings scheduled (link sent)" entry={meet} onChange={setMeet} />
+    <TargetRow label="Calls on Focused Leads" entry={fcalls} onChange={setFcalls} />
+    {prodCodes.length > 0 && <div style={{ borderTop: "1px solid var(--line-2)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+      {prodCodes.map((c) => <TargetRow key={c} label={`${displayProductCode(c)} activity`} entry={products[c]} onChange={(e) => setProducts((p) => ({ ...p, [c]: e }))} />)}
+    </div>}
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid var(--line-2)", paddingTop: 10 }}>
+      <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+      <button className="btn red" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save targets"}</button>
+    </div>
+  </div></Win>;
+}
 const Inflow = (kind: "amb" | "sales") => function InflowDash(x: DX) {
   const ws = x.ctx.ws; const ids = kind === "amb" ? M.ambassadorIds(ws) : x.users; const rows = M.inflow(ws, kind, ids, x.range) as R[]; const s = (k: string) => rows.reduce((a, r) => a + Number(r[k]), 0);
   return <><Tiles items={[{ label: "Today", value: s("d1"), tone: "lav", icon: "plus" }, { label: "3 days", value: s("d3"), tone: "lav" }, { label: "7 days", value: s("d7"), tone: "lav" }, { label: "30 days", value: s("d30"), tone: "lav" }, { label: kind === "amb" ? "Ambassadors with 0 in 7 d" : "People with 0 in 3 d", value: rows.filter((r) => !Number(kind === "amb" ? r.d7 : r.d3)).length, tone: "rose", icon: "flag" }, { label: "Selected period", value: s("range"), sub: x.periodLabel, tone: "slate" }]} />
@@ -146,11 +247,16 @@ D["my-day"] = (x) => {
   return <><Tiles items={[{ label: "Calls today", value: `${calls} / ${tgt}`, sub: "target", tone: calls >= tgt ? "sage" : "rose", icon: "phone" }, { label: "Connected", value: conn, tone: "mint", icon: "check" }, { label: "Follow-ups due today", value: due.length, tone: "peach", icon: "cal", onClick: () => x.listWin("Due today", due) }, { label: "Overdue", value: over.length, tone: "rose", icon: "flag", onClick: () => x.listWin("Overdue follow-ups", over) }, { label: "Closing + negotiation", value: mine.filter((l) => l.bucket === "closing" || l.bucket === "negotiation").length, tone: "butter", icon: "fire" }, { label: "Demos this week", value: `${tg.reduce((s, r) => s + r.demos, 0)} / ${tg.reduce((s, r) => s + r.demosT, 0)}`, tone: "sky", icon: "video" }]} />
     <LeadList id="d-my" rows={list} title="Today's call list — highest focus score first" hideExtra={["hyg", "source", "product"]} /></>;
 };
-D["my-ambassador"] = (x) => {
+function MyAmbassadorDash(x: DX) {
   const ctx = x.ctx; const t = M.ambTargets(ctx.ws, M.periodRange("d7"), ctx.ws.me)[0]; const mine = ctx.ws.rows.filter((r) => r.ambassador === ctx.ws.me);
+  const filters = useMemo(() => leadFilters(ctx.ws), [ctx.ws]);
+  const [f, setF] = useState<FilterState>({}); const [q, setQ] = useState("");
+  const shown = useMemo(() => applyFilters(mine, filters, f), [mine, filters, f]);
   return <><Tiles items={t ? [{ label: "Leads this week", value: `${t.leads} / ${t.leadsT}`, sub: t.leadsGap >= 0 ? `+${t.leadsGap} surplus` : `${t.leadsGap} deficit`, tone: t.leadsGap >= 0 ? "sage" : "rose", icon: "plus" }, { label: "Demos this week", value: `${t.demos} / ${t.demosT}`, sub: t.demosGap >= 0 ? `+${t.demosGap} surplus` : `${t.demosGap} deficit`, tone: t.demosGap >= 0 ? "sage" : "rose", icon: "video" }, { label: "In negotiation / closing", value: mine.filter((r) => r.bucket === "closing" || r.bucket === "negotiation").length, tone: "mint", icon: "fire" }, { label: "All my leads", value: mine.length, tone: "slate", icon: "list" }] : []} />
-    <LeadList id="d-ma" rows={mine} title="Leads I have introduced" hideExtra={["contact", "hyg", "win"]} /></>;
-};
+    <FilterBar defs={filters} rows={mine} state={f} setState={setF} q={q} setQ={setQ} />
+    <LeadList id="d-ma" rows={shown} title="Leads I have introduced" hideExtra={["contact", "hyg", "win"]} q={q} /></>;
+}
+D["my-ambassador"] = (x) => <MyAmbassadorDash {...x} />;
 D.ai = (x) => <AiDash {...x} />;
 
 function AiDash(x: DX) {

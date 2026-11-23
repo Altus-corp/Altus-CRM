@@ -111,6 +111,18 @@ export const DASHES: DashDef[] = [
 export const DEFAULT_DASH: Partial<Record<AppRole, string>> = { admin: "hot", sales_manager: "hot", sales_executive: "my-day", consultant: "my-day", ambassador: "my-ambassador", marketing_manager: "sources", marketing_executive: "sources" };
 export const primaryRole = (roles: AppRole[]): AppRole => (["admin", "sales_manager", "sales_executive", "consultant", "marketing_manager", "marketing_executive", "ambassador"] as AppRole[]).find((r) => roles.includes(r)) ?? roles[0];
 export const dashesFor = (roles: AppRole[]) => DASHES.filter((d) => d.roles.some((r) => roles.includes(r)));
-export const modulesFor = (roles: AppRole[]) => MODULES.filter((m) => !m.roles || m.roles.some((r) => roles.includes(r))).filter((m) => !(roles.length === 1 && roles[0] === "ambassador" && !["dashboards", "sales", "ambassadors"].includes(m.id)));
+// Ambassadors module hidden for pure-ambassador logins for now (add "ambassadors" back here to restore it).
+export const modulesFor = (roles: AppRole[]) => MODULES.filter((m) => !m.roles || m.roles.some((r) => roles.includes(r))).filter((m) => !(roles.length === 1 && roles[0] === "ambassador" && !["dashboards", "sales"].includes(m.id)));
 
-export const DEFAULT_TARGETS = { sales: { demos: 3, references: 15, ambassadors: 3, callsPerDay: 60 }, ambassador: { demos: 3, leads: 10 } };
+export const DEFAULT_TARGETS = { sales: { demos: 3, references: 15, ambassadors: 3, callsPerDay: 60, meetings: 3, focusedCalls: 20 }, ambassador: { demos: 3, leads: 10 } };
+
+/** Per-product "success" resolutions for the product-wise target on /crm/dashboards/targets — a lead counts
+ * toward that product's target the period its resolution last changed to one of these (matched case/punctuation-
+ * insensitively, same normaliser as REPORT_GROUPS). Products with no entry here don't get a target column. */
+export const PRODUCT_TARGET_RESOLUTIONS: Record<string, string[]> = {
+  ALTUS_OS: ["proposal signed", "proposal send", "demo given"],
+  AMBASSADOR: ["agreement sent", "agreement signed/waived"],
+  BSSO: ["registered"],
+  KEYNOTE: ["pitched", "proposal drafted", "proposal sent", "delivered"],
+  RETAINER: ["proposal drafted", "proposal sent", "proposal signed"],
+};

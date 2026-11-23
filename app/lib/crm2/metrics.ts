@@ -1,6 +1,6 @@
 // Altus CRM v2 — pure metric functions. Run on the client over the Workspace payload, so every
 // dashboard, KPI chip and AI rule uses exactly the same numbers.
-import { BUCKET, BUCKETS, DEFAULT_TARGETS, REPORT_GROUPS, type BucketKey, type PeriodKey, type Tone } from "./config";
+import { BUCKET, BUCKETS, DEFAULT_TARGETS, PRODUCT_TARGET_RESOLUTIONS, REPORT_GROUPS, type BucketKey, type PeriodKey, type Tone } from "./config";
 import type { LeadRow, Workspace } from "./types";
 
 export const DAY = 86_400_000;
@@ -39,6 +39,11 @@ export function periodRange(key: PeriodKey | string, ref = now()): DateRange {
     case "lastyear": return { from: dayStart(y - 1, 1, 1), to: dayStart(y, 1, 1) - 1 };
     default: return lastNDays(7);
   }
+}
+/** A user-picked start/end date (as from <input type="date">, "YYYY-MM-DD") — whole calendar days, IST. */
+export function customRange(from: string, to: string): DateRange {
+  const f = from ? from.split("-").map(Number) : null; const t = to ? to.split("-").map(Number) : null;
+  return { from: f ? dayStart(f[0], f[1], f[2]) : -8_640_000_000_000_000, to: t ? dayEnd(t[0], t[1], t[2]) : 8_640_000_000_000_000 };
 }
 export const inRange = (d: string | null | undefined, range: DateRange) => { if (!d) return false; const t = new Date(d).getTime(); return t >= range.from && t <= range.to; };
 export const rangeDays = (range: DateRange) => Math.max(1, Math.round((range.to - range.from) / DAY));
@@ -120,13 +125,42 @@ export function followups(ws: Workspace, users: string[]) {
 }
 export function targets(ws: Workspace, users: string[], range: DateRange) {
   const wk = rangeDays(range) / 7; const T = (x: number) => Math.max(1, Math.round(x * wk));
+  const days = rangeDays(range); const focusedIds = new Set(ws.rows.filter((r) => r.focusedOn).map((r) => r.id));
   return users.map((id) => {
     const t = { ...DEFAULT_TARGETS.sales, ...ws.targets[id] };
     const demos = ws.meetings.filter((e) => e.u === id && !e.upcoming && inRange(e.t, range)).length;
     const refs = ws.references.filter((e) => e.u === id && inRange(e.t, range)).length;
     const ambs = ws.ambAppointed.filter((e) => e.u === id && inRange(e.t, range)).length;
-    return { id, person: personName(ws, id), demosT: T(t.demos), demos, demosGap: demos - T(t.demos), refsT: T(t.references), refs, refsGap: refs - T(t.references), ambT: T(t.ambassadors), ambs, ambGap: ambs - T(t.ambassadors) };
+    // Meeting target tracks when the Zoom/Meet link was sent (sentAt), not when the call itself happens.
+    const meetingsSent = ws.meetings.filter((e) => e.u === id && inRange(e.sentAt, range)).length;
+    // Calls target scoped to round-robin Focused Leads only — same per-day scaling as the general calling report.
+    const focusedCalls = ws.calls.filter((c) => c.u === id && c.a && focusedIds.has(c.a) && inRange(c.t, range)).length;
+    const focusedCallsT = Math.max(1, Math.round(t.focusedCalls * Math.min(days, 6)));
+    return { id, person: personName(ws, id),
+      demosRaw: t.demos, demosT: T(t.demos), demos, demosGap: demos - T(t.demos),
+      refsRaw: t.references, refsT: T(t.references), refs, refsGap: refs - T(t.references),
+      ambRaw: t.ambassadors, ambT: T(t.ambassadors), ambs, ambGap: ambs - T(t.ambassadors),
+      meetingsRaw: t.meetings, meetingsT: T(t.meetings), meetingsSent, meetingsGap: meetingsSent - T(t.meetings),
+      focusedCallsRaw: t.focusedCalls, focusedCallsT, focusedCalls, focusedCallsGap: focusedCalls - focusedCallsT };
   });
+}
+/** Per-(person, product) activity target — a lead counts the period its resolution last changed to one of that
+ * product's PRODUCT_TARGET_RESOLUTIONS. Only products with a resolution list configured get a column. */
+export function productActivityTargets(ws: Workspace, users: string[], range: DateRange) {
+  const wk = rangeDays(range) / 7; const T = (x: number) => Math.max(1, Math.round(x * wk));
+  const codes = Object.keys(PRODUCT_TARGET_RESOLUTIONS).filter((c) => ws.products.some((p) => p.code === c));
+  const namesByCode = new Map(codes.map((c) => [c, new Set(PRODUCT_TARGET_RESOLUTIONS[c].map(normResolution))]));
+  return { codes, rows: users.map((id) => {
+    const t = ws.targets[id]?.products ?? {};
+    const byCode: Record<string, { raw: number; actual: number; target: number; gap: number }> = {};
+    for (const code of codes) {
+      const names = namesByCode.get(code)!;
+      const actual = ws.rows.filter((l) => l.owner === id && l.product === code && l.resolution && names.has(normResolution(l.resolution)) && inRange(l.lastCalledAt, range)).length;
+      const raw = t[code] ?? 0; const target = T(raw);
+      byCode[code] = { raw, actual, target, gap: actual - target };
+    }
+    return { id, person: personName(ws, id), byCode };
+  }) };
 }
 export function ambassadorIds(ws: Workspace) { return ws.people.filter((p) => p.roles.includes("ambassador")).map((p) => p.id); }
 export function ambTargets(ws: Workspace, range: DateRange, only?: string) {
@@ -175,15 +209,15 @@ export function hygiene(ws: Workspace, leads: LeadRow[]) {
 export function resolutionReport(ws: Workspace, leads: LeadRow[], range: DateRange) {
   return ws.resolutions.map((r) => { const ls = leads.filter((l) => l.resolutionId === r.id); const p = ls.filter((l) => inRange(l.lastCalledAt, range)).length; return { id: r.id, name: r.name, bucket: BUCKET[r.bucket].label, bucketKey: r.bucket, tone: BUCKET[r.bucket].tone, today: ls.filter((l) => inDays(l.lastCalledAt, 1)).length, period: p, avg: +(p / rangeDays(range)).toFixed(1), total: ls.length }; });
 }
+// Strips case, spacing AND punctuation so "Follow up" / "Follow Up" / "old, graduate" / "Old Graduate" /
+// "Ringing/Did Not Pick" / "Ringing/ Did Not Pick" (real duplicate lead_resolutions rows) all collapse together.
+export const normResolution = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 /** Groups leads by their current call resolution into the reporting cards (REPORT_GROUPS) — independent of
  * the priority-stage buckets. A lead whose resolution isn't in any group's list is left out of every card. */
 export function reportGroups(leads: LeadRow[], range: DateRange) {
-  // Strips case, spacing AND punctuation so "Follow up" / "Follow Up" / "old, graduate" / "Old Graduate" /
-  // "Ringing/Did Not Pick" / "Ringing/ Did Not Pick" (real duplicate lead_resolutions rows) all collapse together.
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
   return REPORT_GROUPS.map((g) => {
-    const names = new Set(g.resolutions.map(norm));
-    const rows = leads.filter((l) => l.resolution && names.has(norm(l.resolution)));
+    const names = new Set(g.resolutions.map(normResolution));
+    const rows = leads.filter((l) => l.resolution && names.has(normResolution(l.resolution)));
     const periodRows = rows.filter((l) => inRange(l.lastCalledAt, range));
     return { key: g.key, label: g.label, tone: g.tone, rows, periodRows, total: rows.length, period: periodRows.length };
   });

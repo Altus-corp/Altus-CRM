@@ -128,7 +128,8 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .card.min{flex:none!important}
 .crm2 .maxed{position:fixed!important;inset:10px!important;z-index:60!important;height:auto!important;max-height:none!important}
 .crm2 .maxed-bg{position:fixed;inset:0;background:rgba(20,20,24,.25);z-index:59}
-.crm2 .tbl-tools{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line-2);flex:none;flex-wrap:nowrap;min-width:0}
+.crm2 .tbl-tools{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--line-2);flex:none;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
+.crm2 .tbl-tools::-webkit-scrollbar{display:none}
 .crm2 .tbl-tools .sp{flex:1}
 .crm2 .selall{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink-2);white-space:nowrap}
 .crm2 .cb{width:15px;height:15px;accent-color:var(--red);cursor:pointer}
@@ -261,7 +262,6 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .bar.boxed{padding:4px 6px}
 .crm2 .kchip{height:28px}
 .crm2 .stab,.crm2 .ptab,.crm2 .fchip{height:28px}
-.crm2 .tbl-tools{flex-wrap:wrap;row-gap:6px}
 .crm2 .card-h{padding:6px 10px 6px 12px}
 /* ---- v2 extras ---- */
 @keyframes crm2shrink{from{width:100%}to{width:0%}}

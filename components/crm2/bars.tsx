@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { PERIODS, TONES } from "@/app/lib/crm2/config";
 import type { FilterDef, FilterState, Kpi } from "./leads";
-import { Icon, Popover, fmt, usePop } from "./ui";
+import { Icon, Popover, fdate, fmt, usePop } from "./ui";
 
 export function FilterBar<T>({ defs, rows, state, setState, q, setQ, lead, trail }: { defs: FilterDef<T>[]; rows: T[]; state: FilterState; setState: (s: FilterState) => void; q: string; setQ: (q: string) => void; lead?: ReactNode; trail?: ReactNode }) {
   const [min, setMin] = useState(false); const car = useRef<HTMLDivElement>(null); const pop = usePop();
@@ -13,7 +13,7 @@ export function FilterBar<T>({ defs, rows, state, setState, q, setQ, lead, trail
   const d = defs.find((x) => x.k === pop.key);
   return <div className="bar boxed can-hide">{lead}
     {defs.length > 0 && <><button className="carr" onClick={() => car.current?.scrollBy({ left: -300, behavior: "smooth" })}><Icon n="chevl" s="s" /></button>
-    <div className="carousel" ref={car}>{defs.map((x) => { const v = state[x.k]; const on = !!v && ("period" in v || v.size > 0); const lab = !on ? x.label : "period" in v! ? `${x.label}: ${PERIODS.find((p) => p.key === (v as { period: string }).period)?.label}` : `${x.label} (${(v as Set<string>).size})`;
+    <div className="carousel" ref={car}>{defs.map((x) => { const v = state[x.k]; const on = !!v && ("period" in v || v.size > 0); const lab = !on ? x.label : "period" in v! ? `${x.label}: ${v.period === "custom" ? `${fdate(v.from)} – ${fdate(v.to)}` : PERIODS.find((p) => p.key === v.period)?.label}` : `${x.label} (${(v as Set<string>).size})`;
       return <button key={x.k} className={`fchip ${on ? "on" : ""}`} onClick={(e) => pop.open(e.currentTarget, x.k)}><Icon n={x.icon} s="s" />{lab}{on ? <span className="x" onClick={(e) => { e.stopPropagation(); const n = { ...state }; delete n[x.k]; setState(n); }}><Icon n="x" s="s" /></span> : <Icon n="chevd" s="s" />}</button>; })}</div>
     <button className="carr" onClick={() => car.current?.scrollBy({ left: 300, behavior: "smooth" })}><Icon n="chevr" s="s" /></button></>}
     {active.length > 0 && <button className="clearall" onClick={() => setState({})}>Clear all ({active.length})</button>}
@@ -27,7 +27,18 @@ export function FilterBar<T>({ defs, rows, state, setState, q, setQ, lead, trail
 }
 function FilterPicker<T>({ def, rows, value, onApply }: { def: FilterDef<T>; rows: T[]; value: FilterState[string] | undefined; onApply: (v: FilterState[string] | null) => void }) {
   const [q, setQ] = useState(""); const [sel, setSel] = useState<Set<string>>(new Set(value && !("period" in value) ? value : []));
-  if (def.period) return <><div className="ph">{def.label}</div><button className="pi" onClick={() => onApply(null)}>Any time</button>{PERIODS.map((p) => <button key={p.key} className={`pi ${value && "period" in value && value.period === p.key ? "on" : ""}`} onClick={() => onApply({ period: p.key })}>{p.label}</button>)}</>;
+  const custom = value && "period" in value && value.period === "custom" ? value : null;
+  const [from, setFrom] = useState(custom?.from ?? ""); const [to, setTo] = useState(custom?.to ?? "");
+  if (def.period) return <><div className="ph">{def.label}</div><button className="pi" onClick={() => onApply(null)}>Any time</button>
+    <div className={`pi ${custom ? "on" : ""}`} style={{ cursor: "default", flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+      <span>Custom range</span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+        <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+      </div>
+      <button className="btn red sm" disabled={!from || !to} onClick={() => onApply({ period: "custom", from, to })}>Apply</button>
+    </div>
+    {PERIODS.map((p) => <button key={p.key} className={`pi ${value && "period" in value && value.period === p.key ? "on" : ""}`} onClick={() => onApply({ period: p.key })}>{p.label}</button>)}</>;
   const opts = def.opts ? def.opts(rows) : [];
   return <><div className="ph">{def.label}</div><input type="text" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
     <div style={{ display: "flex", gap: 8, padding: "2px 8px 4px", fontSize: 11.5 }}><button style={{ color: "var(--red)", fontWeight: 700 }} onClick={() => setSel(new Set(opts.map((o) => o.v)))}>Select all</button><button style={{ color: "var(--muted)", fontWeight: 700 }} onClick={() => setSel(new Set())}>Clear</button></div>
