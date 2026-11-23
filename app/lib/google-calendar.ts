@@ -72,7 +72,7 @@ export async function createGoogleMeetEvent(input: { topic: string; description:
   return { eventId: result.id, meetUrl, calendarUrl: result.htmlLink ?? null, autoRecordingAccepted };
 }
 
-export async function getGoogleMeetRecordingUrl(eventId: string) {
+export async function getGoogleMeetArtifacts(eventId: string) {
   const accessToken = await getGoogleCalendarAccessToken();
   const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -80,8 +80,13 @@ export async function getGoogleMeetRecordingUrl(eventId: string) {
   });
   const event = await response.json() as { attachments?: { fileUrl?: string; title?: string; mimeType?: string }[]; error?: { message?: string } };
   if (!response.ok) throw new Error(event.error?.message || "Could not check for the Meet recording.");
-  const recording = (event.attachments ?? []).find(
+  const attachments = event.attachments ?? [];
+  const recordingUrl = attachments.find(
     (attachment) => attachment.mimeType?.startsWith("video/") || attachment.title?.toLowerCase().includes("recording"),
-  );
-  return recording?.fileUrl ?? null;
+  )?.fileUrl ?? null;
+  // Meet writes the transcript as a Google Doc attached to the same event, titled e.g. "<topic> - Transcript".
+  const transcriptUrl = attachments.find(
+    (attachment) => attachment.mimeType === "application/vnd.google-apps.document" && attachment.title?.toLowerCase().includes("transcript"),
+  )?.fileUrl ?? null;
+  return { recordingUrl, transcriptUrl };
 }

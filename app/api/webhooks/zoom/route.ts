@@ -1,6 +1,7 @@
 import "server-only";
 import crypto from "crypto";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { downloadZoomTranscript } from "@/app/lib/zoom";
 
 type ZoomWebhookPayload = {
   event?: string;
@@ -53,6 +54,41 @@ export async function POST(request: Request) {
           metadata: { attachments: [{ url: recordingUrl, name: "Watch recording" }] },
           created_by: meeting.host_user_id,
         });
+      }
+    }
+  }
+
+  if (body.event === "recording.transcript_completed") {
+    const meetingId = String(body.payload?.object?.id ?? "");
+    const topic = body.payload?.object?.topic ?? "Zoom meeting";
+    if (meetingId) {
+      const admin = createAdminClient();
+      const { data: meeting } = await admin
+        .from("lead_zoom_meetings")
+        .select("id, lead_id, host_user_id")
+        .eq("zoom_meeting_id", meetingId)
+        .maybeSingle();
+      if (meeting) {
+        try {
+          const transcript = await downloadZoomTranscript(meetingId);
+          await admin
+            .from("lead_zoom_meetings")
+            .update({
+              transcript_text: transcript.text,
+              transcript_download_url: transcript.downloadUrl,
+              transcript_received_at: new Date().toISOString(),
+            })
+            .eq("id", meeting.id);
+          await admin.from("lead_activities").insert({
+            lead_id: meeting.lead_id,
+            activity_type: "zoom_transcript_ready",
+            note: `Transcript is ready for Zoom meeting: ${topic}.`,
+            metadata: { attachments: [{ url: transcript.downloadUrl, name: "Download transcript" }] },
+            created_by: meeting.host_user_id,
+          });
+        } catch {
+          // Zoom reported the transcript but it was not downloadable yet; nothing to save.
+        }
       }
     }
   }
