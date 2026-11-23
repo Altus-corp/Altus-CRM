@@ -7,6 +7,7 @@ import { createAdminClient } from "@/app/lib/supabase/admin";
 import { createSmtpTransport, getUserSmtpPassword, getUserSmtpSettings } from "@/app/lib/smtp-settings";
 import type { AppRole } from "@/app/lib/roles";
 import {
+  addProductToLeadDetails,
   createLeadNote,
   createManualLead,
   manuallyAssignLeads,
@@ -52,6 +53,24 @@ export async function v2UpdateField(targets: Target[], field: string, value: str
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Update failed." };
   }
+}
+
+/** Add an extra product to leads that already have other product work, keeping their existing products,
+ * stage history and owner untouched — same action the classic Lead Details "Add product" uses. Skips (rather
+ * than fails) a lead that already has that product, since addProductToLeadDetails rejects duplicates. */
+export async function v2AddProduct(targets: Target[], productId: string): Promise<ActionResult> {
+  await requireUser();
+  if (!targets.length) return { ok: false, message: "Nothing selected." };
+  let added = 0; let skipped = 0;
+  for (const t of targets) {
+    try {
+      await addProductToLeadDetails(fd({ leadId: t.leadId, sourceAssignmentId: t.assignmentId, productId }));
+      added++;
+    } catch {
+      skipped++;
+    }
+  }
+  return { ok: added > 0 || !skipped, message: `Added to ${added}${skipped ? `, ${skipped} already had it` : ""}`, done: added };
 }
 
 export async function v2LogCall(t: Target, resolutionId: string, followUpAt: string, note: string): Promise<ActionResult> {

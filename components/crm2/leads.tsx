@@ -1,12 +1,12 @@
 "use client";
 // Lead columns, filters, KPI chips and bulk actions — shared by every lead table and dashboard list.
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { BUCKET, BUCKETS, TONES, type Tone } from "@/app/lib/crm2/config";
 import { daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
-import { v2UpdateField } from "@/app/crm/actions";
+import { v2AddProduct, v2UpdateField } from "@/app/crm/actions";
 import { displayProductCode } from "@/app/lib/product-display";
-import { Avatar, Icon, Pill, ago, cap, fdate } from "./ui";
+import { Avatar, Icon, Pill, Win, ago, cap, fdate } from "./ui";
 import type { BulkAction, Col, Opt } from "./DataTable";
 import type { Ctx } from "./context";
 
@@ -58,7 +58,7 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
     { k: "ambassador", label: "Ambassador", text: (r) => (r.ambassador ? personName(ws, r.ambassador) : "—") },
     { k: "createdAt", label: "Created on", groupVal: (r) => fdate(r.createdAt) }, { k: "assignedAt", label: "Assigned on", groupVal: (r) => fdate(r.assignedAt) },
     { k: "no", label: "Lead no.", group: false },
-    ...custom.map((c): Col<LeadRow> => ({ k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e({ type: "text" as const }) })),
+    ...custom.map((c): Col<LeadRow> => ({ k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e(c.fieldType === "dropdown" && c.options.length ? { options: () => c.options.map((o) => ({ v: o, l: o })) } : { type: "text" as const }) })),
   ];
 }
 export const LEAD_HIDDEN = ["phone", "notCalled", "score", "action", "connected", "email", "createdAt", "assignedAt", "no"];
@@ -75,6 +75,57 @@ export function leadEditor(ctx: Ctx, toast: (m: string) => void) {
     if (col.k.startsWith("c:")) rows.forEach((r) => ctx.patchRows([r.id], { custom: { ...r.custom, [field]: value } }));
     else ctx.patchRows(rows.map((r) => r.id), patch);
   };
+}
+/** "Add value" bulk panel — in the bulk bar between "Change field" and WhatsApp. Product is additive (checks
+ * several, each becomes a new product assignment, existing ones untouched); every other dropdown field
+ * (Call resolution, Sales person, and any custom dropdown column) is single-valued so picking one replaces it,
+ * same as "Change field" — only the fields you actually pick a value for are touched. */
+function BulkAddValueModal({ rows, ctx, toast, onClose, onDone }: { rows: LeadRow[]; ctx: Ctx; toast: (m: string) => void; onClose: () => void; onDone: () => void }) {
+  const ws = ctx.ws;
+  const [prodSel, setProdSel] = useState<Set<string>>(new Set());
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const products = ws.products.filter((p) => p.code !== "AMBASSADOR");
+  const customDropdowns = ws.columns.filter((c) => c.source === "custom" && c.fieldType === "dropdown" && c.options.length);
+  const fieldRows: { key: string; label: string; opts: Opt[] }[] = [
+    { key: "resolution", label: "Call resolution", opts: ws.resolutions.map((x) => ({ v: x.id, l: x.name })) },
+    ...(canAssignOwner(ws) ? [{ key: "owner", label: "Sales person", opts: assignableOpts(ws) }] : []),
+    ...customDropdowns.map((c) => ({ key: "c:" + c.key, label: c.label, opts: c.options.map((o) => ({ v: o, l: o })) })),
+  ];
+  const toggleProduct = (id: string) => setProdSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const hasAny = prodSel.size > 0 || Object.values(picks).some(Boolean);
+  const apply = async () => {
+    setBusy(true);
+    const msgs: string[] = [];
+    for (const pid of prodSel) msgs.push((await v2AddProduct(rows.map((r) => ({ leadId: r.leadId, assignmentId: r.id })), pid)).message);
+    const editor = leadEditor(ctx, toast);
+    for (const [key, value] of Object.entries(picks)) { if (value) await editor(rows, { k: key } as Col<LeadRow>, value); }
+    setBusy(false);
+    if (prodSel.size) ctx.refresh();
+    if (msgs.length) toast(msgs.join(" · "));
+    onDone(); onClose();
+  };
+  return <Win small title={`Add / change fields for ${rows.length} leads`} onClose={onClose}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+    {products.length > 0 && <div className="fld"><label>Add product(s) — keeps their existing products</label>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>{products.map((p) => <button key={p.id} type="button" className={`ptab ${prodSel.has(p.id) ? "on" : ""}`} onClick={() => toggleProduct(p.id)}>{displayProductCode(p.code)}</button>)}</div></div>}
+    {fieldRows.map((f) => <div key={f.key} className="fld"><label>{f.label}</label>
+      <select value={picks[f.key] ?? ""} onChange={(e) => setPicks((p) => ({ ...p, [f.key]: e.target.value }))}><option value="">— no change —</option>{f.opts.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select></div>)}
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ color: "var(--muted)", fontSize: 11.5, flex: 1 }}>Only the fields you pick a value for are changed. Products are added, not replaced.</span>
+      <button className="btn" onClick={onClose}>Cancel</button><button className="btn red" disabled={!hasAny || busy} onClick={apply}>{busy ? "Applying…" : `Apply to ${rows.length}`}</button></div>
+  </div></Win>;
+}
+/** Matches DataTable's `bulkExtra` prop shape — use as `bulkExtra={leadBulkAddValue(ctx, toast)}`. */
+export function leadBulkAddValue(ctx: Ctx, toast: (m: string) => void) {
+  function Extra(rows: LeadRow[], clear: () => void): ReactNode { return <BulkAddValueButton rows={rows} clear={clear} ctx={ctx} toast={toast} />; }
+  return Extra;
+}
+function BulkAddValueButton({ rows, clear, ctx, toast }: { rows: LeadRow[]; clear: () => void; ctx: Ctx; toast: (m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!rows.length) return null;
+  return <>
+    <button className="btn sm" onClick={() => setOpen(true)}><Icon n="plus" s="s" /> Add value</button>
+    {open && <BulkAddValueModal rows={rows} ctx={ctx} toast={toast} onClose={() => setOpen(false)} onDone={clear} />}
+  </>;
 }
 export function leadBulk(ctx: Ctx, toast: (m: string) => void, onWhatsApp: (rows: LeadRow[]) => void): BulkAction<LeadRow>[] {
   // Reassign / stage / resolution / follow-up / any field in bulk = "Change field" in the bulk bar (same server actions).

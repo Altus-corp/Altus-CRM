@@ -22,6 +22,9 @@ export type TableProps<T extends { id: string }> = {
   id: string; rows: T[]; cols: Col<T>[]; title?: ReactNode; hidden?: string[]; frozen?: number; group?: string | null; sort?: { k: string; dir: 1 | -1 } | null;
   views?: View[]; kanban?: { key: (r: T) => string; cols: { k: string; label: string; tone: Tone }[]; onMove?: (r: T, k: string) => void };
   calendarKey?: (r: T) => string | null; rowTone?: (r: T) => Tone; onOpen?: (r: T, list: T[]) => void; bulk?: BulkAction<T>[];
+  /** Rendered in the bulk bar right after "Change field" and before `bulk` (e.g. WhatsApp) — for a bulk action
+   * that needs its own modal/panel rather than the single-field popover "Change field" gives you. */
+  bulkExtra?: (rows: T[], clear: () => void) => ReactNode;
   onEdit?: (rows: T[], col: Col<T>, value: string) => Promise<void> | void; q?: string; dupeKey?: (r: T) => string; exportName?: string; card?: (r: T) => ReactNode; minHeight?: number;
   /** A "+N" badge next to the first column — click to expand child rows beneath it, same columns as the parent
    * row (e.g. a lead's secondary contacts: same product/stage/etc., only name/phone/email differ). */
@@ -108,6 +111,7 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
   const bulk = sel.size > 0 && (
     <div className={mobile ? "mbulk" : "bulk"}><span className="n">{sel.size} selected</span>
       <button className="btn sm" onClick={(e) => pop.open(e.currentTarget, "bulkfield")}><Icon n="edit" s="s" /> Change field <Icon n="chevd" s="s" /></button>
+      {p.bulkExtra?.(selected, clear)}
       {(p.bulk ?? []).map((b) => <button key={b.label} className="btn sm" onClick={() => b.run(selected, clear)}><Icon n={b.icon} s="s" /> {b.label}</button>)}
       <button className="btn sm" onClick={(e) => pop.open(e.currentTarget, "export")}><Icon n="download" s="s" /> Export selected</button>
       <span style={{ flex: 1 }} /><button className="btn sm ghost" onClick={clear}>Clear</button></div>);

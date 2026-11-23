@@ -8,7 +8,7 @@ import { ChannelPartnerSelect } from "@/components/leads/channel-partner-select"
 import { ContactsTab } from "./ContactsTab";
 import { daysSince, missingFields, nextAction, personName, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
-import { v2AddNote, v2LeadChannelPartners, v2LogCall, v2UpdateField } from "@/app/crm/actions";
+import { v2AddNote, v2AddProduct, v2LeadChannelPartners, v2LogCall, v2UpdateField } from "@/app/crm/actions";
 import { useCrm } from "./context";
 import { assignableOpts, canAssignOwner, dialLead } from "./leads";
 import { Avatar, Icon, Pill, Win, fdate, fdt, toneStyle, useToast } from "./ui";
@@ -30,6 +30,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   const hasChannelPartnerColumn = customCols.some((c) => isChannelPartnerColumn({ field_key: c.key, label: c.label }));
   useEffect(() => { if (!hasChannelPartnerColumn) return; let live = true; v2LeadChannelPartners(l.leadId).then((r) => live && setCp(r)).catch(() => live && setCp({ ids: [], names: "" })); return () => { live = false; }; }, [l.leadId, hasChannelPartnerColumn]);
   const others = useMemo(() => ws.rows.filter((x) => x.leadId === l.leadId), [ws.rows, l.leadId]);
+  const curProduct = ws.products.find((p) => p.code === l.product);
   const calls = ws.calls.filter((c) => c.a === l.id); const meets = ws.meetings.filter((m) => m.leadId === l.leadId);
 
   return <Win onClose={onClose} title={<span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}><Avatar name={l.name} /><span>{l.name}{l.isNew && <span className="newtag">NEW</span>}<div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 400 }}>{l.company || "No company"} · {l.phone} · <Pill tone="slate">{displayProductCode(l.product)}</Pill> <Pill tone={b.tone}>{b.label}</Pill></div></span></span>}
@@ -57,10 +58,14 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
         <div className="lw-rail"><div className="tile" style={toneStyle(b.tone)}><span className="tl1"><Icon n="fire" s="s" /> Priority stage</span><span className="tv">{b.label}</span><span className="ts">Focus score {priorityScore(l)} · {l.stage}</span></div>
           <div className="tile" style={toneStyle("aqua")}><span className="tl1"><Icon n="spark" s="s" /> AI read</span><span className="tv">{winProb(l)}% win</span><span className="ts">{nextAction(l)}</span></div>
           <div className="tile" style={toneStyle(miss.length ? "butter" : "mint")}><span className="tl1"><Icon n="db" s="s" /> Data hygiene</span><span className="tv">{miss.length ? `${miss.length} empty` : "Complete"}</span><span className="ts">{miss.join(", ") || "All key fields filled"}</span></div>
+          <div className="fld"><label>Product</label><select value={l.id} onChange={(e) => { const r = others.find((o) => o.id === e.target.value); if (r) onNav(r); }}>{others.map((o) => <option key={o.id} value={o.id}>{displayProductCode(o.product)}</option>)}</select>
+            {ctx.canEdit && <div style={{ marginTop: 6 }}><AddMoreProducts leadId={l.leadId} assignmentId={l.id} already={others.map((o) => o.product)} onAdded={() => ctx.refresh()} /></div>}</div>
+          <div className="fld"><label>Stage</label><select disabled={!ctx.canEdit || !curProduct?.stages.length} value={l.stageId ?? ""} onChange={(e) => { const st = curProduct?.stages.find((s) => s.id === e.target.value); if (st) save("stageId", st.id, { stage: st.name, stageId: st.id }); }}><option value="" disabled>Choose…</option>{(curProduct?.stages ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
           <div className="fld"><label>Next follow-up</label><input type="datetime-local" disabled={!ctx.canEdit} defaultValue={l.nextFollowUp ? new Date(l.nextFollowUp).toISOString().slice(0, 16) : ""} onBlur={(e) => e.target.value && save("nextFollowUp", new Date(e.target.value).toISOString(), { nextFollowUp: new Date(e.target.value).toISOString() })} /></div>
           <div className="fld"><label>Sales person</label><select disabled={!ctx.canEdit || !canAssignOwner(ws)} defaultValue={l.owner ?? ""} onChange={(e) => save("owner", e.target.value, { owner: e.target.value })}><option value="">Unassigned</option>{assignableOpts(ws).map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select></div></div></div>}
       {tab === "products" && <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>{others.map((o) => { const pd = ws.products.find((p) => p.code === o.product); return <div key={o.id} className="panel"><div className="panel-h"><Pill tone="slate">{displayProductCode(o.product)}</Pill><span style={{ color: "var(--muted)", fontWeight: 400 }}>{pd?.name}</span><span style={{ flex: 1 }} />{o.resolution && <Pill tone={BUCKET[o.bucket].tone}>{o.resolution}</Pill>}<span style={{ color: "var(--muted)", fontWeight: 400 }}>{personName(ws, o.owner)}</span></div>
-        <div style={{ display: "flex", gap: 6, padding: 12, flexWrap: "wrap" }}>{(pd?.stages ?? []).map((s, i) => { const cur = pd!.stages.findIndex((x) => x.name === o.stage); return <span key={s.id} className="pill" style={{ ...toneStyle(i === cur ? "mint" : i < cur ? "sage" : "slate"), padding: "5px 12px" }}>{i < cur ? "✓ " : i === cur ? "● " : ""}{s.name}</span>; })}</div></div>; })}</div>}
+        <div style={{ display: "flex", gap: 6, padding: 12, flexWrap: "wrap" }}>{(pd?.stages ?? []).map((s, i) => { const cur = pd!.stages.findIndex((x) => x.name === o.stage); return <span key={s.id} className="pill" style={{ ...toneStyle(i === cur ? "mint" : i < cur ? "sage" : "slate"), padding: "5px 12px" }}>{i < cur ? "✓ " : i === cur ? "● " : ""}{s.name}</span>; })}</div></div>; })}
+        {ctx.canEdit && <AddMoreProducts leadId={l.leadId} assignmentId={l.id} already={others.map((o) => o.product)} onAdded={() => ctx.refresh()} />}</div>}
       {(tab === "activity" || tab === "notes") && <div className="tl">{tab === "notes" && ctx.canEdit && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}><textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" style={{ flex: 1, height: 70, border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} /><button className="btn red" onClick={async () => { const r = await v2AddNote({ leadId: l.leadId, assignmentId: l.id }, note); toast(r.message); if (r.ok) { setNote(""); setTab("activity"); } }}>Save note</button></div>}
         {acts == null ? <div className="empty">Loading…</div> : acts.filter((a) => tab === "activity" || a.activity_type === "note").map((a) => <div key={a.id} className="tli"><span className="tdot" style={{ background: TONES[a.activity_type === "call" ? "sky" : a.activity_type === "note" ? "peach" : "slate"].mk }} /><div><b>{a.activity_type}{a.note ? ` · ${a.note}` : ""}</b><div style={{ color: "var(--muted)", fontSize: 11.5 }}>{fdt(a.created_at)} · {a.actor}{a.follow_up_at ? ` · follow-up ${fdate(a.follow_up_at)}` : ""}</div></div></div>)}{acts && !acts.length && <div className="empty">No activity yet.</div>}</div>}
       {tab === "calls" && <div style={{ padding: 12 }}><table className="t"><thead><tr><th>Date</th><th>Direction</th><th>Status</th><th>Duration</th></tr></thead><tbody>{calls.map((c, i) => <tr key={i}><td>{fdt(c.t)}</td><td>{c.out ? "Outgoing" : "Incoming"}</td><td><Pill tone={c.c ? "mint" : "rose"}>{c.c ? "Connected" : "Not connected"}</Pill></td><td>{c.d ? Math.round(c.d / 60) + " min" : "—"}</td></tr>)}</tbody></table>{!calls.length && <div className="empty">No calls in the last 60 days.</div>}</div>}
@@ -70,6 +75,24 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
     </div>
     {logOpen && <LogCall onClose={() => setLogOpen(false)} onSave={async (resId, fu, n) => { const r = await v2LogCall({ leadId: l.leadId, assignmentId: l.id }, resId, fu, n); toast(r.message); if (r.ok) { const x = ws.resolutions.find((q) => q.id === resId); ctx.patchRows([l.id], { resolutionId: resId, resolution: x?.name ?? null, bucket: x?.bucket ?? l.bucket, lastCalledAt: new Date().toISOString(), nextFollowUp: fu || l.nextFollowUp }); setLogOpen(false); } }} />}
   </Win>;
+}
+/** Multi-select "Add product" — pick several at once (same checkbox-multi-select the classic Add-lead form uses),
+ * each becomes a new product assignment; the lead's existing products, stages and owner are untouched. */
+function AddMoreProducts({ leadId, assignmentId, already, onAdded }: { leadId: string; assignmentId: string; already: string[]; onAdded: () => void }) {
+  const { ws } = useCrm(); const toast = useToast();
+  const [sel, setSel] = useState<Set<string>>(new Set()); const [busy, setBusy] = useState(false);
+  const options = ws.products.filter((p) => p.code !== "AMBASSADOR" && !already.includes(p.code));
+  if (!options.length) return null;
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  return <div className="panel" style={{ padding: 12, gap: 8 }}>
+    <span className="lbl">Add product</span>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{options.map((p) => <button key={p.id} type="button" className={`ptab ${sel.has(p.id) ? "on" : ""}`} onClick={() => toggle(p.id)}>{displayProductCode(p.code)}</button>)}</div>
+    <button className="btn red sm" disabled={!sel.size || busy} onClick={async () => {
+      setBusy(true); const msgs: string[] = [];
+      for (const pid of sel) msgs.push((await v2AddProduct([{ leadId, assignmentId }], pid)).message);
+      setBusy(false); toast(msgs.join(" · ")); setSel(new Set()); onAdded();
+    }}>{busy ? "Adding…" : `Add ${sel.size || ""}`}</button>
+  </div>;
 }
 function LogCall({ onClose, onSave }: { onClose: () => void; onSave: (resolutionId: string, followUpAt: string, note: string) => void }) {
   const { ws } = useCrm(); const [res, setRes] = useState(""); const [fu, setFu] = useState(""); const [n, setN] = useState("");
