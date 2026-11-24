@@ -72,6 +72,8 @@ export type Workspace = {
   ambLeads: SimpleEv[];
   targets: Record<string, TargetSet>;
   hygiene: HygieneRule[];
-  columns: { key: string; label: string; source: string; fieldType: string; options: string[] }[];
+  /** `computedFrom` means the classic CRM derives this field from other fields (e.g. Full Name from first +
+   * last) and never stores a value for it directly — editing it is a no-op there, so v2 must not offer to either. */
+  columns: { key: string; label: string; source: string; fieldType: string; options: string[]; computedFrom: string[] }[];
   warnings: string[];
 };

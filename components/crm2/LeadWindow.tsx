@@ -8,7 +8,7 @@ import { ChannelPartnerSelect } from "@/components/leads/channel-partner-select"
 import { ZoomMeetingModal } from "@/components/leads/zoom-meeting-modal";
 import { GoogleMeetModal } from "@/components/leads/google-meet-modal";
 import { ContactsTab } from "./ContactsTab";
-import { daysSince, missingFields, nextAction, personName, priorityScore, winProb } from "@/app/lib/crm2/metrics";
+import { computedFieldValue, daysSince, missingFields, nextAction, personName, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
 import { v2AddNote, v2AddProduct, v2LeadChannelPartners, v2LogCall, v2UpdateField } from "@/app/crm/actions";
 import { useCrm } from "./context";
@@ -29,7 +29,10 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   const idx = list.findIndex((x) => x.id === l.id); const nav = (d: number) => { if (!list.length) return; onNav(list[(idx + d + list.length) % list.length]); };
   const save = async (field: string, value: string, patch: Partial<LeadRow>) => { const r = await v2UpdateField([{ leadId: l.leadId, assignmentId: l.id }], field, value); toast(r.message); if (r.ok) ctx.patchRows([l.id], patch); };
   const coreFields: [string, string, string][] = [["Lead no.", "no", l.no], ["First name", "first_name", l.first], ["Last name", "last_name", l.last], ["Cell number", "phone", l.phone], ["Email", "email", l.email], ["Company", "company_name", l.company]];
-  const customCols = ws.columns.filter((c) => c.source === "custom" && c.key !== "company_name");
+  // Some configs have a stray duplicate custom column for a field that's already a core field above
+  // (same label, different field_key) — matched by label like classic CRM's own lead-no/acquisition-date checks.
+  const DUP_CORE_LABELS = new Set(["lead no", "lead number", "last name", "company name"]);
+  const customCols = ws.columns.filter((c) => c.source === "custom" && c.key !== "company_name" && !DUP_CORE_LABELS.has(c.label.trim().toLowerCase()));
   const isFieldMissing = (lab: string, key: string, val: string) => miss.includes(lab) || (ws.hygiene.some((h) => h.key === key) && !val && ["followup", "negotiation", "closing"].includes(l.bucket));
   const [cp, setCp] = useState<{ ids: string[]; names: string } | null>(null);
   const hasChannelPartnerColumn = customCols.some((c) => isChannelPartnerColumn({ field_key: c.key, label: c.label }));
@@ -46,12 +49,14 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
     <div className="win-b">
       {tab === "overview" && <div className="lw-grid"><div className="fgrid">
         {coreFields.map(([lab, key, val]) => { const isMiss = isFieldMissing(lab, key, val); return (
-          <div key={key} className={`fld ${isMiss ? "miss" : ""}`}><label>{lab}{isMiss ? " · missing" : ""}</label><input defaultValue={val} readOnly={!ctx.canEdit || key === "no"} placeholder={isMiss ? "Needed from follow-up" : "—"} onBlur={(e) => { if (e.target.value !== val) save(key, e.target.value, key === "email" ? { email: e.target.value } : key === "company_name" ? { company: e.target.value } : { custom: { ...l.custom, [key]: e.target.value } }); }} /></div>); })}
+          <div key={key} className={`fld ${isMiss ? "miss" : ""}`}><label>{lab}{isMiss ? " · missing" : ""}</label><input defaultValue={val} readOnly={!ctx.canEdit || key === "no"} placeholder={isMiss ? "Needed from follow-up" : "—"} onBlur={(e) => { if (e.target.value !== val) { const v = e.target.value; const patch: Partial<LeadRow> = key === "email" ? { email: v } : key === "company_name" ? { company: v } : key === "first_name" ? { first: v, name: [v, l.last].filter(Boolean).join(" ") } : key === "last_name" ? { last: v, name: [l.first, v].filter(Boolean).join(" ") } : key === "phone" ? { phone: v } : { custom: { ...l.custom, [key]: v } }; save(key, v, patch); } }} /></div>); })}
         {customCols.map((c) => {
+          if (c.computedFrom.length) { const computed = computedFieldValue(l, c.computedFrom); return <div key={c.key} className="fld"><label>{c.label}</label><input value={computed || "—"} readOnly title="Derived automatically — edit the fields it's built from instead" /></div>; }
+          if (c.label.trim().toLowerCase() === "lead acquisition date") return <div key={c.key} className="fld"><label>{c.label}</label><input value={fdate(l.createdAt)} readOnly title="The date this lead was created" /></div>;
           const val = l.custom[c.key] ?? ""; const isMiss = isFieldMissing(c.label, c.key, val); const disabled = !ctx.canEdit;
           const onSave = (next: string) => { if (next !== val) save(c.key, next, { custom: { ...l.custom, [c.key]: next } }); };
           if (isChannelPartnerColumn({ field_key: c.key, label: c.label })) return <div key={c.key} className={`fld ${isMiss ? "miss" : ""}`}><label>{c.label}{isMiss ? " · missing" : ""}</label>
-            {cp ? <ChannelPartnerSelect leadId={l.leadId} assignmentId={l.id} names={cp.names} options={[]} selectedIds={cp.ids} onSaved={(ids) => setCp({ ids, names: cp.names })} /> : <span style={{ color: "var(--faint)" }}>Loading…</span>}</div>;
+            {cp ? <ChannelPartnerSelect leadId={l.leadId} assignmentId={l.id} names={cp.names} options={[]} selectedIds={cp.ids} onSaved={(ids) => setCp({ ids, names: ids.map((id) => personName(ws, id)).join(", ") })} /> : <span style={{ color: "var(--faint)" }}>Loading…</span>}</div>;
           return <div key={c.key} className={`fld ${isMiss ? "miss" : ""}`}><label>{c.label}{isMiss ? " · missing" : ""}</label>
             {c.fieldType === "dropdown" ? <select disabled={disabled} defaultValue={val} onChange={(e) => onSave(e.target.value)}><option value="">Select</option>{c.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
               : c.fieldType === "checkbox" ? <label style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 8 }}><input type="checkbox" disabled={disabled} defaultChecked={val === "true"} onChange={(e) => onSave(e.target.checked ? "true" : "false")} /> Yes</label>

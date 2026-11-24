@@ -2,7 +2,7 @@
 // Lead columns, filters, KPI chips and bulk actions — shared by every lead table and dashboard list.
 import { useState, type ReactNode } from "react";
 import { BUCKET, BUCKETS, TONES, type Tone } from "@/app/lib/crm2/config";
-import { customRange, daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
+import { computedFieldValue, customRange, daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
 import { v2AddProduct, v2UpdateField } from "@/app/crm/actions";
 import { displayProductCode } from "@/app/lib/product-display";
@@ -31,8 +31,9 @@ export const canAssignOwner = (ws: Workspace) => ws.roles.includes("admin") || w
 export const assignableOpts = (ws: Workspace): Opt[] => ws.roles.includes("admin") ? ownerOpts(ws) : salesPeople(ws).filter((p) => ws.scope.includes(p.id)).map((p) => ({ v: p.id, l: p.name }));
 const resTone = (ws: Workspace, r: LeadRow): Tone => (r.resolutionId ? BUCKET[ws.resolutions.find((x) => x.id === r.resolutionId)?.bucket ?? "approach"].tone : "lav");
 
+const DUP_CORE_LABELS = new Set(["lead no", "lead number", "last name", "company name"]);
 export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) => void): Col<LeadRow>[] {
-  const custom = ws.columns.filter((c) => c.source === "custom" && !["company_name", "priority"].includes(c.key));
+  const custom = ws.columns.filter((c) => c.source === "custom" && !["company_name", "priority"].includes(c.key) && !DUP_CORE_LABELS.has(c.label.trim().toLowerCase()));
   const e = <T,>(x: T) => (canEdit ? x : undefined);
   const call = (r: LeadRow) => { dialLead(r.leadId, r.id, r.phone).then((res) => toast?.(res.message)); };
   return [
@@ -58,7 +59,11 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
     { k: "ambassador", label: "Ambassador", text: (r) => (r.ambassador ? personName(ws, r.ambassador) : "—") },
     { k: "createdAt", label: "Created on", groupVal: (r) => fdate(r.createdAt) }, { k: "assignedAt", label: "Assigned on", groupVal: (r) => fdate(r.assignedAt) },
     { k: "no", label: "Lead no.", group: false },
-    ...custom.map((c): Col<LeadRow> => ({ k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e(c.fieldType === "dropdown" && c.options.length ? { options: () => c.options.map((o) => ({ v: o, l: o })) } : { type: "text" as const }) })),
+    ...custom.map((c): Col<LeadRow> => c.computedFrom.length
+      ? { k: "c:" + c.key, label: c.label, text: (r) => computedFieldValue(r, c.computedFrom) }
+      : c.label.trim().toLowerCase() === "lead acquisition date"
+        ? { k: "c:" + c.key, label: c.label, text: (r) => fdate(r.createdAt) }
+        : { k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e(c.fieldType === "dropdown" && c.options.length ? { options: () => c.options.map((o) => ({ v: o, l: o })) } : { type: "text" as const }) }),
   ];
 }
 export const LEAD_HIDDEN = ["phone", "notCalled", "score", "action", "connected", "email", "createdAt", "assignedAt", "no"];

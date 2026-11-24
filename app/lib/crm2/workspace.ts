@@ -72,7 +72,7 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
     db.from("lead_products").select("id, code, name, is_active").eq("is_active", true),
     db.from("lead_stages").select("id, product_id, name, position, is_active").eq("is_active", true).order("position"),
     db.from("lead_resolutions").select("id, name, is_active").eq("is_active", true),
-    db.from("lead_table_columns").select("field_key, label, source, position, field_type, options").order("position"),
+    db.from("lead_table_columns").select("field_key, label, source, position, field_type, options, computed_from").order("position"),
     db.from("crm_resolution_buckets").select("resolution_id, bucket"),
     db.from("crm_hygiene_rules").select("field_key, label, from_bucket, weight, is_active").eq("is_active", true),
     db.from("crm_targets").select("user_id, demos, references_per_week, ambassadors, calls_per_day, leads, meetings, focused_calls, product_targets"),
@@ -84,7 +84,7 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
   const products: ProductDef[] = (prodRows ?? []).map((p: Raw) => ({ id: s(p.id), code: s(p.code), name: s(p.name), stages: (stageRows ?? []).filter((st: Raw) => s(st.product_id) === s(p.id)).map((st: Raw) => ({ id: s(st.id), name: s(st.name) })) }));
   const prodById = new Map(products.map((p) => [p.id, p]));
   const stageById = new Map(products.flatMap((p) => p.stages.map((st) => [st.id, st.name] as const)));
-  const columns = (colRows ?? []).map((c: Raw) => ({ key: s(c.field_key), label: s(c.label), source: s(c.source), fieldType: s(c.field_type) || "text", options: Array.isArray(c.options) ? c.options.map(String) : [] }));
+  const columns = (colRows ?? []).map((c: Raw) => ({ key: s(c.field_key), label: s(c.label), source: s(c.source), fieldType: s(c.field_type) || "text", options: Array.isArray(c.options) ? c.options.map(String) : [], computedFrom: Array.isArray(c.computed_from) ? c.computed_from.map(String) : [] }));
   const hygiene: HygieneRule[] = hygRes.data?.length
     ? hygRes.data.map((h: Raw) => ({ key: s(h.field_key), label: s(h.label), fromBucket: (h.from_bucket as BucketKey) || "followup", weight: Number(h.weight) || 1 }))
     : [{ key: "email", label: "Email", fromBucket: "followup", weight: 2 }, ...columns.filter((c) => c.source === "custom").slice(0, 12).map((c) => ({ key: c.key, label: c.label, fromBucket: "followup" as BucketKey, weight: 1 }))];

@@ -3967,7 +3967,11 @@ export async function updateLeadDetails(formData: FormData) {
     const value = typeof input.value === "string" ? input.value.trim() : "";
     const column = configured.get(key);
       const addressFieldKey = isLeadAddressFieldKey(key) ? key : null;
-      if ((!column && !addressFieldKey) || column?.computed_from?.length || (column?.read_only && !canOverrideReadOnly)) continue;
+      // first_name/last_name/email/phone are handled unconditionally below regardless of whether this CRM
+      // happens to also have a lead_table_columns row for them (e.g. "lead_name" is configured but a plain
+      // "last_name" row often isn't) — so they must bypass the "no configured column" guard that custom fields need.
+      const isStandardIdentityKey = key === "lead_name" || key === "first_name" || key === "last_name" || key === "email" || key === "phone" || key === "company_name";
+      if ((!column && !addressFieldKey && !isStandardIdentityKey) || column?.computed_from?.length || (column?.read_only && !canOverrideReadOnly)) continue;
       const normalizedLabel = column?.label
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "") ?? "";
@@ -3988,6 +3992,11 @@ export async function updateLeadDetails(formData: FormData) {
     } else if (key === "phone") {
       update.phone = value || null;
         updatedFields.push(column?.label ?? "Phone");
+    } else if (key === "company_name" && !column) {
+      // Company has no dedicated leads column — it's always stored in custom_data, same as a custom field,
+      // but (on at least some CRMs) with no lead_table_columns row of its own to configure it.
+      customData.company_name = value || null;
+        updatedFields.push("Company");
       } else if (addressFieldKey) {
         if (addressFieldKey === "google_map" && value && !isValidLeadLink(value)) {
           throw new Error("Google Map must start with https:// or www.");

@@ -69,7 +69,7 @@ export type PeriodKey = (typeof PERIODS)[number]["key"];
 export type ModuleDef = { id: string; label: string; icon: string; soon?: boolean; ext?: string; roles?: AppRole[] };
 export const MODULES: ModuleDef[] = [
   { id: "dashboards", label: "Dashboards", icon: "dash" },
-  { id: "marketing", label: "Marketing", icon: "megaphone", soon: true },
+  { id: "marketing", label: "Marketing", icon: "megaphone", roles: ["admin", "marketing_manager", "marketing_executive"] },
   { id: "sales", label: "Sales", icon: "trend" },
   { id: "ambassadors", label: "Ambassadors", icon: "users" },
   { id: "lms", label: "LMS", icon: "cap", soon: true },

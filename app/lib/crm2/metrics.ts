@@ -73,10 +73,19 @@ export function nextAction(l: LeadRow) {
   if (l.bucket === "new") return l.owner ? "First call within 24 h of assignment" : "Assign to a sales person";
   return "Archive or move to DND";
 }
-export const missingFields = (ws: Workspace, l: LeadRow) => ws.hygiene.filter((h) => !fieldValue(l, h.key)).map((h) => h.label);
+export const missingFields = (ws: Workspace, l: LeadRow) => ws.hygiene.filter((h) => !hygieneFieldValue(ws, l, h.key)).map((h) => h.label);
 export function fieldValue(l: LeadRow, key: string): string {
   const std: Record<string, string | null> = { email: l.email, phone: l.phone, first_name: l.first, last_name: l.last, company_name: l.company };
   return (key in std ? std[key] : l.custom[key]) || "";
+}
+/** A `computed_from` column's value (e.g. Full Name = first + last) — same fields a classic "computed" column
+ * can draw from. Never stored; always derived fresh, same as the classic CRM does. */
+export const computedFieldValue = (l: LeadRow, fields: string[]) => fields.map((f) => fieldValue(l, f)).filter(Boolean).join(" ");
+/** `fieldValue`, but for a `computed_from` column it derives the value instead of reading the (never-written)
+ * stored one — used everywhere "is this field empty" is checked, so computed fields are never flagged missing. */
+export function hygieneFieldValue(ws: Workspace, l: LeadRow, key: string): string {
+  const col = ws.columns.find((c) => c.key === key);
+  return col?.computedFrom.length ? computedFieldValue(l, col.computedFrom) : fieldValue(l, key);
 }
 const bucketReached = (rowBucket: BucketKey, from: BucketKey) => {
   const order: BucketKey[] = ["new", "approach", "followup", "negotiation", "closing"];
@@ -201,7 +210,7 @@ export function hygiene(ws: Workspace, leads: LeadRow[]) {
     const rules = ws.hygiene.filter((h) => bucketReached(b, h.fromBucket));
     const row: Record<string, number | string> = { bucket: b, stage: BUCKET[b].label, leads: ls.length };
     let empty = 0;
-    ws.hygiene.forEach((h) => { const n = rules.includes(h) ? ls.filter((l) => !fieldValue(l, h.key)).length : 0; row[h.key] = n; empty += n; });
+    ws.hygiene.forEach((h) => { const n = rules.includes(h) ? ls.filter((l) => !hygieneFieldValue(ws, l, h.key)).length : 0; row[h.key] = n; empty += n; });
     row.empty = empty; row.complete = ls.length && rules.length ? Math.round(100 - (empty / (ls.length * rules.length)) * 100) : 100;
     return row;
   });
