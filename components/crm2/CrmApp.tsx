@@ -104,16 +104,18 @@ function ModuleBar({ mods, cur, onPick }: { mods: ReturnType<typeof modulesFor>;
 }
 
 type GlobalLeadHit = { assignmentId: string; leadId: string; name: string; phone: string | null; email: string | null; product: string; isAmbassadorProduct: boolean; assignedToId: string | null; assignedToName: string | null; ambassadorName: string | null };
+type CrmPersonHit = { id: string; name: string; roles: string[] };
 function TitleBar({ title, module, focus, setFocus, onAdd }: { title: string; module: string; focus: boolean; setFocus: (f: boolean) => void; onAdd?: () => void }) {
   const ctx = useCtx(); const { ws } = ctx; const toast = useToast(); const pop = usePop(); const [q, setQ] = useState("");
-  const [hitsFor, setHitsFor] = useState<{ q: string; data: GlobalLeadHit[] } | null>(null);
+  const [hitsFor, setHitsFor] = useState<{ q: string; data: GlobalLeadHit[]; people: CrmPersonHit[] } | null>(null);
   const qTrimmed = q.trim(); const showResults = qTrimmed.length >= 2;
   const leadHits = hitsFor?.q === qTrimmed ? hitsFor.data : null; const searching = showResults && leadHits === null;
+  const crmPeople = hitsFor?.q === qTrimmed ? hitsFor.people : [];
   useEffect(() => {
     if (qTrimmed.length < 2) return;
     let live = true;
     const t = setTimeout(() => {
-      fetch(`/api/leads/global-search?q=${encodeURIComponent(qTrimmed)}`).then((r) => r.json()).then((j) => { if (live) setHitsFor({ q: qTrimmed, data: j.ok ? j.results : [] }); }).catch(() => { if (live) setHitsFor({ q: qTrimmed, data: [] }); });
+      fetch(`/api/leads/global-search?q=${encodeURIComponent(qTrimmed)}`).then((r) => r.json()).then((j) => { if (live) setHitsFor({ q: qTrimmed, data: j.ok ? j.results : [], people: j.ok ? j.people ?? [] : [] }); }).catch(() => { if (live) setHitsFor({ q: qTrimmed, data: [], people: [] }); });
     }, 300);
     return () => { live = false; clearTimeout(t); };
   }, [qTrimmed]);
@@ -142,7 +144,8 @@ function TitleBar({ title, module, focus, setFocus, onAdd }: { title: string; mo
           {canManagerAssign && <select defaultValue="" onChange={(e) => { if (e.target.value) claim(r, e.target.value); }} style={{ height: 26, fontSize: 11, border: "1px solid var(--line)", borderRadius: 6 }}><option value="" disabled>Assign to…</option>{assignableOpts(ws).map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>}
         </span>}
       </div>)}
-      {leadHits !== null && !leadHits.length && !searching && <div className="empty" style={{ padding: "10px 14px" }}>No leads match</div>}</>}
+      {leadHits !== null && !leadHits.length && !searching && <div className="empty" style={{ padding: "10px 14px" }}>No leads match</div>}
+      {crmPeople.length ? <><div className="ph">CRM users — Ambassadors, sales &amp; staff</div>{crmPeople.map((p) => <button key={p.id} className="pi" onClick={() => { pop.close(); if (ws.roles.includes("admin")) ctx.go({ module: "admin", page: "users" }); }}><Avatar name={p.name} photo={M.photoFor(ws, p.id)} /><span><b>{p.name}</b><br /><span style={{ color: "var(--muted)", fontSize: 11 }}>{p.roles.map(cap).join(", ") || "No role"}</span></span></button>)}</> : null}</>}
       {other?.dashes.length ? <><div className="ph">Dashboards</div>{other.dashes.map((d) => <button key={d.id} className="pi" onClick={() => { pop.close(); ctx.go({ module: "dashboards", page: d.id }); }}><Icon n={d.icon} /> {d.label}</button>)}</> : null}
       {other?.people.length ? <><div className="ph">People</div>{other.people.map((p) => <button key={p.id} className="pi" onClick={() => { pop.close(); if (ws.roles.includes("admin")) ctx.go({ module: "admin", page: "users" }); }}><Avatar name={p.name} photo={M.photoFor(ws, p.id)} />{p.name}</button>)}</> : null}
     </Popover>}

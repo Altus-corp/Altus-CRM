@@ -186,7 +186,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .bar-in i{display:block;height:100%;border-radius:4px}
 .crm2 .gap-pos{color:#1D6146;font-weight:700}
 .crm2 .gap-neg{color:#8E2A40;font-weight:700}
-.crm2 .pop{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh-l);padding:6px;min-width:190px;max-height:70vh;overflow:auto}
+.crm2 .pop{position:fixed;z-index:96;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh-l);padding:6px;min-width:190px;max-height:70vh;overflow:auto}
 .crm2 .pop .ph{font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.8px;padding:6px 8px 4px;text-transform:uppercase}
 .crm2 .pop .pi{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border-radius:7px;text-align:left;font-size:12.5px}
 .crm2 .pop .pi:hover{background:var(--line-2)}

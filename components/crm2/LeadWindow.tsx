@@ -1,6 +1,6 @@
 "use client";
 // Lead detail opens as a WINDOW (not a side panel): ‹ › moves through the list it came from; maximise; tabs.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BUCKET, TONES } from "@/app/lib/crm2/config";
 import { displayProductCode } from "@/app/lib/product-display";
 import { isChannelPartnerColumn } from "@/app/lib/channel-partner";
@@ -9,13 +9,14 @@ import { ZoomMeetingModal } from "@/components/leads/zoom-meeting-modal";
 import { GoogleMeetModal } from "@/components/leads/google-meet-modal";
 import { googleCalendarCreateUrl } from "@/app/lib/google-calendar-link";
 import { uploadLeadAttachment, type UploadedLeadFile } from "@/app/lib/lead-attachments-client";
+import { VoiceDictationButton } from "@/components/leads/voice-dictation-button";
 import { ContactsTab } from "./ContactsTab";
 import { computedFieldValue, daysSince, missingFields, nextAction, personName, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
 import { v2AddAttachment, v2AddNote, v2AddProduct, v2CreateProposal, v2LeadChannelPartners, v2LogCall, v2LogProposalWhatsAppShare, v2SendProposalEmail, v2SetProposalApproval, v2UpdateField } from "@/app/crm/actions";
 import { useCrm } from "./context";
 import { assignableOpts, canAssignOwner, dialLead } from "./leads";
-import { Avatar, Icon, Pill, Win, fdate, fdt, toneStyle, useToast } from "./ui";
+import { Avatar, Icon, Pill, Popover, Win, fdate, fdt, toneStyle, usePop, useToast } from "./ui";
 
 type Activity = { id: string; activity_type: string; note: string | null; created_at: string; actor: string; follow_up_at: string | null; metadata?: { attachments?: UploadedLeadFile[] } | null };
 type MeetingDetail = { id: string; kind: "Zoom" | "Google Meet"; topic: string; notes: string | null; startTime: string; durationMinutes: number; joinUrl: string; calendarUrl?: string | null; recordingUrl: string | null; transcriptText: string | null; transcriptUrl: string | null };
@@ -39,6 +40,10 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   useEffect(() => { if (tab !== "proposals") return; let live = true; fetch(`/api/leads/${l.leadId}/contacts?assignmentId=${l.id}`).then((r) => r.json()).then((j) => { if (!live) return; const rows = j.ok ? j.contacts as { id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; contact_type: "primary" | "secondary" }[] : []; setContactsFor({ key: actKey, data: rows.map((c) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || "Contact", email: c.email, phone: c.phone, contactType: c.contact_type })) }); }).catch(() => live && setContactsFor({ key: actKey, data: [] })); return () => { live = false; }; }, [tab, l.leadId, l.id, actKey]);
   const idx = list.findIndex((x) => x.id === l.id); const nav = (d: number) => { if (!list.length) return; onNav(list[(idx + d + list.length) % list.length]); };
   const save = async (field: string, value: string, patch: Partial<LeadRow>) => { const r = await v2UpdateField([{ leadId: l.leadId, assignmentId: l.id }], field, value); toast(r.message); if (r.ok) ctx.patchRows([l.id], patch); };
+  // Overview's text fields are uncontrolled (save-on-blur) — dictation just appends into the live DOM value via
+  // a ref, same as typing would; the existing onBlur still picks it up whenever the field loses focus.
+  const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
+  const dictateInto = (key: string) => (text: string) => { const el = fieldRefs.current[key]; if (el) el.value = el.value ? `${el.value} ${text}` : text; };
   const coreFields: [string, string, string][] = [["Lead no.", "no", l.no], ["First name", "first_name", l.first], ["Last name", "last_name", l.last], ["Cell number", "phone", l.phone], ["Email", "email", l.email], ["Company", "company_name", l.company]];
   // Some configs have a stray duplicate custom column for a field that's already a core field above
   // (same label, different field_key) — matched by label like classic CRM's own lead-no/acquisition-date checks.
@@ -61,8 +66,13 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
     <div className="tabs">{TABS.map(([k, t]) => <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => setTab(k)}>{t}</button>)}</div>
     <div className="win-b">
       {tab === "overview" && <div className="lw-grid"><div className="fgrid">
-        {coreFields.map(([lab, key, val]) => { const isMiss = isFieldMissing(lab, key, val); return (
-          <div key={key} className={`fld ${isMiss ? "miss" : ""}`}><label>{lab}{isMiss ? " · missing" : ""}</label><input defaultValue={val} readOnly={!ctx.canEdit || key === "no"} placeholder={isMiss ? "Needed from follow-up" : "—"} onBlur={(e) => { if (e.target.value !== val) { const v = e.target.value; const patch: Partial<LeadRow> = key === "email" ? { email: v } : key === "company_name" ? { company: v } : key === "first_name" ? { first: v, name: [v, l.last].filter(Boolean).join(" ") } : key === "last_name" ? { last: v, name: [l.first, v].filter(Boolean).join(" ") } : key === "phone" ? { phone: v } : { custom: { ...l.custom, [key]: v } }; save(key, v, patch); } }} /></div>); })}
+        {coreFields.map(([lab, key, val]) => { const isMiss = isFieldMissing(lab, key, val); const canDictate = ctx.canEdit && key !== "no"; return (
+          <div key={key} className={`fld ${isMiss ? "miss" : ""}`}><label>{lab}{isMiss ? " · missing" : ""}</label>
+            <div style={{ position: "relative" }}>
+              <input ref={(el) => { fieldRefs.current[key] = el; }} defaultValue={val} readOnly={!ctx.canEdit || key === "no"} placeholder={isMiss ? "Needed from follow-up" : "—"} style={canDictate ? { paddingRight: 32 } : undefined} onBlur={(e) => { if (e.target.value !== val) { const v = e.target.value; const patch: Partial<LeadRow> = key === "email" ? { email: v } : key === "company_name" ? { company: v } : key === "first_name" ? { first: v, name: [v, l.last].filter(Boolean).join(" ") } : key === "last_name" ? { last: v, name: [l.first, v].filter(Boolean).join(" ") } : key === "phone" ? { phone: v } : { custom: { ...l.custom, [key]: v } }; save(key, v, patch); } }} />
+              {canDictate && <VoiceDictationButton onResult={dictateInto(key)} showLanguagePicker={false} className="absolute right-2 top-1.5" />}
+            </div>
+          </div>); })}
         {customCols.map((c) => {
           if (c.computedFrom.length) { const computed = computedFieldValue(l, c.computedFrom); return <div key={c.key} className="fld"><label>{c.label}</label><input value={computed || "—"} readOnly title="Derived automatically — edit the fields it's built from instead" /></div>; }
           if (c.label.trim().toLowerCase() === "lead acquisition date") return <div key={c.key} className="fld"><label>{c.label}</label><input value={fdate(l.createdAt)} readOnly title="The date this lead was created" /></div>;
@@ -79,8 +89,9 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
           return <div key={c.key} className={`fld ${isMiss ? "miss" : ""}`}><label>{c.label}{isMiss ? " · missing" : ""}</label>
             {c.fieldType === "dropdown" ? <select disabled={disabled} defaultValue={val} onChange={(e) => onSave(e.target.value)}><option value="">Select</option>{c.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
               : c.fieldType === "checkbox" ? <label style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 8 }}><input type="checkbox" disabled={disabled} defaultChecked={val === "true"} onChange={(e) => onSave(e.target.checked ? "true" : "false")} /> Yes</label>
-              : c.fieldType === "textarea" || c.fieldType === "long_text" ? <textarea defaultValue={val} readOnly={disabled} placeholder={isMiss ? "Needed from follow-up" : "—"} style={{ minHeight: 70 }} onBlur={(e) => onSave(e.target.value)} />
-              : <input type={c.fieldType === "date" ? "date" : c.fieldType === "number" ? "number" : "text"} defaultValue={c.fieldType === "date" ? (Number.isNaN(new Date(val).getTime()) ? "" : new Date(val).toISOString().slice(0, 10)) : val} readOnly={disabled} placeholder={isMiss ? "Needed from follow-up" : "—"} onBlur={(e) => onSave(e.target.value)} />}
+              : c.fieldType === "textarea" || c.fieldType === "long_text" ? <div style={{ position: "relative" }}><textarea ref={(el) => { fieldRefs.current[c.key] = el; }} defaultValue={val} readOnly={disabled} placeholder={isMiss ? "Needed from follow-up" : "—"} style={{ width: "100%", minHeight: 70, paddingRight: disabled ? undefined : 32 }} onBlur={(e) => onSave(e.target.value)} />{!disabled && <VoiceDictationButton onResult={dictateInto(c.key)} showLanguagePicker={false} className="absolute right-2 top-2" />}</div>
+              : c.fieldType === "date" || c.fieldType === "number" ? <input type={c.fieldType} defaultValue={c.fieldType === "date" ? (Number.isNaN(new Date(val).getTime()) ? "" : new Date(val).toISOString().slice(0, 10)) : val} readOnly={disabled} placeholder={isMiss ? "Needed from follow-up" : "—"} onBlur={(e) => onSave(e.target.value)} />
+              : <div style={{ position: "relative" }}><input ref={(el) => { fieldRefs.current[c.key] = el; }} type="text" defaultValue={val} readOnly={disabled} placeholder={isMiss ? "Needed from follow-up" : "—"} style={disabled ? undefined : { paddingRight: 32 }} onBlur={(e) => onSave(e.target.value)} />{!disabled && <VoiceDictationButton onResult={dictateInto(c.key)} showLanguagePicker={false} className="absolute right-2 top-1.5" />}</div>}
           </div>;
         })}
       </div>
@@ -95,7 +106,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
       {tab === "products" && <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>{others.map((o) => { const pd = ws.products.find((p) => p.code === o.product); return <div key={o.id} className="panel"><div className="panel-h"><Pill tone="slate">{displayProductCode(o.product)}</Pill><span style={{ color: "var(--muted)", fontWeight: 400 }}>{pd?.name}</span><span style={{ flex: 1 }} />{o.resolution && <Pill tone={BUCKET[o.bucket].tone}>{o.resolution}</Pill>}<span style={{ color: "var(--muted)", fontWeight: 400 }}>{personName(ws, o.owner)}</span></div>
         <div style={{ display: "flex", gap: 6, padding: 12, flexWrap: "wrap" }}>{(pd?.stages ?? []).map((s, i) => { const cur = pd!.stages.findIndex((x) => x.name === o.stage); return <span key={s.id} className="pill" style={{ ...toneStyle(i === cur ? "mint" : i < cur ? "sage" : "slate"), padding: "5px 12px" }}>{i < cur ? "✓ " : i === cur ? "● " : ""}{s.name}</span>; })}</div></div>; })}
         {ctx.canEdit && <AddMoreProducts leadId={l.leadId} assignmentId={l.id} already={others.map((o) => o.product)} onAdded={() => ctx.refresh()} />}</div>}
-      {(tab === "activity" || tab === "notes") && <div className="tl">{tab === "notes" && ctx.canEdit && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}><textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" style={{ flex: 1, height: 70, border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} /><button className="btn red" onClick={async () => { const r = await v2AddNote({ leadId: l.leadId, assignmentId: l.id }, note); toast(r.message); if (r.ok) { setNote(""); setActivitiesNonce((n) => n + 1); setTab("activity"); } }}>Save note</button></div>}
+      {(tab === "activity" || tab === "notes") && <div className="tl">{tab === "notes" && ctx.canEdit && <div style={{ display: "flex", gap: 8, marginBottom: 10 }}><div style={{ position: "relative", flex: 1 }}><textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" style={{ width: "100%", height: 70, border: "1px solid var(--line)", borderRadius: 9, padding: "10px 34px 10px 10px" }} /><VoiceDictationButton onResult={(text) => setNote((cur) => (cur ? `${cur} ${text}` : text))} showLanguagePicker={false} className="absolute right-2 top-2" /></div><button className="btn red" onClick={async () => { const r = await v2AddNote({ leadId: l.leadId, assignmentId: l.id }, note); toast(r.message); if (r.ok) { setNote(""); setActivitiesNonce((n) => n + 1); setTab("activity"); } }}>Save note</button></div>}
         {acts == null ? <div className="empty">Loading…</div> : acts.filter((a) => tab === "activity" || a.activity_type === "note").map((a) => <div key={a.id} className="tli"><span className="tdot" style={{ background: TONES[a.activity_type === "call" ? "sky" : a.activity_type === "note" ? "peach" : "slate"].mk }} /><div style={{ flex: 1 }}><b>{a.activity_type}{a.note ? ` · ${a.note}` : ""}</b><div style={{ color: "var(--muted)", fontSize: 11.5 }}>{fdt(a.created_at)} · {a.actor}{a.follow_up_at ? ` · follow-up ${fdate(a.follow_up_at)}` : ""}</div></div>
           {a.note && <button type="button" className="ib" title="Add to calendar" onClick={() => setCalendarFor({ title: `${a.activity_type === "note" ? "Note" : "Follow-up"}: ${l.name}`, note: a.note ?? "", when: a.follow_up_at ? new Date(a.follow_up_at).toISOString().slice(0, 16) : "" })}><Icon n="cal" s="s" /></button>}
         </div>)}{acts && !acts.length && <div className="empty">No activity yet.</div>}</div>}
@@ -114,7 +125,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
       {tab === "attachments" && <div className="tl">
         {ctx.canEdit && <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
           <input type="file" onChange={(e) => setAttFile(e.target.files?.[0] ?? null)} accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt" />
-          <textarea value={attNote} onChange={(e) => setAttNote(e.target.value)} placeholder="Note for this attachment (optional)…" style={{ height: 60, border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} />
+          <div style={{ position: "relative" }}><textarea value={attNote} onChange={(e) => setAttNote(e.target.value)} placeholder="Note for this attachment (optional)…" style={{ width: "100%", height: 60, border: "1px solid var(--line)", borderRadius: 9, padding: "10px 34px 10px 10px" }} /><VoiceDictationButton onResult={(text) => setAttNote((cur) => (cur ? `${cur} ${text}` : text))} showLanguagePicker={false} className="absolute right-2 top-2" /></div>
           <button className="btn red" style={{ alignSelf: "flex-start" }} disabled={attBusy || (!attFile && !attNote.trim())} onClick={async () => {
             setAttBusy(true);
             try {
@@ -126,7 +137,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
             setAttBusy(false);
           }}>{attBusy ? "Uploading…" : "Upload attachment"}</button>
         </div>}
-        {acts == null ? <div className="empty">Loading…</div> : acts.filter((a) => a.metadata?.attachments?.length).map((a) => <div key={a.id} className="tli">
+        {acts == null ? <div className="empty">Loading…</div> : acts.filter((a) => a.activity_type === "note" && a.metadata?.attachments?.length).map((a) => <div key={a.id} className="tli">
           <span className="tdot" style={{ background: TONES.slate.mk }} />
           <div style={{ flex: 1 }}>
             {a.note && <div><b>{a.note}</b></div>}
@@ -134,13 +145,13 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
             <div style={{ color: "var(--muted)", fontSize: 11.5, marginTop: 4 }}>{fdt(a.created_at)} · {a.actor}</div>
           </div>
         </div>)}
-        {acts && !acts.filter((a) => a.metadata?.attachments?.length).length && <div className="empty">No attachments yet.</div>}
+        {acts && !acts.filter((a) => a.activity_type === "note" && a.metadata?.attachments?.length).length && <div className="empty">No attachments yet.</div>}
       </div>}
       {tab === "proposals" && <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
         {ctx.canEdit && <div className="panel" style={{ padding: 12, gap: 8 }}>
           <span className="lbl">Upload proposal</span>
           <input type="file" onChange={(e) => setPropFile(e.target.files?.[0] ?? null)} accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx" />
-          <textarea value={propDetails} onChange={(e) => setPropDetails(e.target.value)} placeholder="Details about this proposal…" style={{ height: 60, border: "1px solid var(--line)", borderRadius: 9, padding: 10 }} />
+          <div style={{ position: "relative" }}><textarea value={propDetails} onChange={(e) => setPropDetails(e.target.value)} placeholder="Details about this proposal…" style={{ width: "100%", height: 60, border: "1px solid var(--line)", borderRadius: 9, padding: "10px 34px 10px 10px" }} /><VoiceDictationButton onResult={(text) => setPropDetails((cur) => (cur ? `${cur} ${text}` : text))} showLanguagePicker={false} className="absolute right-2 top-2" /></div>
           <button className="btn red sm" style={{ alignSelf: "flex-start" }} disabled={propBusy || !propFile} onClick={async () => {
             if (!propFile) return; setPropBusy(true);
             try {
@@ -157,29 +168,28 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
           <tbody>{(proposals ?? []).map((p) => {
             const sel = clientSel[p.id] ?? new Set<string>();
             const canSend = p.approved && sel.size > 0;
-            return <tr key={p.id}>
+            const sending = sendBusy === p.id;
+            return <tr key={p.id} style={sending ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
               <td><a href={p.fileUrl} target="_blank" rel="noopener noreferrer"><Icon n="file" s="s" /> {p.fileName}</a></td>
               <td style={{ maxWidth: 220, whiteSpace: "normal" }}>{p.details || "—"}</td>
               <td>{ws.roles.includes("admin")
                 ? <select value={p.approved ? "yes" : "no"} onChange={async (e) => { const approved = e.target.value === "yes"; const r = await v2SetProposalApproval(p.id, approved); toast(r.message); if (r.ok) setPropsFor((cur) => (cur ? { ...cur, data: cur.data.map((x) => (x.id === p.id ? { ...x, approved } : x)) } : cur)); }}><option value="no">No</option><option value="yes">Yes</option></select>
                 : <Pill tone={p.approved ? "mint" : "rose"}>{p.approved ? "Yes" : "No"}</Pill>}</td>
-              <td><select multiple value={[...sel]} onChange={(e) => { const vals = new Set(Array.from(e.target.selectedOptions).map((o) => o.value)); setClientSel((cur) => ({ ...cur, [p.id]: vals })); }} style={{ minHeight: 56, minWidth: 160 }}>
-                {(contactOpts ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.contactType === "primary" ? " (Primary)" : ""}</option>)}
-              </select></td>
-              <td><div style={{ display: "flex", gap: 6 }}>
-                <button type="button" className="ib" title={p.approved ? "Email the proposal" : "Approve the proposal first"} disabled={!canSend || sendBusy === p.id} onClick={async () => {
+              <td><ClientsPicker contacts={contactOpts ?? []} selected={sel} onChange={(n) => setClientSel((cur) => ({ ...cur, [p.id]: n }))} /></td>
+              <td>{sending ? <span style={{ color: "var(--muted)", fontSize: 11.5, fontWeight: 700 }}>Sending…</span> : <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" className="ib" title={p.approved ? "Email the proposal" : "Approve the proposal first"} disabled={!canSend} onClick={async () => {
                   const emails = (contactOpts ?? []).filter((c) => sel.has(c.id) && c.email).map((c) => c.email!);
                   if (!emails.length) { toast("None of the selected clients has an email address."); return; }
                   setSendBusy(p.id); const r = await v2SendProposalEmail({ leadId: l.leadId, assignmentId: l.id }, p.id, emails); toast(r.message); setSendBusy(null);
                 }}><Icon n="mail" s="s" /></button>
-                <button type="button" className="ib" title={p.approved ? "Share on WhatsApp" : "Approve the proposal first"} disabled={!canSend || sendBusy === p.id} onClick={async () => {
+                <button type="button" className="ib" title={p.approved ? "Share on WhatsApp" : "Approve the proposal first"} disabled={!canSend} onClick={async () => {
                   const targets = (contactOpts ?? []).filter((c) => sel.has(c.id) && c.phone);
                   if (!targets.length) { toast("None of the selected clients has a phone number."); return; }
                   setSendBusy(p.id);
                   for (const c of targets) window.open(`https://wa.me/91${c.phone!.replace(/\D/g, "").slice(-10)}?text=${encodeURIComponent(`Hi ${c.name}, please find the proposal here: ${p.fileUrl}`)}`, "_blank", "noopener");
                   const r = await v2LogProposalWhatsAppShare({ leadId: l.leadId, assignmentId: l.id }, p.id, targets.map((c) => c.name).join(", ")); toast(r.message); setSendBusy(null);
                 }}><Icon n="wa" s="s" /></button>
-              </div></td>
+              </div>}</td>
             </tr>;
           })}</tbody>
         </table>
@@ -222,4 +232,20 @@ function LogCall({ onClose, onSave }: { onClose: () => void; onSave: (resolution
     <div className="lbl">Resolution</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{ws.resolutions.map((r) => <button key={r.id} className="pill" style={{ ...toneStyle(BUCKET[r.bucket].tone), padding: "5px 10px", outline: res === r.id ? "2px solid var(--ink)" : "none" }} onClick={() => setRes(r.id)}>{r.name}</button>)}</div>
     <div className="fld"><label>Next follow-up</label><input type="datetime-local" value={fu} onChange={(e) => setFu(e.target.value)} /></div><div className="fld"><label>Note</label><input value={n} onChange={(e) => setN(e.target.value)} placeholder="What happened?" /></div>
     <button className="btn red" disabled={!res} onClick={() => onSave(res, fu ? new Date(fu).toISOString() : "", n)}>Save</button></div></Win>;
+}
+/** Closed-by-default multi-select for the Proposal table's Clients column — same chip+checkbox-popover
+ * pattern used elsewhere in v2 (e.g. the Sales person picker), instead of a native <select multiple>. */
+function ClientsPicker({ contacts, selected, onChange }: { contacts: ContactOpt[]; selected: Set<string>; onChange: (s: Set<string>) => void }) {
+  const pop = usePop();
+  const label = selected.size ? `${selected.size} client${selected.size > 1 ? "s" : ""}` : "Select clients";
+  return <>
+    <button type="button" className="btn sm" onClick={(e) => pop.open(e.currentTarget)}>{label} <Icon n="chevd" s="s" /></button>
+    {pop.anchor && <Popover anchor={pop.anchor} onClose={pop.close} width={220}>
+      {contacts.map((c) => <label key={c.id} className="pi" style={{ cursor: "pointer" }}>
+        <input type="checkbox" className="cb" checked={selected.has(c.id)} onChange={() => { const n = new Set(selected); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); onChange(n); }} />
+        {c.name}{c.contactType === "primary" ? " (Primary)" : ""}
+      </label>)}
+      {!contacts.length && <div className="empty" style={{ padding: 10 }}>No contacts</div>}
+    </Popover>}
+  </>;
 }

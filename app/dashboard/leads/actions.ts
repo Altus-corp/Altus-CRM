@@ -2543,7 +2543,7 @@ export async function manuallyAssignLeads(formData: FormData) {
       .from("user_roles")
       .select("role")
       .eq("user_id", assigneeId)
-      .in("role", ["sales_executive", "sales_manager", "consultant"]),
+      .in("role", ["sales_executive", "sales_manager", "consultant", "admin"]),
   ]);
   if (
     profileError ||
@@ -2678,7 +2678,7 @@ export async function claimUnassignedLeadAssignment(formData: FormData) {
     { data: roles, error: rolesError },
   ] = await Promise.all([
     supabase.from("profiles").select("id, is_suspended, first_name, last_name, full_name").eq("id", assigneeId).single(),
-    supabase.from("user_roles").select("role").eq("user_id", assigneeId).in("role", ["sales_executive", "sales_manager", "consultant"]),
+    supabase.from("user_roles").select("role").eq("user_id", assigneeId).in("role", ["sales_executive", "sales_manager", "consultant", "admin"]),
   ]);
   if (profileError || !profile || profile.is_suspended || rolesError || !roles?.length)
     throw new Error("Choose an active eligible sales user.");
@@ -2924,7 +2924,7 @@ export async function addLeadProductAssignment(formData: FormData) {
         .from("user_roles")
         .select("role")
         .eq("user_id", assigneeId)
-        .in("role", ["sales_executive", "sales_manager", "consultant"]),
+        .in("role", ["sales_executive", "sales_manager", "consultant", "admin"]),
     ]);
     if (!profile || profile.is_suspended || !roles?.length)
       throw new Error("Choose an active eligible sales user.");
@@ -3386,7 +3386,7 @@ export async function sendLeadProposalEmail(formData: FormData): Promise<{ ok: b
     if (!proposal.approved) throw new Error("This proposal has not been approved yet.");
     const leadName = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "there";
 
-    let sent = 0; const failed: string[] = [];
+    let sent = 0; const failed: string[] = []; let lastError = "";
     for (const to of emails) {
       try {
         await sendEmailWithUserSmtp(userId, {
@@ -3395,7 +3395,7 @@ export async function sendLeadProposalEmail(formData: FormData): Promise<{ ok: b
           attachments: [{ filename: proposal.file_name, path: proposal.file_url }],
         });
         sent++;
-      } catch { failed.push(to); }
+      } catch (e) { failed.push(to); lastError = e instanceof Error ? e.message : String(e); }
     }
     if (sent) {
       await supabase.from("lead_activities").insert({
@@ -3408,7 +3408,7 @@ export async function sendLeadProposalEmail(formData: FormData): Promise<{ ok: b
       });
     }
     revalidatePath("/dashboard/leads");
-    if (!sent) return { ok: false, message: "Could not send the email. Check your SMTP settings." };
+    if (!sent) return { ok: false, message: lastError || "Could not send the email. Check your SMTP settings." };
     return { ok: true, message: failed.length ? `Sent to ${sent}, failed for ${failed.join(", ")}.` : `Emailed to ${sent}.` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to send the proposal." };
@@ -3782,6 +3782,29 @@ export async function sendEmailToLeadContact(formData: FormData): Promise<{ ok: 
   }
 }
 
+// Resolves which CRM user actually placed each matched call (by Altus's own `user` email on the call),
+// so a fallback-created "call" activity credits the real caller — e.g. an admin calling a lead assigned to
+// someone else — rather than whoever happened to be viewing the lead when this sync ran.
+async function resolveAltusCallerAttribution(callerEmails: (string | undefined)[]) {
+  const needed = new Set(callerEmails.map((value) => value?.trim().toLowerCase()).filter((value): value is string => Boolean(value)));
+  const attribution = new Map<string, { id: string; name: string | null; email: string }>();
+  if (!needed.size) return attribution;
+  const admin = createAdminClient();
+  const [{ data: authUsers }, { data: profiles }] = await Promise.all([
+    admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
+    admin.from("profiles").select("id, first_name, last_name, full_name"),
+  ]);
+  const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  for (const user of authUsers?.users ?? []) {
+    const userEmail = user.email?.trim().toLowerCase();
+    if (!userEmail || !needed.has(userEmail)) continue;
+    const profile = profileById.get(user.id);
+    const name = profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || null;
+    attribution.set(userEmail, { id: user.id, name, email: userEmail });
+  }
+  return attribution;
+}
+
 export async function syncLeadCallTranscripts(
   formData: FormData,
 ): Promise<{ ok: boolean; message: string; synced?: number }> {
@@ -3820,9 +3843,11 @@ export async function syncLeadCallTranscripts(
     leadAssignments?.length === 1 ? leadAssignments[0].id : null;
   try {
     const calls = await altusContactsRequest<AltusCall[]>("/calls?limit=100");
+    // Match by phone number alone, not by whoever is viewing this lead right now: any CRM user may have
+    // placed the call (e.g. an admin calling a lead assigned to someone else), and the transcript must still
+    // land on this lead no matter who later opens it to trigger this sync.
     const matched = (calls.data ?? []).filter(
       (call) =>
-        call.user?.trim().toLowerCase() === email &&
         callHasPhone(call, phone) &&
         call.id !== undefined &&
         call.id !== null,
@@ -3831,9 +3856,10 @@ export async function syncLeadCallTranscripts(
       return {
         ok: true,
         message:
-          "No Altus Contact calls matched this lead's phone number for your CRM account yet.",
+          "No Altus Contact calls matched this lead's phone number yet.",
         synced: 0,
       };
+    const callerAttribution = await resolveAltusCallerAttribution(matched.map((call) => call.user));
     const callIds = matched.map((call) => String(call.id));
     const { data: existing } = await supabase
       .from("lead_call_transcripts")
@@ -3890,6 +3916,7 @@ export async function syncLeadCallTranscripts(
           .eq("id", existingActivity.id);
         if (activityError) throw new Error(activityError.message);
       } else {
+        const caller = callerAttribution.get((detailedCall.user ?? "").trim().toLowerCase());
         const { error: activityError } = await supabase
           .from("lead_activities")
           .insert({
@@ -3898,7 +3925,9 @@ export async function syncLeadCallTranscripts(
             activity_type: "call",
             note: altusCallActivityNote(detailedCall, transcript),
             metadata,
-            created_by: userId,
+            created_by: caller?.id ?? userId,
+            created_by_name: caller?.name ?? null,
+            created_by_email: caller?.email ?? null,
           });
         if (activityError) throw new Error(activityError.message);
       }
@@ -3980,11 +4009,6 @@ export async function syncLeadTranscriptByCallId(
     const call = response.data;
     if (!call)
       return { ok: false, message: "Altus Contact could not find that call." };
-    if (call.user?.trim().toLowerCase() !== email)
-      return {
-        ok: false,
-        message: "That call belongs to a different Altus Contact user.",
-      };
     if (!callHasPhone(call, phone))
       return {
         ok: false,
@@ -4023,6 +4047,7 @@ export async function syncLeadTranscriptByCallId(
         .eq("id", existingActivity.id);
       if (activityError) throw new Error(activityError.message);
     } else {
+      const caller = (await resolveAltusCallerAttribution([call.user])).get((call.user ?? "").trim().toLowerCase());
       const { error: activityError } = await supabase
         .from("lead_activities")
         .insert({
@@ -4031,7 +4056,9 @@ export async function syncLeadTranscriptByCallId(
           activity_type: "call",
           note: altusCallActivityNote(call, transcript),
           metadata,
-          created_by: userId,
+          created_by: caller?.id ?? userId,
+          created_by_name: caller?.name ?? null,
+          created_by_email: caller?.email ?? null,
         });
       if (activityError) throw new Error(activityError.message);
     }
@@ -4164,7 +4191,7 @@ export async function updateLeadDetails(formData: FormData) {
   ] = await Promise.all([
     supabase
       .from("leads")
-      .select("first_name, custom_data")
+      .select("first_name, last_name, email, phone, custom_data")
       .eq("id", leadId)
       .single(),
     supabase
@@ -4182,7 +4209,7 @@ export async function updateLeadDetails(formData: FormData) {
   );
   const customData = { ...(lead.custom_data ?? {}) } as Record<string, unknown>;
   const update: Record<string, unknown> = { custom_data: customData };
-  const updatedFields: string[] = [];
+  const changes: { label: string; from: string; to: string }[] = [];
     const addressValues: Partial<Record<LeadAddressFieldKey, string>> = {};
   for (const input of values) {
     const key = typeof input.key === "string" ? input.key : "";
@@ -4203,29 +4230,36 @@ export async function updateLeadDetails(formData: FormData) {
       key === "first_name" ||
       normalizedLabel === "firstname"
     ) {
+      const from = lead.first_name ?? "";
+      if (from !== value) changes.push({ label: column?.label ?? "First name", from, to: value });
       update.first_name = value;
-        updatedFields.push(column?.label ?? "First name");
     } else if (key === "last_name" || normalizedLabel === "lastname") {
+      const from = lead.last_name ?? "";
+      if (from !== value) changes.push({ label: column?.label ?? "Last name", from, to: value });
       update.last_name = value || null;
-        updatedFields.push(column?.label ?? "Last name");
     } else if (key === "email") {
+      const from = lead.email ?? "";
+      if (from !== value) changes.push({ label: column?.label ?? "Email", from, to: value });
       update.email = value || null;
-        updatedFields.push(column?.label ?? "Email");
     } else if (key === "phone") {
+      const from = lead.phone ?? "";
+      if (from !== value) changes.push({ label: column?.label ?? "Phone", from, to: value });
       update.phone = value || null;
-        updatedFields.push(column?.label ?? "Phone");
     } else if (key === "company_name" && !column) {
       // Company has no dedicated leads column — it's always stored in custom_data, same as a custom field,
       // but (on at least some CRMs) with no lead_table_columns row of its own to configure it.
+      const from = String(customData.company_name ?? "");
+      if (from !== value) changes.push({ label: "Company", from, to: value });
       customData.company_name = value || null;
-        updatedFields.push("Company");
       } else if (addressFieldKey) {
         if (addressFieldKey === "google_map" && value && !isValidLeadLink(value)) {
           throw new Error("Google Map must start with https:// or www.");
         }
+        const from = String(customData[addressFieldKey] ?? "");
+        const label = column?.label ?? LEAD_ADDRESS_FIELD_DEFINITIONS.find((field) => field.field_key === addressFieldKey)?.label ?? addressFieldKey;
+        if (from !== value) changes.push({ label, from, to: value });
         customData[addressFieldKey] = value;
         addressValues[addressFieldKey] = value;
-        updatedFields.push(column?.label ?? LEAD_ADDRESS_FIELD_DEFINITIONS.find((field) => field.field_key === addressFieldKey)?.label ?? addressFieldKey);
     } else if (column?.source === "custom") {
       const options = Array.isArray(column.options)
         ? column.options.filter((option): option is string => typeof option === "string")
@@ -4245,8 +4279,11 @@ export async function updateLeadDetails(formData: FormData) {
       if (column.field_type === "checkbox" && !["", "true", "false"].includes(value)) {
         throw new Error(`${column.label} must be a valid checkbox value.`);
       }
-      customData[key] = column.field_type === "checkbox" ? value === "true" : value;
-      updatedFields.push(column.label);
+      const isCheckbox = column.field_type === "checkbox";
+      const from = isCheckbox ? (customData[key] ? "Yes" : "No") : String(customData[key] ?? "");
+      const to = isCheckbox ? (value === "true" ? "Yes" : "No") : value;
+      if (from !== to) changes.push({ label: column.label, from, to });
+      customData[key] = isCheckbox ? value === "true" : value;
     }
   }
     const addressValidation = validateLeadAddressLocation(
@@ -4265,15 +4302,15 @@ export async function updateLeadDetails(formData: FormData) {
     .update(update)
     .eq("id", leadId);
   if (error) throw new Error(error.message);
-  if (updatedFields.length) {
+  if (changes.length) {
     const { error: activityError } = await supabase
       .from("lead_activities")
       .insert({
         lead_id: leadId,
         lead_product_assignment_id: assignmentId,
         activity_type: "details_updated",
-        note: `Updated ${updatedFields.join(", ")}.`,
-        metadata: { fields: updatedFields },
+        note: `Updated ${changes.map((c) => `${c.label} (${c.from || "—"} → ${c.to || "—"})`).join(", ")}.`,
+        metadata: { changes },
         created_by: userId,
       });
     if (activityError) throw new Error(activityError.message);
@@ -4440,6 +4477,12 @@ export async function updateLeadStageInline(formData: FormData) {
     .single();
   if (stageError || !stage)
     throw new Error("Choose a stage for this lead's product.");
+  const { data: previous } = await supabase
+    .from("lead_product_assignments")
+    .select("stage:lead_stages(name)")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  const previousStage = Array.isArray(previous?.stage) ? previous.stage[0] : previous?.stage;
   const { error } = await supabase
     .from("lead_product_assignments")
     .update({ stage_id: stageId })
@@ -4451,8 +4494,8 @@ export async function updateLeadStageInline(formData: FormData) {
       lead_id: leadId,
       lead_product_assignment_id: assignmentId,
       activity_type: "stage_updated",
-      note: `Stage changed to ${stage.name}.`,
-      metadata: { stage_id: stage.id },
+      note: previousStage?.name && previousStage.name !== stage.name ? `Stage changed from ${previousStage.name} to ${stage.name}.` : `Stage changed to ${stage.name}.`,
+      metadata: { stage_id: stage.id, from: previousStage?.name ?? null, to: stage.name },
       created_by: userId,
     });
   if (activityError) throw new Error(activityError.message);

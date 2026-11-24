@@ -34,7 +34,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 // Browser speech recognition can't truly auto-detect which of these
 // languages is being spoken — it needs one selected up front. The choice is
 // remembered per browser so most users only ever pick it once.
-export function VoiceDictationButton({ onResult, className = "" }: { onResult: (text: string) => void; className?: string }) {
+export function VoiceDictationButton({ onResult, className = "", showLanguagePicker = true }: { onResult: (text: string) => void; className?: string; showLanguagePicker?: boolean }) {
   const [supported] = useState(() => Boolean(getSpeechRecognitionCtor()));
   const [listening, setListening] = useState(false);
   const [lang, setLang] = useState(() => {
@@ -79,13 +79,13 @@ export function VoiceDictationButton({ onResult, className = "" }: { onResult: (
     <button
       type="button"
       onClick={toggle}
-      title={listening ? "Stop dictation" : "Dictate"}
+      title={listening ? "Stop dictation" : `Dictate (${LANGUAGES.find((option) => option.code === lang)?.label ?? lang})`}
       aria-label={listening ? "Stop dictation" : "Dictate"}
       className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border transition ${listening ? "animate-pulse border-red-400 bg-red-50 text-red-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}
     >
       {listening ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
     </button>
-    <select
+    {showLanguagePicker && <select
       value={lang}
       onChange={(event) => changeLang(event.target.value)}
       aria-label="Dictation language"
@@ -93,6 +93,6 @@ export function VoiceDictationButton({ onResult, className = "" }: { onResult: (
       className="h-6 shrink-0 rounded border border-slate-200 bg-white px-1 text-[10px] font-bold text-slate-600 outline-none"
     >
       {LANGUAGES.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
-    </select>
+    </select>}
   </span>;
 }
