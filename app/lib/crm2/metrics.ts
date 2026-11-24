@@ -75,7 +75,7 @@ export function nextAction(l: LeadRow) {
 }
 export const missingFields = (ws: Workspace, l: LeadRow) => ws.hygiene.filter((h) => !hygieneFieldValue(ws, l, h.key)).map((h) => h.label);
 export function fieldValue(l: LeadRow, key: string): string {
-  const std: Record<string, string | null> = { email: l.email, phone: l.phone, first_name: l.first, last_name: l.last, company_name: l.company };
+  const std: Record<string, string | null> = { email: l.email, phone: l.phone, first_name: l.first, last_name: l.last, company_name: l.company, call_resolution: l.resolution, product: l.product, stage: l.stage };
   return (key in std ? std[key] : l.custom[key]) || "";
 }
 /** A `computed_from` column's value (e.g. Full Name = first + last) — same fields a classic "computed" column

@@ -39,9 +39,9 @@ export async function getUserSmtpPassword(userId: string) {
   return data ? decryptSmtpPassword(data.password_encrypted) : null;
 }
 
-export async function sendEmailWithUserSmtp(userId: string, { to, subject, text }: { to: string; subject: string; text: string }) {
+export async function sendEmailWithUserSmtp(userId: string, { to, subject, text, attachments }: { to: string; subject: string; text: string; attachments?: { filename: string; path: string }[] }) {
   const [settings, password] = await Promise.all([getUserSmtpSettings(userId), getUserSmtpPassword(userId)]);
   if (!settings || !password) throw new Error("Set up your email (SMTP) in Settings before sending emails to leads.");
   const transporter = createSmtpTransport({ host: settings.host, port: settings.port, username: settings.username, password });
-  await transporter.sendMail({ from: settings.from_name ? { name: settings.from_name, address: settings.from_email } : settings.from_email, to, subject, text });
+  await transporter.sendMail({ from: settings.from_name ? { name: settings.from_name, address: settings.from_email } : settings.from_email, to, subject, text, attachments });
 }

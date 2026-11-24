@@ -10,8 +10,13 @@ import {
   addProductToLeadDetails,
   claimUnassignedLeadAssignment,
   createLeadNote,
+  createLeadNoteWithAttachment,
+  createLeadProposal,
   createManualLead,
+  logLeadProposalWhatsAppShare,
   manuallyAssignLeads,
+  sendLeadProposalEmail,
+  setLeadProposalApproval,
   updateLeadDetails,
   updateLeadFollowUp,
   updateLeadResolutionInline,
@@ -94,6 +99,27 @@ export async function v2LogCall(t: Target, resolutionId: string, followUpAt: str
 export async function v2AddNote(t: Target, note: string): Promise<ActionResult> {
   try { await createLeadNote(fd({ leadId: t.leadId, assignmentId: t.assignmentId, note })); return { ok: true, message: "Note saved" }; }
   catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not save the note." }; }
+}
+
+export async function v2AddAttachment(t: Target, file: { url: string; name: string; mime: string; size: number } | null, note: string): Promise<ActionResult> {
+  const f = new FormData(); f.set("leadId", t.leadId); f.set("assignmentId", t.assignmentId); f.set("note", note);
+  if (file) { f.set("attachmentUrl", file.url); f.set("attachmentName", file.name); f.set("attachmentMime", file.mime); f.set("attachmentSize", String(file.size)); }
+  return createLeadNoteWithAttachment(f);
+}
+
+/* ---------- Proposals: upload / approve (admin only) / send ---------- */
+export async function v2CreateProposal(t: Target, file: { url: string; name: string; mime: string; size: number }, details: string): Promise<ActionResult> {
+  return createLeadProposal(fd({ leadId: t.leadId, assignmentId: t.assignmentId, fileUrl: file.url, fileName: file.name, fileMime: file.mime, fileSize: String(file.size), details }));
+}
+export async function v2SetProposalApproval(proposalId: string, approved: boolean): Promise<ActionResult> {
+  return setLeadProposalApproval(fd({ proposalId, approved: String(approved) }));
+}
+export async function v2SendProposalEmail(t: Target, proposalId: string, emails: string[]): Promise<ActionResult> {
+  const f = new FormData(); f.set("leadId", t.leadId); f.set("assignmentId", t.assignmentId); f.set("proposalId", proposalId); emails.forEach((e) => f.append("email", e));
+  return sendLeadProposalEmail(f);
+}
+export async function v2LogProposalWhatsAppShare(t: Target, proposalId: string, contactLabel: string): Promise<ActionResult> {
+  return logLeadProposalWhatsAppShare(fd({ leadId: t.leadId, assignmentId: t.assignmentId, proposalId, contactLabel }));
 }
 
 /* ---------- Control Panel / Admin settings (new tables) ---------- */

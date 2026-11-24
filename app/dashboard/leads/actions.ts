@@ -3291,6 +3291,159 @@ export async function createLeadNoteWithAttachment(formData: FormData): Promise<
   }
 }
 
+function validateCdnAttachment(url: string, name: string, mime: string, size: number) {
+  const base = process.env.CDN_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+  if (!base) throw new Error("CDN attachments are not configured yet.");
+  const baseUrl = new URL(base);
+  const uploadedUrl = new URL(url);
+  if (uploadedUrl.origin !== baseUrl.origin || !uploadedUrl.pathname.startsWith(`${baseUrl.pathname}/`))
+    throw new Error("The file must be uploaded through the approved CDN.");
+  if (!name || !mime || !Number.isFinite(size) || size < 1 || size > 100 * 1024 * 1024)
+    throw new Error("The file information is invalid.");
+  return uploadedUrl.toString();
+}
+
+/** A proposal document (quote/agreement) attached to a lead, with an admin-only approval gate before it can be
+ * sent to the client — distinct from a plain note attachment because of that approval + send workflow. */
+export async function createLeadProposal(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const details = String(formData.get("details") ?? "").trim().slice(0, 2000);
+    const fileUrl = String(formData.get("fileUrl") ?? "").trim();
+    const fileName = String(formData.get("fileName") ?? "").trim().slice(0, 180);
+    const fileMime = String(formData.get("fileMime") ?? "").trim().slice(0, 120);
+    const fileSize = Number(formData.get("fileSize") ?? 0);
+    if (!leadId || !assignmentId || !fileUrl) throw new Error("Choose a proposal document to upload.");
+    const url = validateCdnAttachment(fileUrl, fileName, fileMime, fileSize);
+
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const { error } = await supabase.from("lead_proposals").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      file_url: url,
+      file_name: fileName,
+      file_mime: fileMime,
+      file_size: Math.floor(fileSize),
+      details: details || null,
+      created_by: userId,
+    });
+    if (error) throw new Error(error.message);
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "proposal_uploaded",
+      note: `Proposal uploaded: ${fileName}.`,
+      metadata: { attachments: [{ url, name: fileName, mime: fileMime, size: Math.floor(fileSize) }] },
+      created_by: userId,
+    });
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: "Proposal uploaded. Awaiting approval." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to save the proposal." };
+  }
+}
+
+/** Only an admin may approve (or un-approve) a proposal — the Clients send icons on this row stay disabled
+ * everywhere else in the UI until approved is true, but this is the actual enforcement. */
+export async function setLeadProposalApproval(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const user = await requireUser();
+    if (!user.roles.includes("admin")) throw new Error("Only an admin can approve a proposal.");
+    const proposalId = String(formData.get("proposalId") ?? "");
+    const approved = String(formData.get("approved") ?? "") === "true";
+    if (!proposalId) throw new Error("Choose a proposal.");
+    const supabase = createAdminClient();
+    const { error } = await supabase
+      .from("lead_proposals")
+      .update({ approved, approved_by: approved ? user.userId : null, approved_at: approved ? new Date().toISOString() : null })
+      .eq("id", proposalId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: approved ? "Proposal approved." : "Approval removed." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to update the approval." };
+  }
+}
+
+/** Emails the proposal document as a real attachment (via the sender's own SMTP) to one or more contacts —
+ * only once the proposal is approved. */
+export async function sendLeadProposalEmail(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const proposalId = String(formData.get("proposalId") ?? "");
+    const emails = [...new Set(formData.getAll("email").map(String).map((e) => e.trim().toLowerCase()).filter(Boolean))];
+    if (!leadId || !assignmentId || !proposalId || !emails.length) throw new Error("Choose at least one client to email.");
+    if (emails.some((e) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))) throw new Error("One of the selected contacts has no valid email address.");
+
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const [{ data: proposal, error: proposalError }, { data: lead }] = await Promise.all([
+      supabase.from("lead_proposals").select("file_url, file_name, approved").eq("id", proposalId).eq("lead_id", leadId).single(),
+      supabase.from("leads").select("first_name, last_name").eq("id", leadId).single(),
+    ]);
+    if (proposalError || !proposal) throw new Error("This proposal is no longer available.");
+    if (!proposal.approved) throw new Error("This proposal has not been approved yet.");
+    const leadName = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "there";
+
+    let sent = 0; const failed: string[] = [];
+    for (const to of emails) {
+      try {
+        await sendEmailWithUserSmtp(userId, {
+          to, subject: `Proposal — ${leadName}`,
+          text: `Hi,\n\nPlease find the attached proposal.\n\nRegards`,
+          attachments: [{ filename: proposal.file_name, path: proposal.file_url }],
+        });
+        sent++;
+      } catch { failed.push(to); }
+    }
+    if (sent) {
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId,
+        lead_product_assignment_id: assignmentId,
+        activity_type: "proposal_sent",
+        note: `Proposal emailed to ${emails.filter((e) => !failed.includes(e)).join(", ")}.`,
+        metadata: { channel: "email", proposal_id: proposalId },
+        created_by: userId,
+      });
+    }
+    revalidatePath("/dashboard/leads");
+    if (!sent) return { ok: false, message: "Could not send the email. Check your SMTP settings." };
+    return { ok: true, message: failed.length ? `Sent to ${sent}, failed for ${failed.join(", ")}.` : `Emailed to ${sent}.` };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to send the proposal." };
+  }
+}
+
+/** No WhatsApp Business API is wired up for automatic sends — this just logs that the share link was opened
+ * (the actual message, pre-filled with the proposal link, is sent by the user themselves in WhatsApp), same
+ * as every other WhatsApp touch-point in this CRM (see whatsapp-lead-modal.tsx). */
+export async function logLeadProposalWhatsAppShare(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  try {
+    const leadId = String(formData.get("leadId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const proposalId = String(formData.get("proposalId") ?? "");
+    const contactLabel = String(formData.get("contactLabel") ?? "a contact").trim().slice(0, 200);
+    if (!leadId || !assignmentId || !proposalId) throw new Error("Choose a proposal.");
+    const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+    const { data: proposal, error: proposalError } = await supabase.from("lead_proposals").select("approved").eq("id", proposalId).eq("lead_id", leadId).single();
+    if (proposalError || !proposal) throw new Error("This proposal is no longer available.");
+    if (!proposal.approved) throw new Error("This proposal has not been approved yet.");
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "proposal_sent",
+      note: `Proposal shared on WhatsApp with ${contactLabel}.`,
+      metadata: { channel: "whatsapp", proposal_id: proposalId },
+      created_by: userId,
+    });
+    revalidatePath("/dashboard/leads");
+    return { ok: true, message: "Logged." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to log this share." };
+  }
+}
+
 function normalizedLeadContactField(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
