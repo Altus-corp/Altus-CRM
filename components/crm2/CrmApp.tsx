@@ -3,19 +3,19 @@
 // lead window, mobile bottom nav. Navigation is client-side (data loads once), so any page is ≤ 2 clicks.
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BUCKET, DASHES, DEFAULT_DASH, PERIODS, TONES, dashesFor, modulesFor, primaryRole } from "@/app/lib/crm2/config";
+import { DASHES, DEFAULT_DASH, PERIODS, TONES, dashesFor, modulesFor, primaryRole } from "@/app/lib/crm2/config";
 import * as M from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
-import { refreshWorkspace, v2CreateLead } from "@/app/crm/actions";
+import { refreshWorkspace, v2ClaimLead, v2CreateLead } from "@/app/crm/actions";
 import { CrmCtx, useCrm, type Ctx, type Route } from "./context";
 import { TableQCtx } from "./DataTable";
 import { DashboardBody, ListWin, type DX } from "./dashboards";
 import { FilterBar, KpiBar } from "./bars";
 import { LeadWindow } from "./LeadWindow";
 import { PageBody, sidebar } from "./pages";
-import { ownerOpts, type FilterDef, type FilterState, type Kpi } from "./leads";
+import { assignableOpts, canAssignOwner, ownerOpts, type FilterDef, type FilterState, type Kpi } from "./leads";
 import { displayProductCode } from "@/app/lib/product-display";
-import { Avatar, Icon, Pill, Popover, PortalCtx, ToastHost, Win, cap, fmt, toneStyle, usePop, useToast } from "./ui";
+import { Avatar, Icon, Popover, PortalCtx, ToastHost, Win, cap, fmt, toneStyle, usePop, useToast } from "./ui";
 
 export function CrmApp({ initial, initialRoute }: { initial: Workspace; initialRoute: Route }) {
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -103,21 +103,49 @@ function ModuleBar({ mods, cur, onPick }: { mods: ReturnType<typeof modulesFor>;
     <button className="modtab" onMouseEnter={() => !open && show()} onClick={() => (open ? setOpen(false) : show())} title="Modules — hides after 8 s"><Icon n={open ? "chevu" : "chevd"} s="s" /></button></div>;
 }
 
+type GlobalLeadHit = { assignmentId: string; leadId: string; name: string; phone: string | null; email: string | null; product: string; isAmbassadorProduct: boolean; assignedToId: string | null; assignedToName: string | null; ambassadorName: string | null };
 function TitleBar({ title, module, focus, setFocus, onAdd }: { title: string; module: string; focus: boolean; setFocus: (f: boolean) => void; onAdd?: () => void }) {
-  const ctx = useCtx(); const { ws } = ctx; const pop = usePop(); const [q, setQ] = useState("");
-  const results = useMemo(() => { const s = q.trim().toLowerCase(); if (s.length < 2) return null; return { leads: ws.rows.filter((r) => `${r.name} ${r.phone} ${r.company} ${r.email}`.toLowerCase().includes(s)).slice(0, 8), dashes: dashesFor(ws.roles).filter((d) => d.label.toLowerCase().includes(s)), people: ws.people.filter((p) => p.name.toLowerCase().includes(s)).slice(0, 4) }; }, [q, ws]);
+  const ctx = useCtx(); const { ws } = ctx; const toast = useToast(); const pop = usePop(); const [q, setQ] = useState("");
+  const [hitsFor, setHitsFor] = useState<{ q: string; data: GlobalLeadHit[] } | null>(null);
+  const qTrimmed = q.trim(); const showResults = qTrimmed.length >= 2;
+  const leadHits = hitsFor?.q === qTrimmed ? hitsFor.data : null; const searching = showResults && leadHits === null;
+  useEffect(() => {
+    if (qTrimmed.length < 2) return;
+    let live = true;
+    const t = setTimeout(() => {
+      fetch(`/api/leads/global-search?q=${encodeURIComponent(qTrimmed)}`).then((r) => r.json()).then((j) => { if (live) setHitsFor({ q: qTrimmed, data: j.ok ? j.results : [] }); }).catch(() => { if (live) setHitsFor({ q: qTrimmed, data: [] }); });
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [qTrimmed]);
+  const other = useMemo(() => { const s = q.trim().toLowerCase(); if (s.length < 2) return null; return { dashes: dashesFor(ws.roles).filter((d) => d.label.toLowerCase().includes(s)), people: ws.people.filter((p) => p.name.toLowerCase().includes(s)).slice(0, 4) }; }, [q, ws]);
+  const openHit = (r: GlobalLeadHit) => { pop.close(); const row = ws.rows.find((x) => x.id === r.assignmentId); if (row) ctx.openLead(row); else window.open(`/dashboard/leads?lead=${r.leadId}`, "_blank", "noopener"); };
+  const claim = async (r: GlobalLeadHit, assigneeId?: string) => {
+    const res = await v2ClaimLead(r.assignmentId, assigneeId); toast(res.message);
+    if (res.ok) { setHitsFor((cur) => cur ? { ...cur, data: cur.data.map((h) => (h.assignmentId === r.assignmentId ? { ...h, assignedToId: assigneeId ?? ws.me, assignedToName: "You" } : h)) } : cur); ctx.refresh(); }
+  };
+  const canManagerAssign = canAssignOwner(ws);
   return <div className="tbar"><span className="crumb"><span className="m">{module}</span><span className="sep">▶</span><span>{title}</span></span><span className="sp" />
-    <div className="gsearch" onClick={(e) => pop.open(e.currentTarget, "search")}><Icon n="search" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search leads, phone, company, people, dashboards…" /></div>
+    <div className="gsearch" onClick={(e) => pop.open(e.currentTarget, "search")}><Icon n="search" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search every lead — name, phone, company, people, dashboards…" /></div>
     <button className="ib mob-hide" title={`Refresh data (loaded ${new Date(ws.generatedAt).toLocaleTimeString("en-IN")})`} onClick={() => ctx.refresh()}><Icon n="refresh" /></button>
     {ws.roles.includes("admin") && <Link className="ib mob-hide" href="/dashboard/leads" title="Bulk upload leads (classic importer)"><Icon n="upload" /></Link>}
     {onAdd && <button className="btn red mob-hide" onClick={onAdd}><Icon n="plus" s="s" /> Add lead</button>}
     <button className="ib mob-hide" title="Maximise (focus mode)" onClick={() => { setFocus(!focus); try { if (!focus) document.documentElement.requestFullscreen?.(); else if (document.fullscreenElement) document.exitFullscreen(); } catch {} }}><Icon n={focus ? "min" : "focus"} /></button>
     <AccountMenu />
-    {pop.anchor && pop.key === "search" && results && <Popover anchor={pop.anchor} onClose={pop.close} width={420}>
-      {results.leads.length > 0 && <><div className="ph">Leads</div>{results.leads.map((l) => <button key={l.id} className="pi" onClick={() => { pop.close(); ctx.openLead(l, results.leads); }}><Avatar name={l.name} /><span><b>{l.name}</b><br /><span style={{ color: "var(--muted)", fontSize: 11 }}>{l.company} · {l.phone}</span></span><span className="r"><Pill tone={BUCKET[l.bucket].tone}>{l.product}</Pill></span></button>)}</>}
-      {results.dashes.length > 0 && <><div className="ph">Dashboards</div>{results.dashes.map((d) => <button key={d.id} className="pi" onClick={() => { pop.close(); ctx.go({ module: "dashboards", page: d.id }); }}><Icon n={d.icon} /> {d.label}</button>)}</>}
-      {results.people.length > 0 && <><div className="ph">People</div>{results.people.map((p) => <div key={p.id} className="pi"><Avatar name={p.name} photo={M.photoFor(ws, p.id)} />{p.name}</div>)}</>}
-      {!results.leads.length && !results.dashes.length && !results.people.length && <div className="empty" style={{ padding: 20 }}>No matches</div>}</Popover>}
+    {pop.anchor && pop.key === "search" && (showResults || other) && <Popover anchor={pop.anchor} onClose={pop.close} width={460}>
+      {showResults && <><div className="ph">Leads — every product, Ambassador &amp; Uncategorized{searching ? " · searching…" : ""}</div>
+      {(leadHits ?? []).map((r) => <div key={r.assignmentId} className="pi" style={{ cursor: "default", alignItems: "flex-start" }}>
+        <button type="button" onClick={() => openHit(r)} style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, border: 0, background: "none", padding: 0, textAlign: "left", cursor: "pointer" }}>
+          <Avatar name={r.name} /><span><b>{r.name}</b><br /><span style={{ color: "var(--muted)", fontSize: 11 }}>{r.assignedToName ? r.assignedToName : "Unassigned"}{r.ambassadorName ? ` · Amb: ${r.ambassadorName}` : ""} · {r.product}</span></span>
+        </button>
+        {!r.assignedToId && <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <button type="button" className="btn sm" onClick={() => claim(r)}>Assign to me</button>
+          {canManagerAssign && <select defaultValue="" onChange={(e) => { if (e.target.value) claim(r, e.target.value); }} style={{ height: 26, fontSize: 11, border: "1px solid var(--line)", borderRadius: 6 }}><option value="" disabled>Assign to…</option>{assignableOpts(ws).map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}</select>}
+        </span>}
+      </div>)}
+      {leadHits !== null && !leadHits.length && !searching && <div className="empty" style={{ padding: "10px 14px" }}>No leads match</div>}</>}
+      {other?.dashes.length ? <><div className="ph">Dashboards</div>{other.dashes.map((d) => <button key={d.id} className="pi" onClick={() => { pop.close(); ctx.go({ module: "dashboards", page: d.id }); }}><Icon n={d.icon} /> {d.label}</button>)}</> : null}
+      {other?.people.length ? <><div className="ph">People</div>{other.people.map((p) => <button key={p.id} className="pi" onClick={() => { pop.close(); if (ws.roles.includes("admin")) ctx.go({ module: "admin", page: "users" }); }}><Avatar name={p.name} photo={M.photoFor(ws, p.id)} />{p.name}</button>)}</> : null}
+    </Popover>}
   </div>;
 }
 /** Bell + avatar (with their popovers) — shared so mobile's .m-top row and desktop's .tbar can each show their own copy. */

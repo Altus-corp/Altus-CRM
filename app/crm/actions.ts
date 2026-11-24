@@ -8,6 +8,7 @@ import { createSmtpTransport, getUserSmtpPassword, getUserSmtpSettings } from "@
 import type { AppRole } from "@/app/lib/roles";
 import {
   addProductToLeadDetails,
+  claimUnassignedLeadAssignment,
   createLeadNote,
   createManualLead,
   manuallyAssignLeads,
@@ -71,6 +72,16 @@ export async function v2AddProduct(targets: Target[], productId: string): Promis
     }
   }
   return { ok: added > 0 || !skipped, message: `Added to ${added}${skipped ? `, ${skipped} already had it` : ""}`, done: added };
+}
+
+/** Claim an unassigned lead from Global Search — assigneeId defaults to the caller themselves. */
+export async function v2ClaimLead(assignmentId: string, assigneeId?: string): Promise<ActionResult> {
+  try {
+    const r = await claimUnassignedLeadAssignment(fd({ assignmentId, ...(assigneeId ? { assigneeId } : {}) }));
+    return { ok: true, message: r?.message ?? "Assigned." };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Unable to assign this lead." };
+  }
 }
 
 export async function v2LogCall(t: Target, resolutionId: string, followUpAt: string, note: string): Promise<ActionResult> {

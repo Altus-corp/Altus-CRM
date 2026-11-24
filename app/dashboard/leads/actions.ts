@@ -2651,6 +2651,75 @@ export async function manuallyAssignLeads(formData: FormData) {
   revalidatePath("/dashboard/uncategorized-leads");
 }
 
+/** Claim a currently-unassigned product work record — the "Assign to me" action from Global Search. Unlike
+ * manuallyAssignLeads (reassigning work someone already has), this only ever touches work with no owner yet,
+ * so any sales-side user may use it: to themselves, a Sales Manager to themselves or their own team, and an
+ * admin to anyone. The `.is("assigned_to", null)` on the write makes two people claiming at once race-safe —
+ * only one update actually matches a row. */
+export async function claimUnassignedLeadAssignment(formData: FormData) {
+  const user = await requireUser();
+  const isAdmin = user.roles.includes("admin");
+  const isSalesManager = user.roles.includes("sales_manager");
+  const canClaimLeads = isAdmin || isSalesManager || user.roles.some((role) => role === "sales_executive" || role === "consultant");
+  if (!canClaimLeads) throw new Error("You do not have permission to claim leads.");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const assigneeId = String(formData.get("assigneeId") ?? "") || user.userId;
+  if (!assignmentId) throw new Error("Choose a product work record to claim.");
+
+  const supabase = createAdminClient();
+  if (!isAdmin && assigneeId !== user.userId) {
+    if (!isSalesManager) throw new Error("You can only assign an unassigned lead to yourself.");
+    const teamMemberIds = new Set(await getSalesManagerTeamMemberIds(user.userId));
+    if (!teamMemberIds.has(assigneeId)) throw new Error("You can assign leads only to yourself or a member of your sales team.");
+  }
+
+  const [
+    { data: profile, error: profileError },
+    { data: roles, error: rolesError },
+  ] = await Promise.all([
+    supabase.from("profiles").select("id, is_suspended, first_name, last_name, full_name").eq("id", assigneeId).single(),
+    supabase.from("user_roles").select("role").eq("user_id", assigneeId).in("role", ["sales_executive", "sales_manager", "consultant"]),
+  ]);
+  if (profileError || !profile || profile.is_suspended || rolesError || !roles?.length)
+    throw new Error("Choose an active eligible sales user.");
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from("lead_product_assignments")
+    .select("id, lead_id, product_id, assigned_to, is_ambassador, product:lead_products(code), lead:leads(first_name, last_name)")
+    .eq("id", assignmentId)
+    .single();
+  if (assignmentError || !assignment) throw new Error("This product work record is no longer available.");
+  if (assignment.assigned_to) throw new Error("This lead has already been assigned to someone.");
+  if (assignment.is_ambassador && !isAdmin) throw new Error("Only an admin can assign an Ambassador.");
+
+  const assignedAt = new Date().toISOString();
+  const focusedOn = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const { data: claimed, error: claimError } = await supabase
+    .from("lead_product_assignments")
+    .update({ assigned_to: assigneeId, assigned_at: assignedAt, focused_on: focusedOn, assignment_origin: "manual" })
+    .eq("id", assignmentId)
+    .is("assigned_to", null)
+    .select("id");
+  if (claimError) throw new Error(claimError.message);
+  if (!claimed?.length) throw new Error("Someone else just claimed this lead.");
+
+  const assigneeName = profile.full_name || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "a sales user";
+  const lead = Array.isArray(assignment.lead) ? assignment.lead[0] : assignment.lead;
+  const { error: activityError } = await supabase.from("lead_activities").insert({
+    lead_id: assignment.lead_id,
+    lead_product_assignment_id: assignmentId,
+    activity_type: "assigned",
+    note: `Claimed from Global Search and assigned to ${assigneeName}.`,
+    metadata: { assigned_to: assigneeId, assigned_to_name: assigneeName, product_id: assignment.product_id },
+    created_by: user.userId,
+  });
+  if (activityError) throw new Error(activityError.message);
+  await notifyLeadAssignment({ userId: assigneeId, count: 1, source: "manual" });
+  revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard/uncategorized-leads");
+  return { ok: true, message: `Assigned to ${assigneeName}.`, leadName: [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") };
+}
+
 export async function deleteLeads(
   formData: FormData,
 ): Promise<{ ok: boolean; message: string }> {
@@ -4550,6 +4619,15 @@ export async function updateLeadFollowUp(formData: FormData) {
   revalidatePath("/dashboard/team-leads");
 }
 
+// A <input type="datetime-local"> value ("YYYY-MM-DDTHH:mm") carries no timezone — `new Date(...)` parses it in
+// whatever timezone the server process happens to be running in, not the IST the picker is meant for. On a
+// server that isn't itself set to IST (most production hosts default to UTC) that silently shifts every
+// scheduled meeting by the IST offset. Anchor it to IST explicitly instead of trusting the server's local zone.
+function parseIstDateTimeLocal(raw: string): Date {
+  const withSeconds = raw.length === 16 ? `${raw}:00` : raw;
+  return new Date(`${withSeconds}+05:30`);
+}
+
 export async function scheduleLeadZoomMeeting(
   formData: FormData,
 ): Promise<{ ok: boolean; message: string; joinUrl?: string }> {
@@ -4559,7 +4637,7 @@ export async function scheduleLeadZoomMeeting(
   const agenda = String(formData.get("agenda") ?? "").trim();
   const startTime = String(formData.get("startTime") ?? "");
   const duration = Number(formData.get("duration") ?? 0);
-  const startDate = new Date(startTime);
+  const startDate = parseIstDateTimeLocal(startTime);
   const extraEmails = [...new Set(
     String(formData.get("extraEmails") ?? "")
       .split(/[,\s]+/)
@@ -4693,7 +4771,7 @@ export async function scheduleLeadGoogleMeet(
   const description = String(formData.get("description") ?? "").trim();
   const startTime = String(formData.get("startTime") ?? "");
   const duration = Number(formData.get("duration") ?? 0);
-  const startDate = new Date(startTime);
+  const startDate = parseIstDateTimeLocal(startTime);
   const extraEmails = [...new Set(
     String(formData.get("extraEmails") ?? "")
       .split(/[,\s]+/)

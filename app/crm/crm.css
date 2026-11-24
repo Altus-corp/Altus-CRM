@@ -57,7 +57,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 .sub .ni{padding:5.5px 9px;font-size:12.3px}
 .crm2 .grp.closed .sub{display:none}
 .crm2 .side-f{border-top:1px solid var(--line);padding:8px}
-.crm2 .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:0 14px 10px;gap:8px}
+.crm2 .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:0 14px 10px;gap:8px;overflow-y:auto}
 .crm2 .tbar{display:flex;align-items:center;gap:10px;height:52px;flex:none}
 .crm2 .crumb{display:flex;align-items:center;gap:6px;font-size:17px;font-weight:700;white-space:nowrap}
 .crm2 .crumb .m{color:var(--red)}
