@@ -18,6 +18,7 @@ import {
   normalizePhone,
   type AltusCall,
 } from "@/app/lib/altus-call-transcripts";
+import { isConnected } from "@/app/lib/altus-call-utils";
 import {
   notifyFreshFormLead,
   notifyLeadAssignment,
@@ -3904,6 +3905,7 @@ export async function syncLeadCallTranscripts(
         duration_seconds:
           detailedCall.duration_seconds ?? detailedCall.duration ?? null,
         started_at: detailedCall.started_at ?? detailedCall.created_at ?? null,
+        connected: isConnected(detailedCall),
         transcript: transcript || null,
       };
       if (existingActivity) {
@@ -4038,6 +4040,7 @@ export async function syncLeadTranscriptByCallId(
       direction: call.direction ?? null,
       duration_seconds: call.duration_seconds ?? call.duration ?? null,
       started_at: call.started_at ?? call.created_at ?? null,
+      connected: isConnected(call),
       transcript: transcript || null,
     };
     if (existingActivity) {

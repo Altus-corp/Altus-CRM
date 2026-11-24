@@ -17,6 +17,7 @@ import {
   manuallyAssignLeads,
   sendLeadProposalEmail,
   setLeadProposalApproval,
+  syncLeadCallTranscripts,
   updateLeadDetails,
   updateLeadFollowUp,
   updateLeadResolutionInline,
@@ -94,6 +95,15 @@ export async function v2LogCall(t: Target, resolutionId: string, followUpAt: str
     await updateLeadResolutionInline(fd({ leadId: t.leadId, assignmentId: t.assignmentId, resolutionId, followUpAt, followUpNote: note }));
     return { ok: true, message: "Call logged" };
   } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not log the call." }; }
+}
+
+/** Refresh this lead's call activity/transcripts from Altus Contacts — matched by the lead's phone number, so
+ * a call placed by anyone (not just the viewer) still ends up attached here. */
+export async function v2SyncLeadCalls(t: Target): Promise<ActionResult> {
+  try {
+    const r = await syncLeadCallTranscripts(fd({ leadId: t.leadId, assignmentId: t.assignmentId }));
+    return { ok: r.ok, message: r.message };
+  } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not sync calls." }; }
 }
 
 export async function v2AddNote(t: Target, note: string): Promise<ActionResult> {

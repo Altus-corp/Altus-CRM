@@ -108,7 +108,7 @@ export type TeamPerson = { userId: string; name: string };
 export async function syncTeamCallLogs() {
   const admin = createAdminClient();
   const [{ data: roleRows }, { data: profiles }, { data: authUsers }, { data: columns }] = await Promise.all([
-    admin.from("user_roles").select("user_id").in("role", ["sales_executive", "sales_manager", "consultant"]),
+    admin.from("user_roles").select("user_id").in("role", ["sales_executive", "sales_manager", "consultant", "admin"]),
     admin.from("profiles").select("id, first_name, last_name, full_name, is_suspended"),
     admin.auth.admin.listUsers({ perPage: 1000 }),
     admin.from("lead_table_columns").select("field_key, label").eq("source", "custom"),
