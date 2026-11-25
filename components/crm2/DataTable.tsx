@@ -14,7 +14,7 @@ export type Col<T> = {
   k: string; label: string; w?: number; num?: boolean; group?: false;
   val?: (r: T) => unknown; text?: (r: T) => string; render?: (r: T) => ReactNode;
   groupVal?: (r: T) => string; groupTone?: (r: T) => Tone;
-  edit?: { options?: Opt[] | (() => Opt[]); type?: "text" | "date" };
+  edit?: { options?: Opt[] | (() => Opt[]); type?: "text" | "date"; inline?: { value: (row: T) => string; options?: (row: T) => Opt[] } };
 };
 export type BulkAction<T> = { icon: string; label: string; run: (rows: T[], clear: () => void) => void | Promise<void> };
 export type View = "table" | "kanban" | "cards" | "calendar";
@@ -76,7 +76,7 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
   const selected = all.filter((r) => sel.has(r.id)); const allPageSel = pageRows.length > 0 && pageRows.every((r) => sel.has(r.id));
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const clear = () => setSel(new Set());
-  const editable = p.cols.filter((c) => c.edit);
+  const editable = p.cols.filter((c) => c.edit && !c.edit.inline?.options);
   const exportCols = cols.map((c) => ({ label: c.label, text: (r: Record<string, unknown>) => textOf(c, r as unknown as T) }));
   const exportRows = (sel.size ? selected : all) as unknown as Record<string, unknown>[];
   const title = p.exportName ?? "Altus CRM export";
@@ -150,7 +150,7 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
       const main = <tr key={r.id} className={`${sel.has(r.id) ? "sel" : ""} ${tn ? "lb" : ""}`} style={tn ? ({ ["--lbc" as string]: TONES[tn].mk }) : undefined} onDoubleClick={() => p.onOpen?.(r, all)}>
         <td className="c0 frz" style={{ left: 0 }}><input type="checkbox" className="cb" checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></td>
         {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""} ${c.edit ? "edit" : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}
-          onClick={(e) => { if (i === 0) return p.onOpen?.(r, all); if (c.edit) pop.open(e.currentTarget, `cell:${r.id}:${c.k}`); }}>{i === 0 ? <span className="lname">{cell(c, r)}{dCount > 0 && <button type="button" className={`exp-badge ${isOpen ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); toggleExpanded(r.id); }} title={`${dCount} more contact${dCount > 1 ? "s" : ""}`}>+{dCount}</button>}</span> : cell(c, r)}</td>)}</tr>;
+          onClick={(e) => { if (i === 0) return p.onOpen?.(r, all); if (c.edit && !c.edit.inline) pop.open(e.currentTarget, `cell:${r.id}:${c.k}`); }}>{i === 0 ? <span className="lname">{cell(c, r)}{dCount > 0 && <button type="button" className={`exp-badge ${isOpen ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); toggleExpanded(r.id); }} title={`${dCount} more contact${dCount > 1 ? "s" : ""}`}>+{dCount}</button>}</span> : c.edit?.inline && p.onEdit ? <InlineSelect col={c} row={r} onPick={(v) => applyEdit([r], c, v)} /> : cell(c, r)}</td>)}</tr>;
       const children = p.detail && isOpen ? p.detail.rows(r).map((child, idx) => childTr(child, r.id, idx)) : [];
       return [main, ...children]; };
     body = <table className="t"><thead><tr><th className="c0 frz" style={{ left: 0 }} />
@@ -176,7 +176,7 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
     {p.dupeKey && <button className="pi" onClick={() => { close(); setDupes(true); setPage(1); }}><Icon n="dup" /> Find duplicates</button>}
     <button className="pi" onClick={() => { close(); setWin("transpose"); }}><Icon n="transpose" /> Transpose view</button></>; }
   if (key === "bulkfield") { popW = 260; popBody = <BulkField cols={editable} onApply={async (c, v) => { close(); await applyEdit(selected, c, v); clear(); }} count={sel.size} />; }
-  if (key.startsWith("cell:")) { const [, rid, ck] = key.split(":"); const r = all.find((x) => x.id === rid); const c = colMap[ck]; if (r && c) popBody = <CellEdit col={c} row={r} onPick={async (v) => { close(); await applyEdit([r], c, v); }} />; }
+  if (key.startsWith("cell:")) { const [, rid, ...parts] = key.split(":"); const r = all.find((x) => x.id === rid); const c = colMap[parts.join(":")]; if (r && c) popBody = <CellEdit col={c} row={r} onPick={async (v) => { close(); await applyEdit([r], c, v); }} />; }
 
   return <div className={`card grow ${min ? "min" : ""} ${maxed ? "maxed" : ""}`} style={{ minHeight: p.minHeight }}>
     {tools}{bulk}<div className="tw">{body}</div>
@@ -190,6 +190,14 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
 }
 function pagerNums(p: number, n: number) { const s = [...new Set([1, 2, p - 1, p, p + 1, n - 1, n].filter((x) => x >= 1 && x <= n))].sort((a, b) => a - b); const out: number[] = []; s.forEach((x, i) => { if (i && x - s[i - 1] > 1) out.push(-i); out.push(x); }); return out; }
 function opts<T>(c: Col<T>): Opt[] | null { const o = c.edit?.options; return o ? (typeof o === "function" ? o() : o) : null; }
+function InlineSelect<T>({ col, row, onPick }: { col: Col<T>; row: T; onPick: (value: string) => Promise<void> }) {
+  const [busy, setBusy] = useState(false); const toast = useToast(); const config = col.edit!.inline!;
+  const value = config.value(row); const options = config.options?.(row) ?? opts(col) ?? [];
+  return <select className="cell-select" aria-label={col.label} value={value} disabled={busy || !options.length} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} onChange={async (e) => { const next = e.target.value; setBusy(true); try { await onPick(next); } catch { toast("Unable to update this field."); } finally { setBusy(false); } }}>
+    {!options.some((o) => o.v === value) && <option value={value}>{value || "Select"}</option>}
+    {options.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+  </select>;
+}
 function CellEdit<T>({ col, row, onPick }: { col: Col<T>; row: T; onPick: (v: string) => void }) {
   const [q, setQ] = useState(""); const [txt, setTxt] = useState(textOf(col, row)); const o = opts(col);
   if (!o) return <><div className="ph">Edit {col.label}</div><input type={col.edit?.type === "date" ? "date" : "text"} value={txt} onChange={(e) => setTxt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onPick(txt)} autoFocus /><button className="btn red sm" style={{ width: "100%", marginTop: 6 }} onClick={() => onPick(txt)}>Save</button></>;

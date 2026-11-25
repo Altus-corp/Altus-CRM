@@ -5,13 +5,18 @@ export const BANT_FIELD_LABELS = { b: "Budget", a: "Authority", n: "Need", t: "T
 export type BantField = keyof typeof BANT_FIELD_LABELS;
 export const BANT_OPTIONS: Record<BantField, string[]> = {
   b: ["Assumed", "Confirmed", "High", "Not Known"],
-  a: ["Decision Maker", "Assumed", "Confirmed", "Not Known"],
+  a: ["Assumed", "Confirmed", "Not Known"],
   n: ["Assumed", "Confirmed", "Not Known"],
   t: ["Assumed", "Confirmed", "Not Known"],
 };
 
 export function bantCustomKey(field: BantField) {
   return `bant_${field}`;
+}
+
+/** Older records used "Decision Maker" for the same confirmed authority state. */
+export function bantDisplayValue(field: BantField, value: string) {
+  return field === "a" && value === "Decision Maker" ? "Confirmed" : value;
 }
 
 // Fixed tone per value rather than a hash, since each sub-field has a small, known option set.

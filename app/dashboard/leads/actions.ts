@@ -3040,7 +3040,19 @@ export async function addProductToLeadDetails(formData: FormData) {
     .eq("is_active", true)
     .single();
   if (productError || !product) throw new Error("Choose an active product.");
-  if (product.code === "AMBASSADOR") throw new Error("Add Ambassador product work through the Ambassador page, not here.");
+  const { data: removed, error: removedError } = await supabase.from("lead_product_assignments")
+    .select("id, assigned_to, is_active, removed_from_crm").eq("lead_id", leadId).eq("product_id", productId).maybeSingle();
+  if (removedError && removedError.code !== "42703" && removedError.code !== "PGRST204") throw new Error(removedError.message);
+  if (removed && !removed.is_active && removed.removed_from_crm) {
+    const actor = await requireUser();
+    const team = actor.roles.includes("sales_manager") ? await getSalesManagerTeamMemberIds(actor.userId) : [];
+    if (!actor.roles.includes("admin") && removed.assigned_to !== actor.userId && !team.includes(removed.assigned_to ?? "")) throw new Error("Only the product owner, their manager, or an admin can restore this product.");
+    const { error } = await supabase.from("lead_product_assignments").update({ is_active: true, removed_from_crm: false, updated_at: new Date().toISOString() }).eq("id", removed.id).eq("is_active", false).eq("removed_from_crm", true);
+    if (error) throw new Error(error.message);
+    revalidatePath("/dashboard/leads");
+    revalidatePath("/dashboard/team-leads");
+    return;
+  }
 
   const { data: assignment, error: assignmentError } = await supabase
     .from("lead_product_assignments")
@@ -4542,6 +4554,18 @@ export async function updateLeadBantField(formData: FormData) {
   if (!leadId || !BANT_FIELD_LABELS[field]) throw new Error("A lead and BANT field are required.");
   if (value && !BANT_OPTIONS[field].includes(value)) throw new Error("Choose a valid BANT option.");
   const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+  const detail = String(formData.get("detail") ?? "").trim();
+  let detailKey = "";
+  if (value === "Confirmed" && (field === "b" || field === "n" || field === "t")) {
+    if (!detail || detail.length > 2000) throw new Error("Enter the confirmation details (up to 2,000 characters).");
+    if (field === "t") {
+      const { data: columns, error } = await supabase.from("lead_table_columns").select("field_key, label, source, field_type, options").eq("source", "custom");
+      if (error) throw new Error("Unable to load Expected Closing options.");
+      const column = (columns ?? []).find((c) => String(c.label).trim().toLowerCase().replace(/[^a-z0-9]+/g, "") === "expectedclosing" && c.field_type === "dropdown");
+      if (!column || !Array.isArray(column.options) || !column.options.includes(detail)) throw new Error("Choose a configured Expected Closing option.");
+      detailKey = column.field_key;
+    } else detailKey = field === "b" ? "bant_budget_range" : "bant_need_note";
+  }
   const { data: leadRow, error: leadError } = await supabase
     .from("leads")
     .select("custom_data")
@@ -4555,6 +4579,7 @@ export async function updateLeadBantField(formData: FormData) {
   const key = bantCustomKey(field);
   const from = String(customData[key] ?? "");
   customData[key] = value;
+  if (detailKey) customData[detailKey] = detail;
   const { error } = await supabase
     .from("leads")
     .update({ custom_data: customData, updated_at: new Date().toISOString() })

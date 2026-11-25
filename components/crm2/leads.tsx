@@ -2,12 +2,14 @@
 // Lead columns, filters, KPI chips and bulk actions — shared by every lead table and dashboard list.
 import { useState, type ReactNode } from "react";
 import { BUCKET, BUCKETS, TONES, type Tone } from "@/app/lib/crm2/config";
-import { BANT_FIELD_LABELS, bantCustomKey, bantToneStyle, type BantField } from "@/app/lib/bant";
+import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantDisplayValue, bantToneStyle, type BantField } from "@/app/lib/bant";
 import { computedFieldValue, customRange, daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
-import { v2AddProduct, v2UpdateField } from "@/app/crm/actions";
+import { v2AddDecisionMakerContact, v2AddProduct, v2ChangeLeadType, v2LeadProductAssignments, v2SelectLeadProducts, v2UpdateBant, v2UpdateField } from "@/app/crm/actions";
 import { displayProductCode } from "@/app/lib/product-display";
-import { Avatar, Icon, Pill, Win, ago, cap, fdate } from "./ui";
+import { Avatar, Icon, Pill, Popover, Win, ago, cap, fdate, usePop, useToast } from "./ui";
+import { useCrm } from "./context";
+import { BantConfirm } from "./BantConfirm";
 import type { BulkAction, Col, Opt } from "./DataTable";
 import type { Ctx } from "./context";
 
@@ -33,6 +35,56 @@ export const assignableOpts = (ws: Workspace): Opt[] => ws.roles.includes("admin
 const resTone = (ws: Workspace, r: LeadRow): Tone => (r.resolutionId ? BUCKET[ws.resolutions.find((x) => x.id === r.resolutionId)?.bucket ?? "approach"].tone : "lav");
 
 const DUP_CORE_LABELS = new Set(["lead no", "lead number", "last name", "company name"]);
+function ProductCell({ row, canEdit }: { row: LeadRow; canEdit: boolean }) {
+  const ctx = useCrm(); const toast = useToast(); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState<Awaited<ReturnType<typeof v2LeadProductAssignments>>>([]); const [selected, setSelected] = useState<Set<string>>(new Set());
+  const allowed = canEdit && (ctx.ws.roles.includes("admin") || !!row.owner && (row.owner === ctx.ws.me || ctx.ws.roles.includes("sales_manager") && ctx.ws.scope.includes(row.owner)));
+  const show = async () => { setBusy(true); try { const data = await v2LeadProductAssignments(row.leadId); setItems(data); setSelected(new Set(data.filter((p) => p.code.toUpperCase() !== "UNCATEGORIZED").map((p) => p.productId))); setOpen(true); } catch { toast("Unable to load products."); } finally { setBusy(false); } };
+  const save = async () => { setBusy(true); try { const result = await v2SelectLeadProducts(row.leadId, row.id, items.map((p) => p.productId), [...selected]); toast(result.message); if (result.ok) { setOpen(false); await ctx.refresh(); } } catch { toast("Unable to update products."); } finally { setBusy(false); } };
+  return <span onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+    <button type="button" className="lead-product-picker" disabled={!allowed || busy} onClick={show} title={allowed ? "Change products" : "You cannot change this assignment"}><Pill tone="slate">{displayProductCode(row.product)}</Pill>{allowed && <Icon n="chevd" s="s" />}</button>
+    {open && <Win small title="Select products" onClose={() => { if (!busy) setOpen(false); }}><div className="win-b" style={{ padding: 14 }}>
+      <p style={{ margin: "0 0 12px", color: "var(--muted)" }}>Select one or more products. If none are selected, the lead stays in Uncategorized.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{ctx.ws.products.filter((p) => p.code.toUpperCase() !== "UNCATEGORIZED").map((p) => { const assignment = items.find((x) => x.productId === p.id); const locked = !!assignment && (!assignment.canRemove || assignment.isAmbassador); return <label key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", opacity: locked ? .65 : 1 }}><input type="checkbox" checked={selected.has(p.id)} disabled={busy || locked} onChange={(e) => setSelected((prev) => { const next = new Set(prev); if (e.target.checked) next.add(p.id); else next.delete(p.id); return next; })} />{displayProductCode(p.code)} <span style={{ color: "var(--muted)", fontSize: 11 }}>{locked ? assignment?.isAmbassador ? "Established Ambassador" : "Assigned to another user" : ""}</span></label>; })}</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}><button type="button" className="btn" disabled={busy} onClick={() => setOpen(false)}>Cancel</button><button type="button" className="btn red" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button></div>
+    </div></Win>}
+  </span>;
+}
+function BantCell({ row, canEdit }: { row: LeadRow; canEdit: boolean }) {
+  const ctx = useCrm(); const toast = useToast(); const pop = usePop();
+  const [busy, setBusy] = useState(false); const [decision, setDecision] = useState(false);
+  const [confirmation, setConfirmation] = useState<Exclude<BantField, "a"> | null>(null);
+  const [contact, setContact] = useState({ firstName: "", lastName: "", phone: "", email: "" });
+  const save = async (field: BantField, value: string) => {
+    setBusy(true);
+    try {
+      const result = await v2UpdateBant({ leadId: row.leadId, assignmentId: row.id }, field, value);
+      toast(result.message);
+      if (result.ok) ctx.patchRows([row.id], { custom: { ...row.custom, [bantCustomKey(field)]: value } });
+    } catch { toast("Unable to update BANT."); } finally { setBusy(false); }
+  };
+  const addDecisionMaker = async () => {
+    setBusy(true);
+    try {
+      const result = await v2AddDecisionMakerContact({ leadId: row.leadId, assignmentId: row.id }, contact);
+      if (!result.ok) { toast(result.message); return; }
+      const updated = await v2UpdateBant({ leadId: row.leadId, assignmentId: row.id }, "a", "Confirmed");
+      toast(updated.ok ? result.message : updated.message);
+      if (updated.ok) ctx.patchRows([row.id], { custom: { ...row.custom, [bantCustomKey("a")]: "Confirmed" } });
+      setDecision(false);
+    } catch { toast("Unable to add the decision maker."); } finally { setBusy(false); }
+  };
+  return <span style={{ display: "inline-flex", gap: 4 }} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+    {(["b", "a", "n", "t"] as BantField[]).map((f) => <button type="button" key={f} disabled={!canEdit || busy} aria-label={`${BANT_FIELD_LABELS[f]}: ${bantDisplayValue(f, row.custom[bantCustomKey(f)] ?? "") || "Not set"}`} title={`${BANT_FIELD_LABELS[f]}: ${bantDisplayValue(f, row.custom[bantCustomKey(f)] ?? "") || "Not set"}`} onClick={(e) => pop.open(e.currentTarget, f)} style={{ display: "inline-grid", placeItems: "center", width: 24, height: 24, border: 0, borderRadius: 5, fontSize: 10, fontWeight: 800, cursor: canEdit ? "pointer" : "default", ...(bantToneStyle(bantDisplayValue(f, row.custom[bantCustomKey(f)] ?? "")) ?? { background: "var(--bg)", color: "var(--faint)" }) }}>{f.toUpperCase()}</button>)}
+    {pop.anchor && (["b", "a", "n", "t"] as string[]).includes(pop.key) && <Popover anchor={pop.anchor} onClose={pop.close} width={190}><div className="ph">{BANT_FIELD_LABELS[pop.key as BantField]}</div>{BANT_OPTIONS[pop.key as BantField].map((option) => <button type="button" key={option} className="pi" onClick={() => { const field = pop.key as BantField; pop.close(); if (field === "a" && option === "Confirmed") { setContact({ firstName: "", lastName: "", phone: "", email: "" }); setDecision(true); } else if (field !== "a" && option === "Confirmed") setConfirmation(field); else void save(field, option); }}>{option}</button>)}</Popover>}
+    {confirmation && <BantConfirm key={`${row.id}-${confirmation}`} field={confirmation} row={row} ws={ctx.ws} onClose={() => setConfirmation(null)} onSave={async (detail, key) => { try { const result = await v2UpdateBant({ leadId: row.leadId, assignmentId: row.id }, confirmation, "Confirmed", detail); toast(result.message); if (result.ok) { ctx.patchRows(ctx.ws.rows.filter((r) => r.leadId === row.leadId).map((r) => r.id), { custom: { ...row.custom, [bantCustomKey(confirmation)]: "Confirmed", [key]: detail } }); setConfirmation(null); } return result.ok; } catch { toast("Unable to update BANT."); return false; } }} />}
+    {decision && <Win small title="Decision maker" onClose={() => setDecision(false)}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Add the decision maker as a secondary contact for this lead.</div>
+      {([["firstName", "First name"], ["lastName", "Last name"], ["phone", "Contact (optional)"], ["email", "Email (optional)"]] as const).map(([key, label]) => <div className="fld" key={key}><label>{label}</label><input value={contact[key]} onChange={(e) => setContact((c) => ({ ...c, [key]: e.target.value }))} /></div>)}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button className="btn" disabled={busy} onClick={() => setDecision(false)}>Cancel</button><button className="btn red" disabled={busy || !contact.firstName.trim()} onClick={addDecisionMaker}>{busy ? "Saving…" : "Save"}</button></div>
+    </div></Win>}
+  </span>;
+}
 export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) => void): Col<LeadRow>[] {
   const custom = ws.columns.filter((c) => c.source === "custom" && !["company_name", "priority"].includes(c.key) && !DUP_CORE_LABELS.has(c.label.trim().toLowerCase()));
   const e = <T,>(x: T) => (canEdit ? x : undefined);
@@ -42,30 +94,30 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
     { k: "contact", label: "Contact", w: 84, group: false, text: (r) => r.phone, render: (r) => <span className="cact" onClick={(ev) => ev.stopPropagation()}><a href="#" onClick={(ev) => { ev.preventDefault(); call(r); }} title="Call via Altus Contacts"><Icon n="phone" /></a><a href={`https://wa.me/91${r.phone.replace(/\D/g, "").slice(-10)}`} target="_blank" rel="noopener noreferrer" title="WhatsApp"><Icon n="wa" /></a>{r.email && <a href={`mailto:${r.email}`} title={r.email}><Icon n="mail" /></a>}</span> },
     { k: "company", label: "Company", group: false, edit: e({ type: "text" as const }) },
     { k: "phone", label: "Cell number", group: false },
-    { k: "product", label: "Product", text: (r) => r.product, render: (r) => <Pill tone="slate">{displayProductCode(r.product)}</Pill> },
-    { k: "stage", label: "Stage" },
+    { k: "product", label: "Product", text: (r) => r.product, render: (r) => <ProductCell row={r} canEdit={canEdit} /> },
+    { k: "stage", label: "Stage", edit: e({ inline: { value: (r: LeadRow) => r.stageId ?? "", options: (r: LeadRow) => (ws.products.find((p) => p.id === r.productId)?.stages ?? []).map((s) => ({ v: s.id, l: s.name })) } }) },
     { k: "bucket", label: "Priority stage", text: (r) => BUCKET[r.bucket].label, val: (r) => BUCKET[r.bucket].weight, groupVal: (r) => BUCKET[r.bucket].label, groupTone: (r) => BUCKET[r.bucket].tone, render: (r) => <Pill tone={BUCKET[r.bucket].tone}>{BUCKET[r.bucket].label}</Pill> },
-    { k: "resolution", label: "Call resolution", text: (r) => r.resolution ?? "Not called", groupTone: (r) => resTone(ws, r), render: (r) => (r.resolution ? <Pill tone={resTone(ws, r)}>{r.resolution}</Pill> : <span style={{ color: "var(--faint)" }}>Not called</span>), edit: e({ options: () => ws.resolutions.map((x) => ({ v: x.id, l: x.name, tone: BUCKET[x.bucket].tone })) }) },
-    { k: "owner", label: "Sales person", text: (r) => personName(ws, r.owner), render: (r) => (r.owner ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={personName(ws, r.owner)} photo={photoFor(ws, r.owner)} />{personName(ws, r.owner)}</span> : <span style={{ color: "var(--faint)" }}>Unassigned</span>), edit: canEdit && canAssignOwner(ws) ? { options: () => assignableOpts(ws) } : undefined },
+    { k: "resolution", label: "Call resolution", text: (r) => r.resolution ?? "Not called", groupTone: (r) => resTone(ws, r), render: (r) => (r.resolution ? <Pill tone={resTone(ws, r)}>{r.resolution}</Pill> : <span style={{ color: "var(--faint)" }}>Not called</span>), edit: e({ options: () => ws.resolutions.map((x) => ({ v: x.id, l: x.name, tone: BUCKET[x.bucket].tone })), inline: { value: (r: LeadRow) => r.resolutionId ?? "" } }) },
+    { k: "owner", label: "Sales person", text: (r) => personName(ws, r.owner), render: (r) => (r.owner ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={personName(ws, r.owner)} photo={photoFor(ws, r.owner)} />{personName(ws, r.owner)}</span> : <span style={{ color: "var(--faint)" }}>Unassigned</span>), edit: canEdit && canAssignOwner(ws) ? { options: () => assignableOpts(ws), inline: { value: (r: LeadRow) => r.owner ?? "" } } : undefined },
     { k: "lastCalledAt", label: "Last called", groupVal: (r) => (!r.lastCalledAt ? "Never called" : (daysSince(r.lastCalledAt) ?? 0) <= 3 ? "0–3 days" : (daysSince(r.lastCalledAt) ?? 0) <= 7 ? "4–7 days" : "8+ days"), render: (r) => { const d = daysSince(r.lastCalledAt); return <span style={{ color: d == null ? TONES.rose.ink : d > 7 ? TONES.butter.ink : undefined, fontWeight: d == null || d > 7 ? 700 : 400 }}>{ago(r.lastCalledAt)}</span>; } },
     { k: "notCalled", label: "Not called since assigned", num: true, group: false, val: (r) => (!r.lastCalledAt && r.assignedAt ? daysSince(r.assignedAt) : null), render: (r) => { const v = !r.lastCalledAt && r.assignedAt ? daysSince(r.assignedAt) : null; return v == null ? "—" : <b style={{ color: v > 3 ? TONES.rose.ink : TONES.butter.ink }}>{v} d</b>; } },
     { k: "nextFollowUp", label: "Next follow-up", edit: e({ type: "date" as const }), groupVal: (r) => { if (!r.nextFollowUp) return "No follow-up"; const d = -(daysSince(r.nextFollowUp) ?? 0); return d < 0 ? "Overdue" : d === 0 ? "Today" : d <= 7 ? "This week" : "Later"; }, render: (r) => { if (!r.nextFollowUp) return "—"; const d = -(daysSince(r.nextFollowUp) ?? 0); return <span style={{ color: d < 0 ? TONES.rose.ink : d === 0 ? TONES.peach.ink : undefined, fontWeight: d <= 0 ? 700 : 400 }}>{fdate(r.nextFollowUp)}{d < 0 ? ` · ${-d}d late` : d === 0 ? " · today" : ""}</span>; } },
     { k: "score", label: "Focus score", num: true, group: false, val: priorityScore },
     { k: "win", label: "AI win %", num: true, group: false, val: winProb, render: (r) => { const p = winProb(r); return <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span className="bar-in" style={{ width: 50 }}><i style={{ width: `${p}%`, background: TONES[p > 50 ? "mint" : p > 20 ? "butter" : "slate"].mk }} /></span>{p}%</span>; } },
     { k: "action", label: "AI next best action", w: 240, group: false, val: nextAction },
-    { k: "source", label: "Source", text: (r) => r.source, groupVal: (r) => cap(r.source), render: (r) => cap(r.source) },
+    { k: "source", label: "Source", text: (r) => r.source, groupVal: (r) => cap(r.source), render: (r) => cap(r.source), edit: ws.roles.includes("admin") ? { options: [{ v: "reference_leads", l: "Reference Lead" }, { v: "qualified_leads", l: "Qualified Lead" }, { v: "database_leads", l: "Database Leads" }, { v: "leads", l: "Lead" }], inline: { value: (r: LeadRow) => r.source.replace(/ /g, "_") } } : undefined },
     { k: "calls", label: "Calls (60 d)", num: true, group: false }, { k: "connected", label: "Connected", num: true, group: false },
     { k: "hyg", label: "Empty fields", num: true, group: false, val: (r) => missingFields(ws, r).length, render: (r) => { const m = missingFields(ws, r); return m.length ? <span title={m.join(", ")} style={{ color: m.length > 4 ? TONES.rose.ink : TONES.butter.ink, fontWeight: 700 }}>{m.length}</span> : <span style={{ color: TONES.mint.ink }}>✓</span>; } },
     { k: "email", label: "Email", group: false, edit: e({ type: "text" as const }) },
     { k: "ambassador", label: "Ambassador", text: (r) => (r.ambassador ? personName(ws, r.ambassador) : "—") },
     { k: "createdAt", label: "Created on", groupVal: (r) => fdate(r.createdAt) }, { k: "assignedAt", label: "Assigned on", groupVal: (r) => fdate(r.assignedAt) },
     { k: "no", label: "Lead no.", group: false },
-    { k: "bant", label: "BANT", group: false, text: (r) => (["b", "a", "n", "t"] as BantField[]).map((f) => `${f.toUpperCase()}:${r.custom[bantCustomKey(f)] || "—"}`).join(" "), render: (r) => <span style={{ display: "inline-flex", gap: 4 }}>{(["b", "a", "n", "t"] as BantField[]).map((f) => <span key={f} title={`${BANT_FIELD_LABELS[f]}: ${r.custom[bantCustomKey(f)] || "Not set"}`} style={{ display: "inline-grid", placeItems: "center", width: 20, height: 20, borderRadius: 5, fontSize: 10, fontWeight: 800, ...(bantToneStyle(r.custom[bantCustomKey(f)] ?? "") ?? { background: "var(--bg)", color: "var(--faint)" }) }}>{f.toUpperCase()}</span>)}</span> },
+    { k: "bant", label: "BANT", group: false, text: (r) => (["b", "a", "n", "t"] as BantField[]).map((f) => `${f.toUpperCase()}:${bantDisplayValue(f, r.custom[bantCustomKey(f)] ?? "") || "—"}`).join(" "), render: (r) => <BantCell row={r} canEdit={canEdit} /> },
     ...custom.map((c): Col<LeadRow> => c.computedFrom.length
       ? { k: "c:" + c.key, label: c.label, text: (r) => computedFieldValue(r, c.computedFrom) }
       : c.label.trim().toLowerCase() === "lead acquisition date"
         ? { k: "c:" + c.key, label: c.label, text: (r) => fdate(r.createdAt) }
-        : { k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e(c.fieldType === "dropdown" && c.options.length ? { options: () => c.options.map((o) => ({ v: o, l: o })) } : { type: "text" as const }) }),
+        : { k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e(c.fieldType === "dropdown" && c.options.length ? { options: () => c.options.map((o) => ({ v: o, l: o })), inline: { value: (r: LeadRow) => r.custom[c.key] ?? "" } } : { type: "text" as const }) }),
   ];
 }
 export const LEAD_HIDDEN = ["phone", "notCalled", "score", "action", "connected", "email", "createdAt", "assignedAt", "no"];
@@ -74,10 +126,12 @@ export const hiddenWithCustom = (ws: Workspace) => [...LEAD_HIDDEN, ...ws.column
 /** Save an edit through the existing actions, then patch the local rows. */
 export function leadEditor(ctx: Ctx, toast: (m: string) => void) {
   return async (rows: LeadRow[], col: Col<LeadRow>, value: string) => {
-    const field = col.k === "owner" ? "owner" : col.k === "resolution" ? "resolutionId" : col.k === "nextFollowUp" ? "nextFollowUp" : col.k === "company" ? "company_name" : col.k.startsWith("c:") ? col.k.slice(2) : col.k;
+    if (col.k === "source") { for (const id of new Set(rows.map((r) => r.leadId))) { const result = await v2ChangeLeadType(id, value); toast(result.message); if (result.ok) ctx.patchRows(ctx.ws.rows.filter((r) => r.leadId === id).map((r) => r.id), { source: value.replace(/_/g, " ") }); } return; }
+    const field = col.k === "stage" ? "stageId" : col.k === "owner" ? "owner" : col.k === "resolution" ? "resolutionId" : col.k === "nextFollowUp" ? "nextFollowUp" : col.k === "company" ? "company_name" : col.k.startsWith("c:") ? col.k.slice(2) : col.k;
     const res = await v2UpdateField(rows.map((r) => ({ leadId: r.leadId, assignmentId: r.id })), field, field === "nextFollowUp" ? new Date(value).toISOString() : value);
     toast(res.message);
     if (!res.ok) return;
+    if (field === "stageId") { await ctx.refresh(); return; }
     const patch: Partial<LeadRow> = field === "owner" ? { owner: value, assignedAt: new Date().toISOString() } : field === "resolutionId" ? (() => { const x = ctx.ws.resolutions.find((q) => q.id === value); return { resolutionId: value, resolution: x?.name ?? null, bucket: x?.bucket ?? "approach", lastCalledAt: new Date().toISOString() }; })() : field === "nextFollowUp" ? { nextFollowUp: new Date(value).toISOString() } : field === "company_name" ? { company: value } : field === "email" ? { email: value } : {};
     if (col.k.startsWith("c:")) rows.forEach((r) => ctx.patchRows([r.id], { custom: { ...r.custom, [field]: value } }));
     else ctx.patchRows(rows.map((r) => r.id), patch);

@@ -31,6 +31,7 @@ import { saveTeam } from "@/app/dashboard/team/actions";
 import { attendanceAvailability, attendanceForEmail, getWmsAttendance } from "@/app/lib/wms-attendance";
 import { withoutDuplicateSystemColumns } from "@/app/lib/lead-shared-config";
 import { loadWorkspace } from "@/app/lib/crm2/workspace";
+import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
 
 type Target = { leadId: string; assignmentId: string };
 export type ActionResult = { ok: boolean; message: string; done?: number };
@@ -39,6 +40,57 @@ const fd = (o: Record<string, string>) => { const f = new FormData(); Object.ent
 export async function refreshWorkspace() {
   const user = await requireUser();
   return loadWorkspace(user);
+}
+
+export async function v2ChangeLeadType(leadId: string, leadType: string): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!user.roles.includes("admin")) return { ok: false, message: "Only an admin can change the lead type." };
+  if (!["reference_leads", "qualified_leads", "database_leads", "leads"].includes(leadType)) return { ok: false, message: "Choose a valid lead type." };
+  const { data, error } = await createAdminClient().from("leads").update({ lead_database: leadType }).eq("id", leadId).select("id").maybeSingle();
+  if (error || !data) return { ok: false, message: error?.message ?? "Lead not found." };
+  return { ok: true, message: "Lead type updated." };
+}
+
+async function productScope() {
+  const user = await requireUser();
+  const admin = user.roles.includes("admin");
+  const owners = [user.userId, ...(user.roles.includes("sales_manager") ? await getSalesManagerTeamMemberIds(user.userId) : [])];
+  return { user, admin, owners };
+}
+
+export async function v2LeadProductAssignments(leadId: string) {
+  const { admin, owners } = await productScope();
+  const db = createAdminClient();
+  if (!admin) {
+    const { data, error } = await db.from("lead_product_assignments").select("id").eq("lead_id", leadId).eq("is_active", true).in("assigned_to", owners).limit(1);
+    if (error || !data?.length) throw new Error("You cannot access this lead.");
+  }
+  const { data, error } = await db.from("lead_product_assignments").select("id, product_id, stage_id, latest_resolution_id, assigned_to, is_ambassador, product:lead_products(code, name), stage:lead_stages(name), resolution:lead_resolutions(name)").eq("lead_id", leadId).eq("is_active", true);
+  if (error) throw new Error("Unable to load products.");
+  return (data ?? []).map((raw) => {
+    const x = raw as unknown as { id: string; product_id: string; assigned_to: string | null; is_ambassador: boolean; product: { code: string; name: string } | null; stage: { name: string } | null; resolution: { name: string } | null };
+    return { id: x.id, productId: x.product_id, code: x.product?.code ?? "", name: x.product?.name ?? "", stage: x.stage?.name ?? "", resolution: x.resolution?.name ?? "", owner: x.assigned_to, canRemove: admin || !!x.assigned_to && owners.includes(x.assigned_to), isAmbassador: x.is_ambassador };
+  });
+}
+
+export async function v2RemoveProduct(leadId: string, assignmentId: string): Promise<ActionResult> {
+  try {
+    const { user, admin, owners } = await productScope();
+    const { error } = await createAdminClient().rpc("crm_remove_product", { p_lead: leadId, p_assignment: assignmentId, p_actor: user.userId, p_allowed_owners: owners, p_admin: admin });
+    if (error) throw new Error(error.message);
+    return { ok: true, message: "Product removed. Its history is preserved." };
+  } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Unable to remove product." }; }
+}
+
+export async function v2SelectLeadProducts(leadId: string, assignmentId: string, expected: string[], selected: string[]): Promise<ActionResult> {
+  try {
+    const { user, admin, owners } = await productScope();
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (![leadId, assignmentId, ...expected, ...selected].every((id) => uuid.test(id)) || expected.length > 100 || selected.length > 100) return { ok: false, message: "Invalid product selection." };
+    const { error } = await createAdminClient().rpc("crm_select_products", { p_lead: leadId, p_source: assignmentId, p_actor: user.userId, p_allowed_owners: owners, p_admin: admin, p_expected: expected, p_selected: selected });
+    if (error) throw new Error(error.message);
+    return { ok: true, message: "Products updated." };
+  } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Unable to update products." }; }
 }
 
 /** Change one field on many rows. Fields map 1:1 to existing actions. */
@@ -70,16 +122,17 @@ export async function v2UpdateField(targets: Target[], field: string, value: str
 export async function v2AddProduct(targets: Target[], productId: string): Promise<ActionResult> {
   await requireUser();
   if (!targets.length) return { ok: false, message: "Nothing selected." };
-  let added = 0; let skipped = 0;
+  let added = 0; let skipped = 0; let lastError = "";
   for (const t of targets) {
     try {
       await addProductToLeadDetails(fd({ leadId: t.leadId, sourceAssignmentId: t.assignmentId, productId }));
       added++;
-    } catch {
+    } catch (e) {
       skipped++;
+      lastError = e instanceof Error ? e.message : "Unable to add product.";
     }
   }
-  return { ok: added > 0 || !skipped, message: `Added to ${added}${skipped ? `, ${skipped} already had it` : ""}`, done: added };
+  return { ok: added > 0 || !skipped, message: skipped ? `${added ? `Added to ${added}. ` : ""}${lastError}` : `Added to ${added}`, done: added };
 }
 
 /** Claim an unassigned lead from Global Search — assigneeId defaults to the caller themselves. */
@@ -108,14 +161,14 @@ export async function v2SyncLeadCalls(t: Target): Promise<ActionResult> {
   } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not sync calls." }; }
 }
 
-export async function v2UpdateBant(t: Target, field: "b" | "a" | "n" | "t", value: string): Promise<ActionResult> {
+export async function v2UpdateBant(t: Target, field: "b" | "a" | "n" | "t", value: string, detail = ""): Promise<ActionResult> {
   try {
-    await updateLeadBantField(fd({ leadId: t.leadId, assignmentId: t.assignmentId, field, value }));
+    await updateLeadBantField(fd({ leadId: t.leadId, assignmentId: t.assignmentId, field, value, detail }));
     return { ok: true, message: "BANT updated" };
   } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not update BANT." }; }
 }
 
-/** Authority = Decision Maker asks for the decision maker's details and records them as a Secondary Contact
+/** Confirmed authority asks for the decision maker's details and records them as a Secondary Contact
  * on this lead, same as the Add Contact tab. */
 export async function v2AddDecisionMakerContact(t: Target, contact: { firstName: string; lastName: string; phone: string; email: string }): Promise<ActionResult> {
   const r = await createLeadContact(fd({ leadId: t.leadId, assignmentId: t.assignmentId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, email: contact.email, contactType: "secondary" }));
