@@ -19,6 +19,7 @@ import {
   type AltusCall,
 } from "@/app/lib/altus-call-transcripts";
 import { isConnected } from "@/app/lib/altus-call-utils";
+import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, type BantField } from "@/app/lib/bant";
 import {
   notifyFreshFormLead,
   notifyLeadAssignment,
@@ -4214,6 +4215,10 @@ export async function updateLeadDetails(formData: FormData) {
   const update: Record<string, unknown> = { custom_data: customData };
   const changes: { label: string; from: string; to: string }[] = [];
     const addressValues: Partial<Record<LeadAddressFieldKey, string>> = {};
+    // A SPANCO custom dropdown is admin-created, not a system column, but "Abandoned" already means something
+    // specific here (Call Resolution "Abandoned" releases the lead and surfaces it in admin's DND Master) —
+    // moving SPANCO to Abandoned should move the lead there too, not sit as an unrelated label.
+    let spancoAbandoned = false;
   for (const input of values) {
     const key = typeof input.key === "string" ? input.key : "";
     const value = typeof input.value === "string" ? input.value.trim() : "";
@@ -4287,6 +4292,7 @@ export async function updateLeadDetails(formData: FormData) {
       const to = isCheckbox ? (value === "true" ? "Yes" : "No") : value;
       if (from !== to) changes.push({ label: column.label, from, to });
       customData[key] = isCheckbox ? value === "true" : value;
+      if (normalizedLabel === "spanco" && from !== to && to === "Abandoned") spancoAbandoned = true;
     }
   }
     const addressValidation = validateLeadAddressLocation(
@@ -4317,6 +4323,24 @@ export async function updateLeadDetails(formData: FormData) {
         created_by: userId,
       });
     if (activityError) throw new Error(activityError.message);
+  }
+  if (spancoAbandoned) {
+    const { data: abandonedResolution } = await supabase
+      .from("lead_resolutions")
+      .select("id")
+      .ilike("name", "Abandoned")
+      .eq("is_active", true)
+      .maybeSingle();
+    if (abandonedResolution) {
+      // Best-effort: the SPANCO value itself is already saved above regardless of whether this succeeds.
+      try {
+        const resolutionForm = new FormData();
+        resolutionForm.set("leadId", leadId);
+        resolutionForm.set("assignmentId", assignmentId);
+        resolutionForm.set("resolutionId", abandonedResolution.id);
+        await updateLeadResolutionInline(resolutionForm);
+      } catch { /* ignore — SPANCO save already succeeded */ }
+    }
   }
   revalidatePath("/dashboard/leads");
   revalidatePath("/dashboard/team-leads");
@@ -4504,6 +4528,51 @@ export async function updateLeadStageInline(formData: FormData) {
   if (activityError) throw new Error(activityError.message);
   revalidatePath("/dashboard/leads");
   revalidatePath("/dashboard/team-leads");
+}
+
+// BANT is a lead qualification score (Budget / Authority / Need / Timeline) — one system column with four
+// sub-dropdowns, not a generic per-column value. Each sub-value is stored as its own scalar custom_data key
+// (bant_b/bant_a/bant_n/bant_t), not nested under one "bant" object, because the workspace loader drops any
+// custom_data value that isn't a plain scalar when it builds a lead's editable field map.
+export async function updateLeadBantField(formData: FormData) {
+  const leadId = String(formData.get("leadId") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const field = String(formData.get("field") ?? "") as BantField;
+  const value = String(formData.get("value") ?? "");
+  if (!leadId || !BANT_FIELD_LABELS[field]) throw new Error("A lead and BANT field are required.");
+  if (value && !BANT_OPTIONS[field].includes(value)) throw new Error("Choose a valid BANT option.");
+  const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+  const { data: leadRow, error: leadError } = await supabase
+    .from("leads")
+    .select("custom_data")
+    .eq("id", leadId)
+    .single();
+  if (leadError || !leadRow) throw new Error("This lead is no longer available.");
+  const customData: Record<string, unknown> =
+    leadRow.custom_data && typeof leadRow.custom_data === "object" && !Array.isArray(leadRow.custom_data)
+      ? { ...(leadRow.custom_data as Record<string, unknown>) }
+      : {};
+  const key = bantCustomKey(field);
+  const from = String(customData[key] ?? "");
+  customData[key] = value;
+  const { error } = await supabase
+    .from("leads")
+    .update({ custom_data: customData, updated_at: new Date().toISOString() })
+    .eq("id", leadId);
+  if (error) throw new Error(error.message);
+  if (from !== value) {
+    const label = BANT_FIELD_LABELS[field];
+    const { error: activityError } = await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "details_updated",
+      note: `BANT ${label} changed from ${from || "—"} to ${value || "—"}.`,
+      metadata: { changes: [{ label: `BANT ${label}`, from, to: value }] },
+      created_by: userId,
+    });
+    if (activityError) throw new Error(activityError.message);
+  }
+  revalidatePath("/dashboard/leads");
 }
 
 export async function updateLeadResolutionInline(formData: FormData) {

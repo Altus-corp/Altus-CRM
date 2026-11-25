@@ -15,9 +15,11 @@ import {
   createManualLead,
   logLeadProposalWhatsAppShare,
   manuallyAssignLeads,
+  createLeadContact,
   sendLeadProposalEmail,
   setLeadProposalApproval,
   syncLeadCallTranscripts,
+  updateLeadBantField,
   updateLeadDetails,
   updateLeadFollowUp,
   updateLeadResolutionInline,
@@ -104,6 +106,20 @@ export async function v2SyncLeadCalls(t: Target): Promise<ActionResult> {
     const r = await syncLeadCallTranscripts(fd({ leadId: t.leadId, assignmentId: t.assignmentId }));
     return { ok: r.ok, message: r.message };
   } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not sync calls." }; }
+}
+
+export async function v2UpdateBant(t: Target, field: "b" | "a" | "n" | "t", value: string): Promise<ActionResult> {
+  try {
+    await updateLeadBantField(fd({ leadId: t.leadId, assignmentId: t.assignmentId, field, value }));
+    return { ok: true, message: "BANT updated" };
+  } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not update BANT." }; }
+}
+
+/** Authority = Decision Maker asks for the decision maker's details and records them as a Secondary Contact
+ * on this lead, same as the Add Contact tab. */
+export async function v2AddDecisionMakerContact(t: Target, contact: { firstName: string; lastName: string; phone: string; email: string }): Promise<ActionResult> {
+  const r = await createLeadContact(fd({ leadId: t.leadId, assignmentId: t.assignmentId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, email: contact.email, contactType: "secondary" }));
+  return { ok: r.ok, message: r.ok ? "Decision maker added to Add Contact as a Secondary Contact." : r.message };
 }
 
 export async function v2AddNote(t: Target, note: string): Promise<ActionResult> {

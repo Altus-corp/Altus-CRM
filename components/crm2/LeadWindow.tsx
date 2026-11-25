@@ -10,10 +10,11 @@ import { GoogleMeetModal } from "@/components/leads/google-meet-modal";
 import { googleCalendarCreateUrl } from "@/app/lib/google-calendar-link";
 import { uploadLeadAttachment, type UploadedLeadFile } from "@/app/lib/lead-attachments-client";
 import { VoiceDictationButton } from "@/components/leads/voice-dictation-button";
+import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantToneStyle, type BantField } from "@/app/lib/bant";
 import { ContactsTab } from "./ContactsTab";
 import { computedFieldValue, daysSince, missingFields, nextAction, personName, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
-import { v2AddAttachment, v2AddNote, v2AddProduct, v2CreateProposal, v2LeadChannelPartners, v2LogCall, v2LogProposalWhatsAppShare, v2SendProposalEmail, v2SetProposalApproval, v2SyncLeadCalls, v2UpdateField } from "@/app/crm/actions";
+import { v2AddAttachment, v2AddDecisionMakerContact, v2AddNote, v2AddProduct, v2CreateProposal, v2LeadChannelPartners, v2LogCall, v2LogProposalWhatsAppShare, v2SendProposalEmail, v2SetProposalApproval, v2SyncLeadCalls, v2UpdateBant, v2UpdateField } from "@/app/crm/actions";
 import { useCrm } from "./context";
 import { assignableOpts, canAssignOwner, dialLead } from "./leads";
 import { Avatar, Icon, Pill, Popover, Win, fdate, fdt, toneStyle, usePop, useToast } from "./ui";
@@ -34,6 +35,10 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   const [propFile, setPropFile] = useState<File | null>(null); const [propDetails, setPropDetails] = useState(""); const [propBusy, setPropBusy] = useState(false);
   const [contactsFor, setContactsFor] = useState<{ key: string; data: ContactOpt[] } | null>(null); const contactOpts = contactsFor?.key === actKey ? contactsFor.data : null;
   const [clientSel, setClientSel] = useState<Record<string, Set<string>>>({}); const [sendBusy, setSendBusy] = useState<string | null>(null);
+  const bantRefs = useRef<Record<string, HTMLSelectElement | null>>({});
+  const [dmPrompt, setDmPrompt] = useState<{ field: BantField; prevValue: string } | null>(null);
+  const [dmForm, setDmForm] = useState({ firstName: "", lastName: "", phone: "", email: "" });
+  const [dmBusy, setDmBusy] = useState(false);
   useEffect(() => { if (tab !== "activity" && tab !== "notes" && tab !== "attachments" && tab !== "calls") return; let live = true; fetch(`/api/leads/${l.leadId}/activities?assignmentId=${l.id}`).then((r) => r.json()).then((j) => live && setActsFor({ key: actKey, data: j.ok ? j.activities : [] })).catch(() => live && setActsFor({ key: actKey, data: [] })); return () => { live = false; }; }, [tab, l.leadId, l.id, actKey, activitiesNonce]);
   // Altus Contacts calls aren't pushed into the CRM by a webhook — they're pulled on demand, matched by this
   // lead's phone number so a call placed by ANY user (not just whoever opens this lead) still shows up here.
@@ -43,6 +48,29 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   useEffect(() => { if (tab !== "proposals") return; let live = true; fetch(`/api/leads/${l.leadId}/contacts?assignmentId=${l.id}`).then((r) => r.json()).then((j) => { if (!live) return; const rows = j.ok ? j.contacts as { id: string; first_name: string; last_name: string | null; email: string | null; phone: string | null; contact_type: "primary" | "secondary" }[] : []; setContactsFor({ key: actKey, data: rows.map((c) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || "Contact", email: c.email, phone: c.phone, contactType: c.contact_type })) }); }).catch(() => live && setContactsFor({ key: actKey, data: [] })); return () => { live = false; }; }, [tab, l.leadId, l.id, actKey]);
   const idx = list.findIndex((x) => x.id === l.id); const nav = (d: number) => { if (!list.length) return; onNav(list[(idx + d + list.length) % list.length]); };
   const save = async (field: string, value: string, patch: Partial<LeadRow>) => { const r = await v2UpdateField([{ leadId: l.leadId, assignmentId: l.id }], field, value); toast(r.message); if (r.ok) ctx.patchRows([l.id], patch); };
+  // Authority = "Decision Maker" defers the save until the mini-form below is submitted — picking it just
+  // opens the prompt; the select itself gets reverted to its previous value if the admin cancels.
+  const handleBantChange = async (field: BantField, value: string) => {
+    const prevValue = l.custom[bantCustomKey(field)] ?? "";
+    if (field === "a" && value === "Decision Maker") { setDmForm({ firstName: "", lastName: "", phone: "", email: "" }); setDmPrompt({ field, prevValue }); return; }
+    const r = await v2UpdateBant({ leadId: l.leadId, assignmentId: l.id }, field, value);
+    toast(r.message);
+    if (r.ok) ctx.patchRows([l.id], { custom: { ...l.custom, [bantCustomKey(field)]: value } });
+    else { const el = bantRefs.current[field]; if (el) el.value = prevValue; }
+  };
+  const submitDecisionMaker = async () => {
+    if (!dmPrompt || !dmForm.firstName.trim()) return;
+    setDmBusy(true);
+    const contactRes = await v2AddDecisionMakerContact({ leadId: l.leadId, assignmentId: l.id }, dmForm);
+    if (!contactRes.ok) { toast(contactRes.message); setDmBusy(false); return; }
+    const bantRes = await v2UpdateBant({ leadId: l.leadId, assignmentId: l.id }, dmPrompt.field, "Decision Maker");
+    setDmBusy(false);
+    toast(bantRes.ok ? contactRes.message : bantRes.message);
+    if (bantRes.ok) ctx.patchRows([l.id], { custom: { ...l.custom, [bantCustomKey(dmPrompt.field)]: "Decision Maker" } });
+    else { const el = bantRefs.current[dmPrompt.field]; if (el) el.value = dmPrompt.prevValue; }
+    setDmPrompt(null);
+  };
+  const cancelDecisionMaker = () => { if (dmPrompt) { const el = bantRefs.current[dmPrompt.field]; if (el) el.value = dmPrompt.prevValue; } setDmPrompt(null); };
   // Overview's text fields are uncontrolled (save-on-blur) — dictation just appends into the live DOM value via
   // a ref, same as typing would; the existing onBlur still picks it up whenever the field loses focus.
   const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
@@ -51,9 +79,9 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   // Some configs have a stray duplicate custom column for a field that's already a core field above
   // (same label, different field_key) — matched by label like classic CRM's own lead-no/acquisition-date checks.
   const DUP_CORE_LABELS = new Set(["lead no", "lead number", "last name", "company name"]);
-  // "resolution"-sourced columns (e.g. "Activity resolution") are configured fields too, just backed by the
-  // lead's current call resolution rather than custom_data — same treatment as "custom" ones here.
-  const customCols = ws.columns.filter((c) => (c.source === "custom" || c.source === "resolution") && c.key !== "company_name" && !DUP_CORE_LABELS.has(c.label.trim().toLowerCase()));
+  // "resolution"- and "bant"-sourced columns (e.g. "Activity resolution", "BANT") are configured fields too,
+  // just backed by something other than custom_data — same treatment as "custom" ones here.
+  const customCols = ws.columns.filter((c) => (c.source === "custom" || c.source === "resolution" || c.source === "bant") && c.key !== "company_name" && !DUP_CORE_LABELS.has(c.label.trim().toLowerCase()));
   const isFieldMissing = (lab: string, key: string, val: string) => miss.includes(lab) || (ws.hygiene.some((h) => h.key === key) && !val && ["followup", "negotiation", "closing"].includes(l.bucket));
   const [cp, setCp] = useState<{ ids: string[]; names: string } | null>(null);
   const hasChannelPartnerColumn = customCols.some((c) => isChannelPartnerColumn({ field_key: c.key, label: c.label }));
@@ -63,8 +91,8 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   // Prefer the per-lead, phone-matched call activities (any caller) over ws.calls, which only reflects
   // whichever team member's call history has separately been synced via the classic Call Report page.
   const calls = tab === "calls" && acts !== null
-    ? acts.filter((a) => a.activity_type === "call").map((a) => ({ t: a.metadata?.started_at ?? a.created_at, out: String(a.metadata?.direction ?? "").toLowerCase() !== "incoming", c: Boolean(a.metadata?.connected), d: Number(a.metadata?.duration_seconds) || 0 }))
-    : ws.calls.filter((c) => c.a === l.id);
+    ? acts.filter((a) => a.activity_type === "call").map((a) => ({ t: a.metadata?.started_at ?? a.created_at, out: String(a.metadata?.direction ?? "").toLowerCase() !== "incoming", c: Boolean(a.metadata?.connected), d: Number(a.metadata?.duration_seconds) || 0, by: a.actor }))
+    : ws.calls.filter((c) => c.a === l.id).map((c) => ({ ...c, by: personName(ws, c.u) }));
 
   return <Win onClose={onClose} title={<span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}><Avatar name={l.name} /><span>{l.name}{l.isNew && <span className="newtag">NEW</span>}<div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 400 }}>{l.company || "No company"} · {l.phone} · <Pill tone="slate">{displayProductCode(l.product)}</Pill> <Pill tone={b.tone}>{b.label}</Pill></div></span></span>}
     extra={<><button className="btn" disabled={dialling} onClick={() => { setDialling(true); dialLead(l.leadId, l.id, l.phone).then((r) => { toast(r.message); setDialling(false); }); }}><Icon n="phone" s="s" /> {dialling ? "Calling…" : "Call"}</button><a className="btn" href={`https://wa.me/91${l.phone.replace(/\D/g, "").slice(-10)}`} target="_blank" rel="noopener noreferrer"><Icon n="wa" s="s" /> WhatsApp</a>{l.email && <a className="btn" href={`mailto:${l.email}`}><Icon n="mail" s="s" /> Email</a>}<button className="btn" onClick={() => setGmeetOpen(true)} title="Schedule a Google Meet"><Icon n="video" s="s" /> Google Meet</button><button className="btn" onClick={() => setZoomOpen(true)} title="Schedule a Zoom meeting"><Icon n="video" s="s" /> Zoom</button>
@@ -88,6 +116,21 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
               <option value="">Not called</option>
               {ws.resolutions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
+          </div>;
+          if (c.source === "bant") return <div key={c.key} className="fld" style={{ gridColumn: "1 / -1" }}>
+            <label>{c.label}</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, marginTop: 4 }}>
+              {(Object.keys(BANT_FIELD_LABELS) as BantField[]).map((f) => {
+                const v = l.custom[bantCustomKey(f)] ?? ""; const bantStyle = bantToneStyle(v);
+                return <div key={f}>
+                  <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: "var(--faint)", letterSpacing: .5, textTransform: "uppercase", marginBottom: 3 }}>{f.toUpperCase()} · {BANT_FIELD_LABELS[f]}</span>
+                  <select ref={(el) => { bantRefs.current[f] = el; }} disabled={!ctx.canEdit} defaultValue={v} onChange={(e) => handleBantChange(f, e.target.value)} style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 6px", fontWeight: 700, ...bantStyle }}>
+                    <option value="">Select</option>
+                    {BANT_OPTIONS[f].map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>;
+              })}
+            </div>
           </div>;
           const val = l.custom[c.key] ?? ""; const isMiss = isFieldMissing(c.label, c.key, val); const disabled = !ctx.canEdit;
           const onSave = (next: string) => { if (next !== val) save(c.key, next, { custom: { ...l.custom, [c.key]: next } }); };
@@ -117,7 +160,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
         {acts == null ? <div className="empty">Loading…</div> : acts.filter((a) => tab === "activity" || a.activity_type === "note").map((a) => <div key={a.id} className="tli"><span className="tdot" style={{ background: TONES[a.activity_type === "call" ? "sky" : a.activity_type === "note" ? "peach" : "slate"].mk }} /><div style={{ flex: 1 }}><b>{a.activity_type}{a.note ? ` · ${a.note}` : ""}</b><div style={{ color: "var(--muted)", fontSize: 11.5 }}>{fdt(a.created_at)} · {a.actor}{a.follow_up_at ? ` · follow-up ${fdate(a.follow_up_at)}` : ""}</div></div>
           {a.note && <button type="button" className="ib" title="Add to calendar" onClick={() => setCalendarFor({ title: `${a.activity_type === "note" ? "Note" : "Follow-up"}: ${l.name}`, note: a.note ?? "", when: a.follow_up_at ? new Date(a.follow_up_at).toISOString().slice(0, 16) : "" })}><Icon n="cal" s="s" /></button>}
         </div>)}{acts && !acts.length && <div className="empty">No activity yet.</div>}</div>}
-      {tab === "calls" && <div style={{ padding: 12 }}>{acts === null ? <div className="empty">Loading…</div> : <><table className="t"><thead><tr><th>Date</th><th>Direction</th><th>Status</th><th>Duration</th></tr></thead><tbody>{calls.map((c, i) => <tr key={i}><td>{fdt(c.t)}</td><td>{c.out ? "Outgoing" : "Incoming"}</td><td><Pill tone={c.c ? "mint" : "rose"}>{c.c ? "Connected" : "Not connected"}</Pill></td><td>{c.d ? Math.round(c.d / 60) + " min" : "—"}</td></tr>)}</tbody></table>{!calls.length && <div className="empty">No calls found for this lead.</div>}</>}</div>}
+      {tab === "calls" && <div style={{ padding: 12 }}>{acts === null ? <div className="empty">Loading…</div> : <><table className="t"><thead><tr><th>Date</th><th>Direction</th><th>Status</th><th>Duration</th><th>Called by</th></tr></thead><tbody>{calls.map((c, i) => <tr key={i}><td>{fdt(c.t)}</td><td>{c.out ? "Outgoing" : "Incoming"}</td><td><Pill tone={c.c ? "mint" : "rose"}>{c.c ? "Connected" : "Not connected"}</Pill></td><td>{c.d ? Math.round(c.d / 60) + " min" : "—"}</td><td>{c.by || "—"}</td></tr>)}</tbody></table>{!calls.length && <div className="empty">No calls found for this lead.</div>}</>}</div>}
       {tab === "meetings" && <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>{meetingDetails === null ? <div className="empty">Loading…</div> : meetingDetails.map((m) => { const upcoming = new Date(m.startTime).getTime() > new Date(ws.generatedAt).getTime(); return <div key={m.id} className="panel" style={{ flexDirection: "column", gap: 6, padding: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}><Pill tone={upcoming ? "sky" : "mint"}>{upcoming ? "Upcoming" : "Done"}</Pill><b>{m.kind}</b><span>{m.topic}</span><span style={{ color: "var(--muted)" }}>{fdt(m.startTime)} · {m.durationMinutes}m</span></div>
         {m.notes && <div style={{ color: "var(--muted)", fontSize: 12.5 }}>{m.notes}</div>}
@@ -210,6 +253,14 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
       {calendarFor.note && <div style={{ color: "var(--muted)", fontSize: 12.5 }}>{calendarFor.note}</div>}
       <div className="fld"><label>Date and time</label><input type="datetime-local" value={calendarFor.when} onChange={(e) => setCalendarFor((c) => (c ? { ...c, when: e.target.value } : c))} /></div>
       <button type="button" className="btn red" disabled={!calendarFor.when} onClick={() => { const start = new Date(calendarFor.when); window.open(googleCalendarCreateUrl({ title: calendarFor.title, description: calendarFor.note, start, end: new Date(start.getTime() + 30 * 60_000) }), "_blank", "noopener"); setCalendarFor(null); }}><Icon n="cal" s="s" /> Add to Google Calendar</button>
+    </div></Win>}
+    {dmPrompt && <Win small title="Decision maker" onClose={cancelDecisionMaker}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Add the decision maker&apos;s details — they&apos;ll be saved as a Secondary Contact for this lead.</div>
+      <div className="fld"><label>First name</label><input value={dmForm.firstName} onChange={(e) => setDmForm((f) => ({ ...f, firstName: e.target.value }))} /></div>
+      <div className="fld"><label>Last name</label><input value={dmForm.lastName} onChange={(e) => setDmForm((f) => ({ ...f, lastName: e.target.value }))} /></div>
+      <div className="fld"><label>Contact (optional)</label><input value={dmForm.phone} onChange={(e) => setDmForm((f) => ({ ...f, phone: e.target.value }))} /></div>
+      <div className="fld"><label>Email (optional)</label><input value={dmForm.email} onChange={(e) => setDmForm((f) => ({ ...f, email: e.target.value }))} /></div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button type="button" className="btn" onClick={cancelDecisionMaker}>Cancel</button><button type="button" className="btn red" disabled={dmBusy || !dmForm.firstName.trim()} onClick={submitDecisionMaker}>{dmBusy ? "Saving…" : "Save"}</button></div>
     </div></Win>}
     {gmeetOpen && <GoogleMeetModal leadId={l.leadId} assignmentId={l.id} leadName={l.name} onClose={() => setGmeetOpen(false)} onScheduled={() => { ctx.refresh(); setMeetingsNonce((n) => n + 1); }} />}
     {zoomOpen && <ZoomMeetingModal leadId={l.leadId} assignmentId={l.id} leadName={l.name} onClose={() => setZoomOpen(false)} onScheduled={() => { ctx.refresh(); setMeetingsNonce((n) => n + 1); }} />}
