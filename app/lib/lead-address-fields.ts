@@ -13,6 +13,20 @@ export const LEAD_ADDRESS_FIELD_DEFINITIONS = [
 
 export type LeadAddressFieldKey = (typeof LEAD_ADDRESS_FIELD_DEFINITIONS)[number]["field_key"];
 
+/** Legacy Ambassador syncs stored address values in a labelled import summary. */
+export function addressFromAmbassadorSummary(summary: string): Partial<Record<LeadAddressFieldKey, string>> {
+  const entries: Record<string, string> = {};
+  for (const line of summary.split(/\r?\n/)) {
+    const match = /^(Address|Address line 1|Address line 2|City|State|Postal code|Landmark):\s*(.*)$/i.exec(line);
+    if (match && !entries[match[1].toLowerCase()]) entries[match[1].toLowerCase()] = match[2].trim();
+  }
+  return {
+    address_line_1: entries["address line 1"] || entries.address || "",
+    address_line_2: entries["address line 2"] || "",
+    city: entries.city || "", state: entries.state || "", pincode: entries["postal code"] || "", nearby_landmark: entries.landmark || "",
+  };
+}
+
 export const INDIA_CITIES_BY_STATE: Record<string, string[]> = {
   "Andaman and Nicobar Islands": ["Port Blair"],
   "Andhra Pradesh": ["Visakhapatnam", "Vijayawada", "Guntur", "Tirupati", "Kurnool"],

@@ -68,9 +68,10 @@ function BantCell({ row, canEdit }: { row: LeadRow; canEdit: boolean }) {
     try {
       const result = await v2AddDecisionMakerContact({ leadId: row.leadId, assignmentId: row.id }, contact);
       if (!result.ok) { toast(result.message); return; }
-      const updated = await v2UpdateBant({ leadId: row.leadId, assignmentId: row.id }, "a", "Confirmed");
+      const decisionMakerName = [contact.firstName.trim(), contact.lastName.trim()].filter(Boolean).join(" ");
+      const updated = await v2UpdateBant({ leadId: row.leadId, assignmentId: row.id }, "a", "Confirmed", decisionMakerName);
       toast(updated.ok ? result.message : updated.message);
-      if (updated.ok) ctx.patchRows([row.id], { custom: { ...row.custom, [bantCustomKey("a")]: "Confirmed" } });
+      if (updated.ok) ctx.patchRows(ctx.ws.rows.filter((r) => r.leadId === row.leadId).map((r) => r.id), { custom: { ...row.custom, [bantCustomKey("a")]: "Confirmed", bant_decision_maker_name: decisionMakerName } });
       setDecision(false);
     } catch { toast("Unable to add the decision maker."); } finally { setBusy(false); }
   };

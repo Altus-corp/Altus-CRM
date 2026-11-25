@@ -268,6 +268,12 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 .crm2 a{color:inherit;text-decoration:none}
 .crm2 .cact a{color:var(--faint)}.crm2 .cact a:hover{color:var(--red)}
 .crm2 .lw-grid{display:grid;grid-template-columns:1fr 300px;min-height:100%}
+.crm2 .overview-sections{min-width:0;padding:14px;display:flex;flex-direction:column;gap:10px}
+.crm2 .overview-section{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.crm2 .overview-section summary{cursor:pointer;padding:12px 14px;font-size:13px;font-weight:700;color:var(--ink);background:#fafbfc}
+.crm2 .overview-section[open] summary{border-bottom:1px solid var(--line)}
+.crm2 .overview-fields{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+@media(max-width:600px){.crm2 .overview-fields{grid-template-columns:1fr}.crm2 .overview-bant{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 .crm2 .lead-layout{display:flex;flex:1;min-height:0}
 .crm2 .lead-profile{width:250px;flex:none;overflow:auto;border-right:1px solid var(--line);background:#fcfcfc;padding:20px 16px}
 .crm2 .lead-profile-person{display:flex;align-items:flex-start;gap:10px}

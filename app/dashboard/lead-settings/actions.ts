@@ -4,6 +4,7 @@ import { revalidatePath, updateTag } from "next/cache";
 import { requireAdmin } from "@/app/lib/auth";
 import { createClient } from "@/app/lib/supabase/server";
 import { createAdminClient } from "@/app/lib/supabase/admin";
+import { isLeadAddressFieldKey } from "@/app/lib/lead-address-fields";
 import {
   attendanceAvailability,
   attendanceForEmail,
@@ -823,6 +824,9 @@ export async function editLeadTableColumn(formData: FormData) {
     throw new Error("Add at least one dropdown option.");
 
   const supabase = await createClient();
+  const { data: currentColumn, error: currentColumnError } = await supabase.from("lead_table_columns").select("field_key").eq("id", id).single();
+  if (currentColumnError || !currentColumn) throw new Error("Lead table column was not found.");
+  if (isLeadAddressFieldKey(currentColumn.field_key)) throw new Error("System address columns cannot be edited.");
   const { error } = await supabase
     .from("lead_table_columns")
     .update({
@@ -929,11 +933,11 @@ export async function deleteLeadTableColumn(formData: FormData) {
   const supabase = await createClient();
   const { data: column, error: readError } = await supabase
     .from("lead_table_columns")
-    .select("source, is_required")
+    .select("source, is_required, field_key")
     .eq("id", id)
     .single();
   if (readError || !column) throw new Error("Lead table column was not found.");
-  if (column.source !== "custom" || column.is_required)
+  if (column.source !== "custom" || column.is_required || isLeadAddressFieldKey(column.field_key))
     throw new Error("Only optional custom columns can be deleted.");
   const { error } = await supabase
     .from("lead_table_columns")

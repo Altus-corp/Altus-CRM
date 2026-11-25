@@ -3,6 +3,7 @@ import "server-only";
 // READ-ONLY. All writes go through the existing server actions in app/dashboard/leads/actions.ts.
 import { createAdminClient } from "@/app/lib/supabase/admin";
 import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
+import { addressFromAmbassadorSummary, LEAD_ADDRESS_FIELD_DEFINITIONS, leadAddressFieldKeyForColumn } from "@/app/lib/lead-address-fields";
 import { attendanceForEmail, getWmsAttendance, toWmsProfileImageUrl } from "@/app/lib/wms-attendance";
 import type { AppRole } from "@/app/lib/roles";
 import { DEFAULT_RESOLUTION_BUCKETS, type BucketKey } from "./config";
@@ -85,6 +86,12 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
   const prodById = new Map(products.map((p) => [p.id, p]));
   const stageById = new Map(products.flatMap((p) => p.stages.map((st) => [st.id, st.name] as const)));
   const columns = (colRows ?? []).map((c: Raw) => ({ key: s(c.field_key), label: s(c.label), source: s(c.source), fieldType: s(c.field_type) || "text", options: Array.isArray(c.options) ? c.options.map(String) : [], computedFrom: Array.isArray(c.computed_from) ? c.computed_from.map(String) : [] }));
+  const addressColumns = new Map(columns.map((c) => [leadAddressFieldKeyForColumn({ field_key: c.key, label: c.label }), c]).filter((entry): entry is [NonNullable<ReturnType<typeof leadAddressFieldKeyForColumn>>, typeof columns[number]] => entry[0] !== null));
+  for (const field of LEAD_ADDRESS_FIELD_DEFINITIONS) if (!addressColumns.has(field.field_key)) {
+    const column = { key: field.field_key, label: field.label, source: "custom", fieldType: field.field_type, options: [] as string[], computedFrom: [] as string[] };
+    columns.push(column); addressColumns.set(field.field_key, column);
+  }
+  const summaryKey = columns.find((c) => c.source === "custom" && c.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "") === "ambassadorimportsummary")?.key ?? "ambassador_import_summary";
   const hygiene: HygieneRule[] = hygRes.data?.length
     ? hygRes.data.map((h: Raw) => ({ key: s(h.field_key), label: s(h.label), fromBucket: (h.from_bucket as BucketKey) || "followup", weight: Number(h.weight) || 1 }))
     : [{ key: "email", label: "Email", fromBucket: "followup", weight: 2 }, ...columns.filter((c) => c.source === "custom").slice(0, 12).map((c) => ({ key: c.key, label: c.label, fromBucket: "followup" as BucketKey, weight: 1 }))];
@@ -138,6 +145,11 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
   const buildRow = (a: Raw): LeadRow => {
     const L = (a.lead ?? {}) as Raw; const cd = (L.custom_data ?? {}) as Record<string, unknown>;
     const custom: Record<string, string> = {}; Object.entries(cd).forEach(([k, v]) => { if (v != null && typeof v !== "object") custom[k] = String(v); });
+    const importedAddress = addressFromAmbassadorSummary(s(cd[summaryKey]));
+    for (const [field, value] of Object.entries(importedAddress)) {
+      const column = addressColumns.get(field as keyof typeof importedAddress);
+      if (column && !Object.prototype.hasOwnProperty.call(cd, column.key) && value) custom[column.key] = value;
+    }
     const res = a.latest_resolution_id ? resById.get(s(a.latest_resolution_id)) : undefined;
     const p = prodById.get(s(a.product_id)); const last = lastCall.get(s(a.id)) ?? null; const cc = callCount.get(s(a.id)) ?? [0, 0];
     const name = [L.first_name, L.last_name].filter(Boolean).join(" ");

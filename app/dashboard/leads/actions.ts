@@ -4340,14 +4340,14 @@ export async function updateLeadDetails(formData: FormData) {
       if (normalizedLabel === "spanco" && from !== to && to === "Abandoned") spancoAbandoned = true;
     }
   }
-    const addressValidation = validateLeadAddressLocation(
+    const addressValidation = ["country", "state", "city"].some((key) => key in addressValues) ? validateLeadAddressLocation(
       Object.fromEntries(
         LEAD_ADDRESS_FIELD_DEFINITIONS.map((field) => [
           field.field_key,
           addressValues[field.field_key] ?? String(customData[field.field_key] ?? ""),
         ]),
       ) as Partial<Record<LeadAddressFieldKey, string>>,
-    );
+    ) : null;
     if (addressValidation) throw new Error(addressValidation);
   if ("first_name" in update && !update.first_name)
     throw new Error("First name is required.");
@@ -4613,6 +4613,7 @@ export async function updateLeadBantField(formData: FormData) {
   const from = String(customData[key] ?? "");
   customData[key] = value;
   if (detailKey) customData[detailKey] = detail;
+  if (field === "a" && value === "Confirmed" && detail) customData.bant_decision_maker_name = detail.slice(0, 241);
   const { error } = await supabase
     .from("leads")
     .update({ custom_data: customData, updated_at: new Date().toISOString() })
