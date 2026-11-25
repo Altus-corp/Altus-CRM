@@ -3830,18 +3830,29 @@ export async function syncLeadCallTranscripts(
     { data: lead, error: leadError },
     { data: authResult, error: authError },
     { data: leadAssignments, error: assignmentsError },
+    { data: contacts, error: contactsError },
   ] = await Promise.all([
-    supabase.from("leads").select("phone").eq("id", leadId).single(),
+    supabase.from("leads").select("phone, first_name, last_name").eq("id", leadId).single(),
     supabase.auth.admin.getUserById(userId),
     supabase
       .from("lead_product_assignments")
       .select("id")
       .eq("lead_id", leadId)
       .eq("is_active", true),
+    supabase.from("lead_contacts").select("phone, first_name, last_name").eq("lead_id", leadId),
   ]);
   const phone = normalizePhone(lead?.phone);
+  const contactNames = new Map<string, string[]>();
+  for (const contact of [lead, ...(contacts ?? [])]) {
+    if (!contact) continue;
+    const number = normalizePhone(contact.phone);
+    const name = [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim();
+    if (number && name) contactNames.set(number, [...(contactNames.get(number) ?? []), name]);
+  }
   const email = authResult.user?.email?.trim().toLowerCase();
-  if (leadError || !phone)
+  const secondaryPhones = [...new Set((contacts ?? []).map((c) => normalizePhone(c.phone)).filter((p) => p && p !== phone))];
+  if (contactsError) return { ok: false, message: "Unable to load this lead's contacts for call matching." };
+  if (leadError || (!phone && !secondaryPhones.length))
     return {
       ok: false,
       message:
@@ -3856,13 +3867,26 @@ export async function syncLeadCallTranscripts(
   const automaticAssignmentId =
     leadAssignments?.length === 1 ? leadAssignments[0].id : null;
   try {
+    // A secondary number may be shared by multiple leads. Only match it by phone when it belongs to
+    // this lead alone; otherwise a call or transcript could be exposed or reassigned to the wrong lead.
+    const safePhones = new Set(phone ? [phone] : []);
+    let skippedContacts = 0;
+    for (const candidate of secondaryPhones) {
+      const pattern = `%${candidate.split("").join("%")}%`;
+      const [{ data: otherContacts, error: contactLookupError }, { data: otherLeads, error: leadLookupError }] = await Promise.all([
+        supabase.from("lead_contacts").select("lead_id, phone").ilike("phone", pattern).limit(1001),
+        supabase.from("leads").select("id").eq("phone_key", candidate).limit(2),
+      ]);
+      if (contactLookupError || leadLookupError || (otherContacts?.length ?? 0) >= 1001 || (otherContacts ?? []).some((c) => c.lead_id !== leadId && normalizePhone(c.phone) === candidate) || (otherLeads ?? []).some((l) => l.id !== leadId)) { skippedContacts++; continue; }
+      safePhones.add(candidate);
+    }
     const calls = await altusContactsRequest<AltusCall[]>("/calls?limit=100");
     // Match by phone number alone, not by whoever is viewing this lead right now: any CRM user may have
     // placed the call (e.g. an admin calling a lead assigned to someone else), and the transcript must still
     // land on this lead no matter who later opens it to trigger this sync.
     const matched = (calls.data ?? []).filter(
       (call) =>
-        callHasPhone(call, phone) &&
+        [...safePhones].some((number) => callHasPhone(call, number)) &&
         call.id !== undefined &&
         call.id !== null,
     );
@@ -3870,15 +3894,16 @@ export async function syncLeadCallTranscripts(
       return {
         ok: true,
         message:
-          "No Altus Contact calls matched this lead's phone number yet.",
+          skippedContacts ? "No calls matched. A secondary contact number could not be matched safely because it may be shared or could not be checked." : "No Altus Contact calls matched this lead's phone numbers yet.",
         synced: 0,
       };
     const callerAttribution = await resolveAltusCallerAttribution(matched.map((call) => call.user));
     const callIds = matched.map((call) => String(call.id));
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("lead_call_transcripts")
-      .select("altus_call_id")
+      .select("altus_call_id, lead_id, lead_product_assignment_id")
       .in("altus_call_id", callIds);
+    if (existingError) throw new Error("Unable to check existing call transcripts.");
     const existingIds = new Set(
       (existing ?? []).map((item) => item.altus_call_id),
     );
@@ -3886,6 +3911,8 @@ export async function syncLeadCallTranscripts(
     let available = 0;
     for (const call of matched) {
       const callId = String(call.id);
+      const existingTranscript = (existing ?? []).find((item) => item.altus_call_id === callId);
+      if (existingTranscript && existingTranscript.lead_id !== leadId) continue;
       const detailed = await altusContactsRequest<AltusCall>(
         `/calls/${encodeURIComponent(callId)}`,
       );
@@ -3893,7 +3920,7 @@ export async function syncLeadCallTranscripts(
       const transcript = extractAltusTranscript(detailedCall);
       let { data: existingActivity } = await supabase
         .from("lead_activities")
-        .select("id")
+        .select("id, lead_product_assignment_id, metadata")
         .eq("lead_id", leadId)
         .eq("activity_type", "call")
         .contains("metadata", { source: "altus_contacts", call_id: callId })
@@ -3901,7 +3928,7 @@ export async function syncLeadCallTranscripts(
       if (!existingActivity) {
         const { data: pendingDial } = await supabase
           .from("lead_activities")
-          .select("id")
+          .select("id, lead_product_assignment_id, metadata")
           .eq("lead_id", leadId)
           .eq("activity_type", "call")
           .contains("metadata", {
@@ -3911,7 +3938,10 @@ export async function syncLeadCallTranscripts(
           .maybeSingle();
         existingActivity = pendingDial;
       }
+      const matchedPhone = [...safePhones].find((number) => callHasPhone(detailedCall, number)) ?? [...safePhones].find((number) => callHasPhone(call, number)) ?? null;
+      const matchedNames = matchedPhone ? [...new Set(contactNames.get(matchedPhone) ?? [])] : [];
       const metadata = {
+        ...(existingActivity?.metadata && typeof existingActivity.metadata === "object" ? existingActivity.metadata : {}),
         source: "altus_contacts",
         call_id: callId,
         direction: detailedCall.direction ?? null,
@@ -3920,6 +3950,8 @@ export async function syncLeadCallTranscripts(
         started_at: detailedCall.started_at ?? detailedCall.created_at ?? null,
         connected: isConnected(detailedCall),
         transcript: transcript || null,
+        matched_phone: matchedPhone,
+        contact_name: matchedNames.length === 1 ? matchedNames[0] : null,
       };
       if (existingActivity) {
         const { error: activityError } = await supabase
@@ -3948,26 +3980,27 @@ export async function syncLeadCallTranscripts(
       }
       if (!transcript) continue;
       available += 1;
-      const { error } = await supabase.from("lead_call_transcripts").upsert(
-        {
+      const transcriptPayload = {
           lead_id: leadId,
-          lead_product_assignment_id: automaticAssignmentId,
+          lead_product_assignment_id: existingTranscript ? existingTranscript.lead_product_assignment_id : existingActivity?.lead_product_assignment_id ?? automaticAssignmentId,
           altus_call_id: callId,
           transcript_text: transcript,
           source_payload: detailed.data ?? call,
           updated_at: new Date().toISOString(),
-        },
-        { onConflict: "altus_call_id" },
-      );
+      };
+      const { error } = existingTranscript
+        ? await supabase.from("lead_call_transcripts").update(transcriptPayload).eq("altus_call_id", callId).eq("lead_id", leadId)
+        : await supabase.from("lead_call_transcripts").insert(transcriptPayload);
+      if (error?.code === "23505") continue; // Another sync claimed the call; never reassign it.
       if (error) throw new Error(error.message);
       if (!existingIds.has(callId)) synced += 1;
     }
     revalidatePath("/dashboard/leads");
     return {
       ok: true,
-      message: available
+      message: (available
         ? `${matched.length} matching call${matched.length === 1 ? "" : "s"} checked; ${available} transcript${available === 1 ? "" : "s"} available, ${synced} newly saved.`
-        : `${matched.length} matching call${matched.length === 1 ? "" : "s"} found, but Altus Contacts has not finished a transcript for them yet.`,
+        : `${matched.length} matching call${matched.length === 1 ? "" : "s"} found, but Altus Contacts has not finished a transcript for them yet.`) + (skippedContacts ? " Some secondary numbers could not be matched safely." : ""),
       synced,
     };
   } catch (error) {

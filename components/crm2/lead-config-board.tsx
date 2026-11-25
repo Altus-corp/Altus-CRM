@@ -36,7 +36,7 @@ export function AdminColumnsPage() {
   useEffect(() => { let live = true; v2LeadColumns().then((d) => live && setData(d)); return () => { live = false; }; }, [gen]);
   if (!data) return <Loading />;
   if (!data.ready) return <Err text="Columns management is not available. Run the lead-table-columns database migration first." />;
-  return <div style={{ display: "flex", flexDirection: "column", gap: 14 }}><Refresh onClick={() => setGen((g) => g + 1)} /><ColumnsManagement columns={data.columns} /></div>;
+  return <div style={{ display: "flex", flexDirection: "column", gap: 14 }}><Refresh onClick={() => setGen((g) => g + 1)} /><ColumnsManagement columns={data.columns} showLifeCycleLabel /></div>;
 }
 
 export function AdminProductsPage() {

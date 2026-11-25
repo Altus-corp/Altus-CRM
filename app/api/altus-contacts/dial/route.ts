@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     if (response.data?.id) await supabase.from("altus_contact_requests").insert({ request_id: response.data.id, user_id: userId, kind: "dial" });
     const leadId = typeof input.leadId === "string" ? input.leadId : "";
     const assignmentId = typeof input.assignmentId === "string" ? input.assignmentId : "";
-    if (leadId && assignmentId) await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "call", created_by: userId, metadata: { source: "altus_contacts", request_id: response.data?.id ?? null } });
+    if (leadId && assignmentId) await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "call", created_by: userId, metadata: { source: "altus_contacts", request_id: response.data?.id ?? null, dialled_number: number } });
     return Response.json(response, { status: 202 });
   } catch (error) {
     return altusContactsErrorResponse(error);
