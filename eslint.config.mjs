@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Separate Expo/React Native project with its own lint setup ("npx expo lint" inside it).
+    "altus-crm-mobile/**",
   ]),
 ]);
 

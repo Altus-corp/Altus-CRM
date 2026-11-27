@@ -10,11 +10,11 @@ import { GoogleMeetModal } from "@/components/leads/google-meet-modal";
 import { googleCalendarCreateUrl } from "@/app/lib/google-calendar-link";
 import { uploadLeadAttachment, type UploadedLeadFile } from "@/app/lib/lead-attachments-client";
 import { VoiceDictationButton } from "@/components/leads/voice-dictation-button";
-import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantDisplayValue, bantToneStyle, type BantField } from "@/app/lib/bant";
+import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantToneStyle, type BantField } from "@/app/lib/bant";
 import { ContactsTab } from "./ContactsTab";
 import { BantConfirm } from "./BantConfirm";
 import { LEAD_ADDRESS_COUNTRIES, leadAddressFieldKeyForColumn, locationCities, locationStates } from "@/app/lib/lead-address-fields";
-import { computedFieldValue, daysSince, missingFields, nextAction, personName, priorityScore, winProb } from "@/app/lib/crm2/metrics";
+import { computedFieldValue, daysSince, missingFields, personName } from "@/app/lib/crm2/metrics";
 import type { LeadRow } from "@/app/lib/crm2/types";
 import { v2AddAttachment, v2AddDecisionMakerContact, v2AddNote, v2AddProduct, v2ChangeLeadType, v2CreateProposal, v2LeadChannelPartners, v2LeadProductAssignments, v2RemoveProduct, v2LogCall, v2LogProposalWhatsAppShare, v2SendProposalEmail, v2SetProposalApproval, v2SyncLeadCalls, v2UpdateBant, v2UpdateField } from "@/app/crm/actions";
 import { useCrm } from "./context";
@@ -25,7 +25,7 @@ type Activity = { id: string; activity_type: string; note: string | null; create
 type MeetingDetail = { id: string; kind: "Zoom" | "Google Meet"; topic: string; notes: string | null; startTime: string; durationMinutes: number; joinUrl: string; calendarUrl?: string | null; recordingUrl: string | null; transcriptText: string | null; transcriptUrl: string | null };
 type ProposalRow = { id: string; fileUrl: string; fileName: string; fileSize: number | null; details: string | null; approved: boolean; approvedAt: string | null; createdAt: string };
 type ContactOpt = { id: string; name: string; email: string | null; phone: string | null; contactType: "primary" | "secondary" };
-const TABS = [["overview", "Overview"], ["products", "Products & Life Cycle"], ["activity", "Activity"], ["calls", "Calls"], ["meetings", "Meetings"], ["notes", "Notes"], ["ai", "AI insights"], ["contacts", "Add Contact"], ["attachments", "Add Attachment"], ["proposals", "Add Proposal"]] as const;
+const TABS = [["overview", "Overview"], ["products", "Products & Life Cycle"], ["activity", "Activity"], ["calls", "Calls"], ["meetings", "Meetings"], ["notes", "Notes"], ["contacts", "Add Contact"], ["attachments", "Add Attachment"], ["proposals", "Add Proposal"]] as const;
 
 export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: LeadRow[]; onClose: () => void; onNav: (r: LeadRow) => void }) {
   const ctx = useCrm(); const { ws } = ctx; const toast = useToast();
@@ -60,8 +60,10 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   // Confirmed authority defers the save until the decision-maker form is submitted — picking it just
   // opens the prompt; the select itself gets reverted to its previous value if the admin cancels.
   const handleBantChange = async (field: BantField, value: string) => {
-    const prevValue = bantDisplayValue(field, l.custom[bantCustomKey(field)] ?? "");
-    if (field === "a" && value === "Confirmed") { setDmForm({ firstName: "", lastName: "", phone: "", email: "" }); setDmPrompt({ field, prevValue }); return; }
+    const prevValue = l.custom[bantCustomKey(field)] ?? "";
+    // Only ask for the decision maker when this lead doesn't already have one on file — re-confirming
+    // Authority (e.g. after toggling it to Assumed and back) must not re-prompt for details it already has.
+    if (field === "a" && value === "Confirmed" && !l.custom.bant_decision_maker_name) { setDmForm({ firstName: "", lastName: "", phone: "", email: "" }); setDmPrompt({ field, prevValue }); return; }
     if (field !== "a" && value === "Confirmed") { setBantPrompt({ field, prevValue }); return; }
     const r = await v2UpdateBant({ leadId: l.leadId, assignmentId: l.id }, field, value);
     toast(r.message);
@@ -197,7 +199,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
             <label>{c.label}</label>
             <div className="overview-bant" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 8, marginTop: 4 }}>
               {(Object.keys(BANT_FIELD_LABELS) as BantField[]).map((f) => {
-                const v = bantDisplayValue(f, l.custom[bantCustomKey(f)] ?? ""); const bantStyle = bantToneStyle(v);
+                const v = l.custom[bantCustomKey(f)] ?? ""; const bantStyle = bantToneStyle(v);
                 return <div key={f}>
                   <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: "var(--faint)", letterSpacing: .5, textTransform: "uppercase", marginBottom: 3 }}>{f.toUpperCase()} · {BANT_FIELD_LABELS[f]}</span>
                   <select ref={(el) => { bantRefs.current[f] = el; }} disabled={!ctx.canEdit} defaultValue={v} onChange={(e) => handleBantChange(f, e.target.value)} style={{ width: "100%", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 6px", fontWeight: 700, ...bantStyle }}>
@@ -205,7 +207,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
                     {BANT_OPTIONS[f].map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                   {v === "Confirmed" && f !== "a" && <><div style={{ marginTop: 5, fontSize: 11, overflowWrap: "anywhere" }}>{(f === "b" ? l.custom.bant_budget_range : f === "n" ? l.custom.bant_need_note : l.custom[ws.columns.find((col) => normal(col.label) === "expectedclosing")?.key ?? ""]) || "—"}</div><button type="button" className="btn ghost sm" disabled={!ctx.canEdit} onClick={() => setBantPrompt({ field: f, prevValue: v })}>Edit details</button></>}
-                  {v === "Confirmed" && f === "a" && <div style={{ marginTop: 5, fontSize: 11, overflowWrap: "anywhere" }}>{l.custom.bant_decision_maker_name || "See contacts"}</div>}
+                  {v === "Confirmed" && f === "a" && <><div style={{ marginTop: 5, fontSize: 11, overflowWrap: "anywhere" }}>{l.custom.bant_decision_maker_name || "See contacts"}</div><button type="button" className="btn ghost sm" disabled={!ctx.canEdit} onClick={() => { setDmForm({ firstName: "", lastName: "", phone: "", email: "" }); setDmPrompt({ field: "a", prevValue: v }); }}>Edit details</button></>}
                 </div>;
               })}
             </div>
@@ -228,9 +230,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
         {section.title === "Address" && section.fields.filter((key) => !customCols.some((c) => customKey(c) === key)).map((key) => <div className="fld" key={key} style={{ order: section.fields.indexOf(key) }}><label>{({ addressline1: "Address Line 1", addressline2: "Address Line 2", addressline3: "Address Line 3", addressline4: "Address Line 4", nearbylandmark: "Nearby Landmark", city: "City", pincode: "Pin Code", country: "Country", state: "State", googlepinattachment: "Google Pin Attachment" } as Record<string, string>)[key]}</label><span style={{ color: "var(--muted)", fontSize: 12 }}>Not configured</span></div>)}
       </div></details>)}
       </div>
-        <div className="lw-rail"><div className="tile" style={toneStyle(b.tone)}><span className="tl1"><Icon n="fire" s="s" /> Priority stage</span><span className="tv">{b.label}</span><span className="ts">Focus score {priorityScore(l)} · {l.stage}</span></div>
-          <div className="tile" style={toneStyle("aqua")}><span className="tl1"><Icon n="spark" s="s" /> AI read</span><span className="tv">{winProb(l)}% win</span><span className="ts">{nextAction(l)}</span></div>
-          <div className="tile" style={toneStyle(miss.length ? "butter" : "mint")}><span className="tl1"><Icon n="db" s="s" /> Data hygiene</span><span className="tv">{miss.length ? `${miss.length} empty` : "Complete"}</span><span className="ts">{miss.join(", ") || "All key fields filled"}</span></div>
+        <div className="lw-rail"><div className="tile" style={toneStyle(miss.length ? "butter" : "mint")}><span className="tl1"><Icon n="db" s="s" /> Data hygiene</span><span className="tv">{miss.length ? `${miss.length} empty` : "Complete"}</span><span className="ts">{miss.join(", ") || "All key fields filled"}</span></div>
           <div className="fld"><label>Product</label><select value={l.id} onChange={(e) => { const r = others.find((o) => o.id === e.target.value); if (r) onNav(r); }}>{others.map((o) => <option key={o.id} value={o.id}>{displayProductCode(o.product)}</option>)}</select>
             {ctx.canEdit && <div style={{ marginTop: 6 }}><AddMoreProducts leadId={l.leadId} assignmentId={l.id} already={others.map((o) => o.product)} onAdded={() => ctx.refresh()} /></div>}</div>
           </div></div>}
@@ -251,7 +251,6 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
           {m.transcriptText ? <button type="button" className="btn" onClick={() => setTranscriptFor(m)}><Icon n="note" s="s" /> View transcript</button> : m.transcriptUrl ? <a className="btn" href={m.transcriptUrl} target="_blank" rel="noopener noreferrer"><Icon n="note" s="s" /> View transcript</a> : !upcoming && <span style={{ color: "var(--muted)", fontSize: 12.5, alignSelf: "center" }}>Transcript not available yet</span>}
         </div>
       </div>; })}{meetingDetails !== null && !meetingDetails.length && <div className="empty">No meetings. Schedule a Zoom or Google Meet from the header above.</div>}</div>}
-      {tab === "ai" && <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10 }}>{([["Win probability", winProb(l) + "%", "mint", "Stage, recency and connects"], ["Next best action", nextAction(l), "aqua", "Do this on the next touch"], ["Risk", (daysSince(l.lastCalledAt) ?? 99) > 7 ? `Going cold — ${l.lastCalledAt ? daysSince(l.lastCalledAt) + " days since last call" : "never called"}` : "Low", (daysSince(l.lastCalledAt) ?? 99) > 7 ? "rose" : "sage", "Recency & follow-up discipline"], ["Missing data", miss.join(", ") || "None", miss.length ? "butter" : "mint", "Fill before the next stage"]] as const).map(([t, v, tn, s]) => <div key={t} className="ins" style={{ borderColor: TONES[tn].bd }}><span className="cat" style={{ color: TONES[tn].ink }}><Icon n="spark" s="s" /> {t}</span><h4>{v}</h4><p>{s}</p></div>)}</div>}
       {tab === "contacts" && <ContactsTab leadId={l.leadId} assignmentId={l.id} ws={ws} readOnly={!ctx.canEdit} />}
       {tab === "attachments" && <div className="tl">
         {ctx.canEdit && <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
@@ -329,7 +328,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
     </div>
     </div></div>
     {logOpen && <LogCall onClose={() => setLogOpen(false)} onSave={async (resId, fu, n) => { const r = await v2LogCall({ leadId: l.leadId, assignmentId: l.id }, resId, fu, n); toast(r.message); if (r.ok) { const x = ws.resolutions.find((q) => q.id === resId); ctx.patchRows([l.id], { resolutionId: resId, resolution: x?.name ?? null, bucket: x?.bucket ?? l.bucket, lastCalledAt: new Date().toISOString(), nextFollowUp: fu || l.nextFollowUp }); setLogOpen(false); } }} />}
-    {bantPrompt && <BantConfirm key={`${l.id}-${bantPrompt.field}`} field={bantPrompt.field} row={l} ws={ws} onClose={() => { const el = bantRefs.current[bantPrompt.field]; if (el) el.value = bantDisplayValue(bantPrompt.field, l.custom[bantCustomKey(bantPrompt.field)] ?? ""); setBantPrompt(null); }} onSave={async (detail, key) => { try { const result = await v2UpdateBant({ leadId: l.leadId, assignmentId: l.id }, bantPrompt.field, "Confirmed", detail); toast(result.message); if (result.ok) { ctx.patchRows(ws.rows.filter((r) => r.leadId === l.leadId).map((r) => r.id), { custom: { ...l.custom, [bantCustomKey(bantPrompt.field)]: "Confirmed", [key]: detail } }); const el = bantRefs.current[bantPrompt.field]; if (el) el.value = "Confirmed"; setBantPrompt(null); } return result.ok; } catch { toast("Unable to update BANT."); return false; } }} />}
+    {bantPrompt && <BantConfirm key={`${l.id}-${bantPrompt.field}`} field={bantPrompt.field} row={l} ws={ws} onClose={() => { const el = bantRefs.current[bantPrompt.field]; if (el) el.value = l.custom[bantCustomKey(bantPrompt.field)] ?? ""; setBantPrompt(null); }} onSave={async (detail, key) => { try { const result = await v2UpdateBant({ leadId: l.leadId, assignmentId: l.id }, bantPrompt.field, "Confirmed", detail); toast(result.message); if (result.ok) { ctx.patchRows(ws.rows.filter((r) => r.leadId === l.leadId).map((r) => r.id), { custom: { ...l.custom, [bantCustomKey(bantPrompt.field)]: "Confirmed", [key]: detail } }); const el = bantRefs.current[bantPrompt.field]; if (el) el.value = "Confirmed"; setBantPrompt(null); } return result.ok; } catch { toast("Unable to update BANT."); return false; } }} />}
     {transcriptFor && <Win small title={`Transcript · ${transcriptFor.kind} · ${transcriptFor.topic}`} onClose={() => setTranscriptFor(null)}><div className="win-b" style={{ padding: 14 }}><pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, margin: 0 }}>{transcriptFor.transcriptText}</pre></div></Win>}
     {calendarFor && <Win small title="Add to calendar" onClose={() => setCalendarFor(null)}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
       <div><b>{calendarFor.title}</b></div>

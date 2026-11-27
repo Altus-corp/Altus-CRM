@@ -14,11 +14,6 @@ export function bantCustomKey(field: BantField) {
   return `bant_${field}`;
 }
 
-/** Older records used "Decision Maker" for the same confirmed authority state. */
-export function bantDisplayValue(field: BantField, value: string) {
-  return field === "a" && value === "Decision Maker" ? "Confirmed" : value;
-}
-
 // Fixed tone per value rather than a hash, since each sub-field has a small, known option set.
 export const BANT_TONE: Record<string, "yellow" | "grey" | "green"> = {
   Assumed: "yellow",

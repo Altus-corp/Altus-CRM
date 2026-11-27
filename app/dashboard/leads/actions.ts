@@ -2331,6 +2331,14 @@ export async function createManualLead(
     if (roleResult.error || profileResult.error || !roleResult.data || !profileResult.data)
       return { ok: false, message: "Choose an active Ambassador." };
   }
+  // Selecting an Ambassador routes the new lead straight to that Ambassador's own
+  // CRM sales person, instead of the staff member who happened to type it in.
+  let leadOwnerId = user.userId;
+  if (ambassadorId) {
+    const { data: resolvedOwnerId } = await supabase.rpc("resolve_ambassador_sales_owner", { target_ambassador_id: ambassadorId });
+    if (resolvedOwnerId) leadOwnerId = resolvedOwnerId;
+  }
+  const routedToAmbassadorOwner = Boolean(ambassadorId) && leadOwnerId !== user.userId;
   if (stageId) {
     const { data: stage } = await supabase
       .from("lead_stages")
@@ -2355,7 +2363,7 @@ export async function createManualLead(
       phone: phone || null,
       product_id: productId,
       stage_id: stageId || null,
-      assigned_to: user.userId,
+      assigned_to: leadOwnerId,
       assigned_at: assignedAt,
       created_by: user.userId,
       lead_database: "leads",
@@ -2412,6 +2420,8 @@ export async function createManualLead(
       activity_type: "lead_created",
       note: isAmbassadorWorkspace(user.roles)
         ? `Lead manually added by an Ambassador and routed to the Relationship Manager for ${[...productsById.values()].map((item) => item.code).join(", ")}.`
+        : routedToAmbassadorOwner
+        ? `Lead manually added and routed to the selected Ambassador's sales person for ${[...productsById.values()].map((item) => item.code).join(", ")}.`
         : `Lead manually added and assigned to the creating CRM user for ${[...productsById.values()].map((item) => item.code).join(", ")}.`,
       metadata: {
         source: "manual_lead_creation",
@@ -2422,6 +2432,7 @@ export async function createManualLead(
       created_by: user.userId,
     });
   if (activityError) return { ok: false, message: activityError.message };
+  if (routedToAmbassadorOwner) await notifyLeadAssignment({ userId: leadOwnerId, count: 1, source: "manual" });
   revalidatePath("/dashboard/leads");
   revalidatePath("/dashboard/uncategorized-leads");
   if (ambassadorId) revalidatePath("/dashboard/my-ambassador");
@@ -2430,6 +2441,8 @@ export async function createManualLead(
     ok: true,
     message: isAmbassadorWorkspace(user.roles)
       ? "Lead created and routed to your Relationship Manager."
+      : routedToAmbassadorOwner
+      ? "Lead created and routed to the selected Ambassador's sales person. An admin can reassign it later if needed."
       : "Lead created and assigned to you.",
   };
 }
@@ -3086,8 +3099,12 @@ export async function addProductToLeadDetails(formData: FormData) {
   revalidatePath("/dashboard/team-leads");
 }
 
-async function getEditableLead(leadId: string, assignmentId: string) {
-  const user = await requireUser();
+// presetUser lets a caller that has already authenticated outside the cookie-based web session
+// (currently: the mobile Bearer-token API routes under app/api/mobile/*) reuse this exact same
+// ownership/scope check instead of re-deriving it — requireUser() only works against a cookie
+// session, so it cannot run inside a request authenticated by a bearer token.
+async function getEditableLead(leadId: string, assignmentId: string, presetUser?: Awaited<ReturnType<typeof requireUser>>) {
+  const user = presetUser ?? await requireUser();
   if (
     !user.roles.includes("admin") &&
     !user.roles.some(
@@ -3143,7 +3160,7 @@ export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok:
   const assignmentId = String(formData.get("assignmentId") ?? "");
   const ids = [...new Set(formData.getAll("ambassadorIds").map(String))];
   if (ids.length > 100 || ids.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) return { ok: false, message: "Choose valid Ambassadors." };
-  const { supabase } = await getEditableLead(leadId, assignmentId);
+  const { supabase, lead: assignment } = await getEditableLead(leadId, assignmentId);
   if (ids.length) {
     const [roles, profiles] = await Promise.all([
       supabase.from("user_roles").select("user_id").eq("role", "ambassador").in("user_id", ids),
@@ -3174,6 +3191,32 @@ export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok:
     })));
     if (error) return { ok: false, message: "Channel Partners could not be updated. Please retry." };
   }
+  // A newly linked Ambassador routes this product work to that Ambassador's own CRM sales
+  // person, same as picking an Ambassador when the lead is first created. An admin can still
+  // reassign it afterwards through the normal reassignment tools.
+  let routedToAmbassadorOwner = false;
+  for (const ambassadorId of addedIds) {
+    const { data: resolvedOwnerId } = await supabase.rpc("resolve_ambassador_sales_owner", { target_ambassador_id: ambassadorId });
+    if (!resolvedOwnerId || resolvedOwnerId === assignment.assigned_to) continue;
+    const assignedAt = new Date().toISOString();
+    const { error: routeError } = await supabase
+      .from("lead_product_assignments")
+      .update({ assigned_to: resolvedOwnerId, assigned_at: assignedAt, focused_on: indiaToday(), assignment_origin: "manual" })
+      .eq("id", assignmentId);
+    if (routeError) return { ok: false, message: "Channel Partners were saved, but routing to the Ambassador's sales person failed. Please reassign manually." };
+    await supabase.from("leads").update({ assigned_to: resolvedOwnerId, assigned_at: assignedAt }).eq("id", leadId);
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      lead_product_assignment_id: assignmentId,
+      activity_type: "assigned",
+      note: "Routed to the linked Ambassador's sales person.",
+      metadata: { assigned_to: resolvedOwnerId, ambassador_id: ambassadorId, source: "ambassador_channel_partner" },
+      created_by: user.userId,
+    });
+    await notifyLeadAssignment({ userId: resolvedOwnerId, count: 1, source: "manual" });
+    routedToAmbassadorOwner = true;
+    break;
+  }
   // Keep the original lightweight field in sync for older displays and exports.
   const { error: legacyError } = await supabase.from("leads").update({ channel_partner_ids: ids }).eq("id", leadId);
   if (legacyError && !["42703", "PGRST204"].includes(legacyError.code ?? ""))
@@ -3182,7 +3225,7 @@ export async function saveLeadChannelPartners(formData: FormData): Promise<{ ok:
   revalidatePath("/dashboard/team-leads");
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/products", "layout");
-  return { ok: true, message: "Channel Partners saved." };
+  return { ok: true, message: routedToAmbassadorOwner ? "Channel Partners saved and the lead was routed to the Ambassador's sales person." : "Channel Partners saved." };
 }
 
 export async function saveLeadSeniorAmbassador(formData: FormData): Promise<{ ok: boolean; message: string }> {
@@ -3242,19 +3285,20 @@ export async function createLeadActivity(formData: FormData) {
   revalidatePath("/dashboard/leads");
   revalidatePath("/dashboard/team-leads");
 }
-export async function createLeadNote(formData: FormData) {
+export async function createLeadNote(formData: FormData, presetUser?: Awaited<ReturnType<typeof requireUser>>) {
   const leadId = String(formData.get("leadId") ?? "");
   const assignmentId = String(formData.get("assignmentId") ?? "");
   const note = String(formData.get("note") ?? "").trim();
   if (!leadId || !note || note.length > 2000)
     throw new Error("Write a note of up to 2,000 characters.");
-  const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+  const { supabase, userId } = await getEditableLead(leadId, assignmentId, presetUser);
   const { error } = await supabase.from("lead_activities").insert({
     lead_id: leadId,
     lead_product_assignment_id: assignmentId,
     activity_type: "note",
     note,
     created_by: userId,
+    source: presetUser ? "mobile" : null,
   });
   if (error) throw new Error(error.message);
   revalidatePath("/dashboard/leads");
@@ -4264,6 +4308,7 @@ export async function updateLeadDetails(formData: FormData) {
     // specific here (Call Resolution "Abandoned" releases the lead and surfaces it in admin's DND Master) —
     // moving SPANCO to Abandoned should move the lead there too, not sit as an unrelated label.
     let spancoAbandoned = false;
+  let demoGivenSelected = false;
   for (const input of values) {
     const key = typeof input.key === "string" ? input.key : "";
     const value = typeof input.value === "string" ? input.value.trim() : "";
@@ -4337,6 +4382,7 @@ export async function updateLeadDetails(formData: FormData) {
       const to = isCheckbox ? (value === "true" ? "Yes" : "No") : value;
       if (from !== to) changes.push({ label: column.label, from, to });
       customData[key] = isCheckbox ? value === "true" : value;
+      if (normalizedLabel === "demogiven" && from !== to && to.toLowerCase() === "yes") demoGivenSelected = true;
       if (normalizedLabel === "spanco" && from !== to && to === "Abandoned") spancoAbandoned = true;
     }
   }
@@ -4351,11 +4397,27 @@ export async function updateLeadDetails(formData: FormData) {
     if (addressValidation) throw new Error(addressValidation);
   if ("first_name" in update && !update.first_name)
     throw new Error("First name is required.");
+  let demoResolutionId: string | null = null;
+  if (demoGivenSelected) {
+    const { data: assignment, error: assignmentError } = await supabase.from("lead_product_assignments").select("is_ambassador").eq("id", assignmentId).eq("lead_id", leadId).single();
+    if (assignmentError) throw new Error(assignmentError.message);
+    if (assignment?.is_ambassador) {
+      const { data: resolution, error: resolutionError } = await supabase.from("lead_resolutions").select("id").ilike("name", "Demo Given").eq("is_active", true).maybeSingle();
+      if (resolutionError || !resolution) throw new Error("The active Demo Given resolution is unavailable.");
+      demoResolutionId = resolution.id;
+    }
+  }
   const { error } = await supabase
     .from("leads")
     .update(update)
     .eq("id", leadId);
   if (error) throw new Error(error.message);
+  if (demoResolutionId) {
+    const { error: resolutionError } = await supabase.from("lead_product_assignments").update({ latest_resolution_id: demoResolutionId, ringing_streak: 0, stall_streak: 0 }).eq("id", assignmentId).eq("lead_id", leadId);
+    if (resolutionError) throw new Error(resolutionError.message);
+    const { error: activityError } = await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignmentId, activity_type: "resolution_updated", note: "Activity resolution set to Demo Given when Demo Given was marked Yes.", metadata: { resolution_id: demoResolutionId }, created_by: userId });
+    if (activityError) throw new Error(activityError.message);
+  }
   if (changes.length) {
     const { error: activityError } = await supabase
       .from("lead_activities")
@@ -4579,14 +4641,14 @@ export async function updateLeadStageInline(formData: FormData) {
 // sub-dropdowns, not a generic per-column value. Each sub-value is stored as its own scalar custom_data key
 // (bant_b/bant_a/bant_n/bant_t), not nested under one "bant" object, because the workspace loader drops any
 // custom_data value that isn't a plain scalar when it builds a lead's editable field map.
-export async function updateLeadBantField(formData: FormData) {
+export async function updateLeadBantField(formData: FormData, presetUser?: Awaited<ReturnType<typeof requireUser>>) {
   const leadId = String(formData.get("leadId") ?? "");
   const assignmentId = String(formData.get("assignmentId") ?? "");
   const field = String(formData.get("field") ?? "") as BantField;
   const value = String(formData.get("value") ?? "");
   if (!leadId || !BANT_FIELD_LABELS[field]) throw new Error("A lead and BANT field are required.");
   if (value && !BANT_OPTIONS[field].includes(value)) throw new Error("Choose a valid BANT option.");
-  const { supabase, userId } = await getEditableLead(leadId, assignmentId);
+  const { supabase, userId } = await getEditableLead(leadId, assignmentId, presetUser);
   const detail = String(formData.get("detail") ?? "").trim();
   let detailKey = "";
   if (value === "Confirmed" && (field === "b" || field === "n" || field === "t")) {
@@ -4628,13 +4690,14 @@ export async function updateLeadBantField(formData: FormData) {
       note: `BANT ${label} changed from ${from || "—"} to ${value || "—"}.`,
       metadata: { changes: [{ label: `BANT ${label}`, from, to: value }] },
       created_by: userId,
+      source: presetUser ? "mobile" : null,
     });
     if (activityError) throw new Error(activityError.message);
   }
   revalidatePath("/dashboard/leads");
 }
 
-export async function updateLeadResolutionInline(formData: FormData) {
+export async function updateLeadResolutionInline(formData: FormData, presetUser?: Awaited<ReturnType<typeof requireUser>>) {
   const leadId = String(formData.get("leadId") ?? "");
   const assignmentId = String(formData.get("assignmentId") ?? "");
   const resolutionId = String(formData.get("resolutionId") ?? "");
@@ -4648,6 +4711,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
   const { supabase, lead, contact, userId } = await getEditableLead(
     leadId,
     assignmentId,
+    presetUser,
   );
   const { data: mapping, error: mappingError } = await supabase
     .from("lead_product_resolutions")
@@ -4862,6 +4926,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
         stall_streak: update.stall_streak,
       },
       created_by: userId,
+      source: presetUser ? "mobile" : null,
     });
   if (activityError) throw new Error(activityError.message);
   if (releasesAssignment) {
@@ -4874,6 +4939,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
         note: releasesForRingingStreak ? "Released to Admin's unassigned pool after 5 consecutive Ringing resolutions." : releasesForStallStreak ? "Released to Admin's unassigned pool after 10 consecutive No Busy/Call Back/Call for Next resolutions." : `Released to Admin's unassigned pool after ${resolutionName}.`,
         metadata: { resolution_id: resolutionId, released_by: userId, released_for_ringing_streak: releasesForRingingStreak, released_for_stall_streak: releasesForStallStreak },
         created_by: userId,
+        source: presetUser ? "mobile" : null,
       });
     if (releaseActivityError) throw new Error(releaseActivityError.message);
   }
@@ -4905,6 +4971,7 @@ export async function updateLeadResolutionInline(formData: FormData) {
         follow_up_at: followUpDate.toISOString(),
         metadata: followUpNote ? { follow_up_note: followUpNote } : {},
         created_by: userId,
+        source: presetUser ? "mobile" : null,
       });
     if (followUpActivityError) throw new Error(followUpActivityError.message);
   }

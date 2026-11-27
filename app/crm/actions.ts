@@ -171,7 +171,14 @@ export async function v2UpdateBant(t: Target, field: "b" | "a" | "n" | "t", valu
 /** Confirmed authority asks for the decision maker's details and records them as a Secondary Contact
  * on this lead, same as the Add Contact tab. */
 export async function v2AddDecisionMakerContact(t: Target, contact: { firstName: string; lastName: string; phone: string; email: string }): Promise<ActionResult> {
-  const r = await createLeadContact(fd({ leadId: t.leadId, assignmentId: t.assignmentId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, email: contact.email, contactType: "secondary" }));
+  // Tag the contact's Designation as "Decision Maker" so it stands out in Add Contact — but only when
+  // that's already a configured option on this workspace's Designation dropdown; createLeadContact
+  // rejects any designation value that isn't one of the dropdown's configured options.
+  const admin = createAdminClient();
+  const { data: dropdowns } = await admin.from("lead_table_columns").select("label, options").eq("source", "custom").eq("field_type", "dropdown");
+  const designationColumn = (dropdowns ?? []).find((c) => c.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "") === "designation");
+  const designation = Array.isArray(designationColumn?.options) && designationColumn.options.includes("Decision Maker") ? "Decision Maker" : "";
+  const r = await createLeadContact(fd({ leadId: t.leadId, assignmentId: t.assignmentId, firstName: contact.firstName, lastName: contact.lastName, phone: contact.phone, email: contact.email, designation, contactType: "secondary" }));
   return { ok: r.ok, message: r.ok ? "Decision maker added to Add Contact as a Secondary Contact." : r.message };
 }
 

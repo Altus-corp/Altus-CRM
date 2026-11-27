@@ -110,7 +110,8 @@ export const DASHES: DashDef[] = [
 ];
 export const DEFAULT_DASH: Partial<Record<AppRole, string>> = { admin: "hot", sales_manager: "hot", sales_executive: "my-day", consultant: "my-day", ambassador: "my-ambassador", marketing_manager: "sources", marketing_executive: "sources" };
 export const primaryRole = (roles: AppRole[]): AppRole => (["admin", "sales_manager", "sales_executive", "consultant", "marketing_manager", "marketing_executive", "ambassador"] as AppRole[]).find((r) => roles.includes(r)) ?? roles[0];
-export const dashesFor = (roles: AppRole[]) => DASHES.filter((d) => d.roles.some((r) => roles.includes(r)));
+// "ai" stays in DASHES as a last-resort fallback id (see CrmApp.tsx), but is hidden from the sidebar for everyone.
+export const dashesFor = (roles: AppRole[]) => DASHES.filter((d) => d.id !== "ai" && d.roles.some((r) => roles.includes(r)));
 // Ambassadors module hidden for pure-ambassador logins for now (add "ambassadors" back here to restore it).
 export const modulesFor = (roles: AppRole[]) => MODULES.filter((m) => !m.roles || m.roles.some((r) => roles.includes(r))).filter((m) => !(roles.length === 1 && roles[0] === "ambassador" && !["dashboards", "sales"].includes(m.id)));
 

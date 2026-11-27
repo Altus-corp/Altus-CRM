@@ -99,7 +99,7 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
       {!sel.size && <button className="btn sm ghost" style={{ color: "var(--muted)" }} onClick={() => setSel(new Set(all.map((r) => r.id)))}>All {fmt(all.length)}</button>}
       {(p.views?.length ?? 0) > 1 && <div className="vtog">{p.views!.filter((v) => !(mobile && v === "cards")).map((v) => <button key={v} className={view === v ? "on" : ""} onClick={() => set({ view: v })}><Icon n={{ table: "table", kanban: "kanban", cards: "cards", calendar: "cal" }[v]} s="s" />{view === v ? " " + v[0].toUpperCase() + v.slice(1) : ""}</button>)}</div>}
       <span className="sp" />
-      {view === "table" && !mobile && <div className="pg">Rows <select value={prefs.size} onChange={(e) => { set({ size: +e.target.value }); setPage(1); }}>{[20, 25, 50, 100, 0].map((n) => <option key={n} value={n}>{n || "All"}</option>)}</select>
+      {view === "table" && !mobile && !prefs.group && <div className="pg">Rows <select value={prefs.size} onChange={(e) => { set({ size: +e.target.value }); setPage(1); }}>{[20, 25, 50, 100, 0].map((n) => <option key={n} value={n}>{n || "All"}</option>)}</select>
         <button className="sb" onClick={() => setPage(Math.max(1, pg - 1))}><Icon n="chevl" s="s" /></button> Page <input value={pg} onChange={(e) => setPage(Math.max(1, +e.target.value || 1))} /> of {pages} <button className="sb" onClick={() => setPage(Math.min(pages, pg + 1))}><Icon n="chevr" s="s" /></button></div>}
       <button className="btn sm" onClick={(e) => pop.open(e.currentTarget, "cols")}><Icon n="cols" s="s" /> {mobile ? "Fields" : "Columns"} <span style={{ background: "var(--line-2)", borderRadius: 5, padding: "0 5px" }}>{cols.length}</span></button>
       {!mobile && <button className="btn sm" onClick={(e) => pop.open(e.currentTarget, "freeze")}><Icon n="pin" s="s" /> Freeze {prefs.frozen}</button>}
@@ -138,12 +138,15 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
   } else if (mobile) {
     const card = (r: T) => <div key={r.id} className={`mrow ${sel.has(r.id) ? "sel" : ""}`} style={{ ["--lbc" as string]: p.rowTone ? TONES[p.rowTone(r)].mk : "transparent" }} onClick={(e) => { if (!(e.target as HTMLElement).closest("input")) p.onOpen?.(r, all); }}>
       <input type="checkbox" className="cb" checked={sel.has(r.id)} onChange={() => toggle(r.id)} /><div className="mrow-b"><div className="mt">{cell(cols[0], r)}</div><div className="mm">{cols.slice(1).filter((c) => c.k !== "contact").slice(0, 6).map((c) => <span key={c.k}><i>{c.label}</i>{cell(c, r)}</span>)}</div></div></div>;
-    const gr = groups(pageRows);
+    // Grouping must see every matching row, not just the current page's slice — otherwise a group's header
+    // count (always computed from the full filtered set) would outnumber the rows actually rendered under it.
+    const gr = groups(all);
     body = <><div className="mlist">{gr ? [...gr.g.entries()].map(([k, rs]) => <div key={k}><div className="mgrp">{gr.gc.groupTone ? <Pill tone={gr.gc.groupTone(rs[0])}>{k}</Pill> : k}<span style={{ color: "var(--muted)", fontWeight: 400 }}>{gr.counts.get(k)}</span></div>{rs.map(card)}</div>) : pageRows.map(card)}</div>
       {all.length > pageRows.length ? <button className="btn more" onClick={() => setMShow((n) => n + 30)}>Show more · {pageRows.length} of {all.length}</button> : <div className="empty" style={{ padding: 12 }}>{all.length} records</div>}</>;
   } else {
-    const gr = groups(pageRows);
-    const childTr = (child: T, parentId: string, idx: number) => <tr key={parentId + ":c" + idx} className="child-row" onDoubleClick={() => p.onOpen?.(child, all)}>
+    // Same reasoning as the mobile list above: group against every matching row, not just the current page.
+    const gr = groups(all);
+    const childTr = (child: T, parentId: string, idx: number) =><tr key={parentId + ":c" + idx} className="child-row" onDoubleClick={() => p.onOpen?.(child, all)}>
       <td className="c0 frz" style={{ left: 0 }} />
       {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}>{i === 0 ? <span className="lname" style={{ paddingLeft: 18 }}>{cell(c, child)}</span> : cell(c, child)}</td>)}</tr>;
     const tr = (r: T): ReactNode[] => { const tn = p.rowTone?.(r); const dCount = p.detail?.count(r) ?? 0; const isOpen = expanded.has(r.id);
@@ -180,8 +183,8 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
 
   return <div className={`card grow ${min ? "min" : ""} ${maxed ? "maxed" : ""}`} style={{ minHeight: p.minHeight }}>
     {tools}{bulk}<div className="tw">{body}</div>
-    {view === "table" && !mobile && <div className="tbl-foot">Showing {all.length ? (pg - 1) * size + 1 : 0}–{Math.min(pg * size, all.length)} of {fmt(all.length)}{dupes && <> · <b style={{ color: "var(--red)" }}>duplicates only</b> <button className="btn sm ghost" onClick={() => setDupes(false)}>show all</button></>}
-      <div className="pgn"><button onClick={() => setPage(Math.max(1, pg - 1))}>‹ Prev</button>{pagerNums(pg, pages).map((n, i) => n < 0 ? <button key={"e" + i} disabled>…</button> : <button key={n} className={n === pg ? "on" : ""} onClick={() => setPage(n)}>{n}</button>)}<button onClick={() => setPage(Math.min(pages, pg + 1))}>Next ›</button></div></div>}
+    {view === "table" && !mobile && <div className="tbl-foot">{prefs.group ? <>Showing all {fmt(all.length)} records, grouped</> : <>Showing {all.length ? (pg - 1) * size + 1 : 0}–{Math.min(pg * size, all.length)} of {fmt(all.length)}</>}{dupes && <> · <b style={{ color: "var(--red)" }}>duplicates only</b> <button className="btn sm ghost" onClick={() => setDupes(false)}>show all</button></>}
+      {!prefs.group && <div className="pgn"><button onClick={() => setPage(Math.max(1, pg - 1))}>‹ Prev</button>{pagerNums(pg, pages).map((n, i) => n < 0 ? <button key={"e" + i} disabled>…</button> : <button key={n} className={n === pg ? "on" : ""} onClick={() => setPage(n)}>{n}</button>)}<button onClick={() => setPage(Math.min(pages, pg + 1))}>Next ›</button></div>}</div>}
     {pop.anchor && popBody && <Popover anchor={pop.anchor} onClose={close} width={popW} right={popRight}>{popBody}</Popover>}
     {win === "transpose" && <Win title="Transpose view — fields as rows" onClose={() => setWin(null)}><div className="win-b"><table className="t"><thead><tr><th>Field</th>{all.slice(0, 12).map((r) => <th key={r.id}>{textOf(cols[0], r)}</th>)}</tr></thead><tbody>{cols.map((c) => <tr key={c.k}><td><b>{c.label}</b></td>{all.slice(0, 12).map((r) => <td key={r.id}>{cell(c, r)}</td>)}</tr>)}</tbody></table></div></Win>}
     {win === "whatsapp" && <ShareWhatsApp title={title} text={summaryText(title, exportCols, exportRows)} onClose={() => setWin(null)} />}

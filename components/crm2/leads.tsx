@@ -2,7 +2,7 @@
 // Lead columns, filters, KPI chips and bulk actions — shared by every lead table and dashboard list.
 import { useState, type ReactNode } from "react";
 import { BUCKET, BUCKETS, TONES, type Tone } from "@/app/lib/crm2/config";
-import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantDisplayValue, bantToneStyle, type BantField } from "@/app/lib/bant";
+import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantToneStyle, type BantField } from "@/app/lib/bant";
 import { computedFieldValue, customRange, daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
 import { v2AddDecisionMakerContact, v2AddProduct, v2ChangeLeadType, v2LeadProductAssignments, v2SelectLeadProducts, v2UpdateBant, v2UpdateField } from "@/app/crm/actions";
@@ -76,8 +76,11 @@ function BantCell({ row, canEdit }: { row: LeadRow; canEdit: boolean }) {
     } catch { toast("Unable to add the decision maker."); } finally { setBusy(false); }
   };
   return <span style={{ display: "inline-flex", gap: 4 }} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-    {(["b", "a", "n", "t"] as BantField[]).map((f) => <button type="button" key={f} disabled={!canEdit || busy} aria-label={`${BANT_FIELD_LABELS[f]}: ${bantDisplayValue(f, row.custom[bantCustomKey(f)] ?? "") || "Not set"}`} title={`${BANT_FIELD_LABELS[f]}: ${bantDisplayValue(f, row.custom[bantCustomKey(f)] ?? "") || "Not set"}`} onClick={(e) => pop.open(e.currentTarget, f)} style={{ display: "inline-grid", placeItems: "center", width: 24, height: 24, border: 0, borderRadius: 5, fontSize: 10, fontWeight: 800, cursor: canEdit ? "pointer" : "default", ...(bantToneStyle(bantDisplayValue(f, row.custom[bantCustomKey(f)] ?? "")) ?? { background: "var(--bg)", color: "var(--faint)" }) }}>{f.toUpperCase()}</button>)}
-    {pop.anchor && (["b", "a", "n", "t"] as string[]).includes(pop.key) && <Popover anchor={pop.anchor} onClose={pop.close} width={190}><div className="ph">{BANT_FIELD_LABELS[pop.key as BantField]}</div>{BANT_OPTIONS[pop.key as BantField].map((option) => <button type="button" key={option} className="pi" onClick={() => { const field = pop.key as BantField; pop.close(); if (field === "a" && option === "Confirmed") { setContact({ firstName: "", lastName: "", phone: "", email: "" }); setDecision(true); } else if (field !== "a" && option === "Confirmed") setConfirmation(field); else void save(field, option); }}>{option}</button>)}</Popover>}
+    {(["b", "a", "n", "t"] as BantField[]).map((f) => <button type="button" key={f} disabled={!canEdit || busy} aria-label={`${BANT_FIELD_LABELS[f]}: ${row.custom[bantCustomKey(f)] || "Not set"}`} title={`${BANT_FIELD_LABELS[f]}: ${row.custom[bantCustomKey(f)] || "Not set"}`} onClick={(e) => pop.open(e.currentTarget, f)} style={{ display: "inline-grid", placeItems: "center", width: 24, height: 24, border: 0, borderRadius: 5, fontSize: 10, fontWeight: 800, cursor: canEdit ? "pointer" : "default", ...(bantToneStyle(row.custom[bantCustomKey(f)] ?? "") ?? { background: "var(--bg)", color: "var(--faint)" }) }}>{f.toUpperCase()}</button>)}
+    {pop.anchor && (["b", "a", "n", "t"] as string[]).includes(pop.key) && <Popover anchor={pop.anchor} onClose={pop.close} width={190}><div className="ph">{BANT_FIELD_LABELS[pop.key as BantField]}</div>{BANT_OPTIONS[pop.key as BantField].map((option) => <button type="button" key={option} className="pi" onClick={() => { const field = pop.key as BantField; pop.close();
+      // Only ask for the decision maker when this lead doesn't already have one on file — re-confirming
+      // Authority (e.g. after toggling it to Assumed and back) must not re-prompt for details it already has.
+      if (field === "a" && option === "Confirmed" && !row.custom.bant_decision_maker_name) { setContact({ firstName: "", lastName: "", phone: "", email: "" }); setDecision(true); } else if (field !== "a" && option === "Confirmed") setConfirmation(field); else void save(field, option); }}>{option}</button>)}</Popover>}
     {confirmation && <BantConfirm key={`${row.id}-${confirmation}`} field={confirmation} row={row} ws={ctx.ws} onClose={() => setConfirmation(null)} onSave={async (detail, key) => { try { const result = await v2UpdateBant({ leadId: row.leadId, assignmentId: row.id }, confirmation, "Confirmed", detail); toast(result.message); if (result.ok) { ctx.patchRows(ctx.ws.rows.filter((r) => r.leadId === row.leadId).map((r) => r.id), { custom: { ...row.custom, [bantCustomKey(confirmation)]: "Confirmed", [key]: detail } }); setConfirmation(null); } return result.ok; } catch { toast("Unable to update BANT."); return false; } }} />}
     {decision && <Win small title="Decision maker" onClose={() => setDecision(false)}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Add the decision maker as a secondary contact for this lead.</div>
@@ -113,7 +116,7 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
     { k: "ambassador", label: "Ambassador", text: (r) => (r.ambassador ? personName(ws, r.ambassador) : "—") },
     { k: "createdAt", label: "Created on", groupVal: (r) => fdate(r.createdAt) }, { k: "assignedAt", label: "Assigned on", groupVal: (r) => fdate(r.assignedAt) },
     { k: "no", label: "Lead no.", group: false },
-    { k: "bant", label: "BANT", group: false, text: (r) => (["b", "a", "n", "t"] as BantField[]).map((f) => `${f.toUpperCase()}:${bantDisplayValue(f, r.custom[bantCustomKey(f)] ?? "") || "—"}`).join(" "), render: (r) => <BantCell row={r} canEdit={canEdit} /> },
+    { k: "bant", label: "BANT", group: false, text: (r) => (["b", "a", "n", "t"] as BantField[]).map((f) => `${f.toUpperCase()}:${r.custom[bantCustomKey(f)] || "—"}`).join(" "), render: (r) => <BantCell row={r} canEdit={canEdit} /> },
     ...custom.map((c): Col<LeadRow> => c.computedFrom.length
       ? { k: "c:" + c.key, label: c.label, text: (r) => computedFieldValue(r, c.computedFrom) }
       : c.label.trim().toLowerCase() === "lead acquisition date"
@@ -121,7 +124,9 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
         : { k: "c:" + c.key, label: c.label, text: (r) => r.custom[c.key] ?? "", edit: e(c.fieldType === "dropdown" && c.options.length ? { options: () => c.options.map((o) => ({ v: o, l: o })), inline: { value: (r: LeadRow) => r.custom[c.key] ?? "" } } : { type: "text" as const }) }),
   ];
 }
-export const LEAD_HIDDEN = ["phone", "notCalled", "score", "action", "connected", "email", "createdAt", "assignedAt", "no"];
+// "win" (AI win %) is hidden by default — it's a simple rule-of-thumb score, not a trained model, and
+// showing it plainly in the grid invited the misunderstanding that it's an AI prediction.
+export const LEAD_HIDDEN = ["phone", "notCalled", "score", "action", "connected", "email", "createdAt", "assignedAt", "no", "win"];
 export const hiddenWithCustom = (ws: Workspace) => [...LEAD_HIDDEN, ...ws.columns.filter((c) => c.source === "custom").map((c) => "c:" + c.key)];
 
 /** Save an edit through the existing actions, then patch the local rows. */
