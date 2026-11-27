@@ -22,7 +22,7 @@ import type { V2ManagedUser } from "@/app/crm/actions";
 import { useCrm, type Ctx } from "./context";
 import { DataTable, ShareWhatsApp, type Col } from "./DataTable";
 import { FilterBar, KpiBar } from "./bars";
-import { applyFilters, hiddenWithCustom, leadBulk, leadBulkAddValue, leadCard, leadCols, leadEditor, leadFilters, leadKpis, leadTone, type FilterDef, type FilterState, type Kpi } from "./leads";
+import { applyFilters, hiddenWithCustom, leadBulk, leadBulkAddValue, leadCard, leadCols, leadEditor, leadFilters, leadKpis, leadTone, useLeadEditor, type FilterDef, type FilterState, type Kpi } from "./leads";
 import { Avatar, Icon, Pill, Popover, fdt, toneStyle, usePop, useToast } from "./ui";
 
 export type NavItem = { id: string; label: string; icon?: string; cnt?: number; group?: string };
@@ -64,11 +64,12 @@ function LeadPage({ pid, rows, group, sort, kanbanStages, trail }: { pid: string
   const cols = useMemo(() => leadCols(ctx.ws, ctx.canEdit, toast), [ctx.ws, ctx.canEdit, toast]); const filters = useMemo(() => leadFilters(ctx.ws), [ctx.ws]);
   const kpis = kanbanStages ? (rs: LeadRow[]): Kpi<LeadRow>[] => [{ k: "all", n: rs.length, label: "Total", tone: "slate" }, ...kanbanStages.map((s, i) => ({ k: "st" + i, n: rs.filter((r) => r.stage === s).length, label: s, tone: (["lav", "sky", "peach", "butter", "mint"] as Tone[])[i % 5], test: (r: LeadRow) => r.stage === s })), { k: "overdue", n: rs.filter((r) => r.nextFollowUp && (M.daysSince(r.nextFollowUp) ?? 0) > 0).length, label: "Overdue follow-ups", tone: "rose", test: (r) => !!r.nextFollowUp && (M.daysSince(r.nextFollowUp) ?? 0) > 0 }] : (rs: LeadRow[]) => leadKpis(ctx.ws, rs);
   const stageCols = kanbanStages?.map((s, i) => ({ k: s, label: s, tone: (["lav", "sky", "peach", "butter", "mint"] as Tone[])[i % 5] }));
+  const { onEdit, modal } = useLeadEditor(ctx, toast);
   return <><TablePage pid={pid} rows={rows} filters={filters} kpis={kpis} trail={trail} table={(shown, q) => <DataTable<LeadRow> id={pid} rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ctx.ws)} group={group ?? null} sort={sort ?? null} frozen={2} views={["table", "kanban", "cards", "calendar"]}
     kanban={stageCols ? { key: (r) => r.stage, cols: stageCols, onMove: (r, s) => { const st = ctx.ws.products.find((p) => p.code === r.product)?.stages.find((x) => x.name === s); if (st) leadEditor(ctx, toast)([r], { k: "stageId", label: "Stage" }, st.id).then(() => ctx.patchRows([r.id], { stage: s, stageId: st.id })); } } : { key: (r) => r.bucket, cols: BUCKETS.map((b) => ({ k: b.key, label: b.label, tone: b.tone })) }}
-    calendarKey={(r) => r.nextFollowUp} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} dupeKey={(r) => r.phone} exportName={pid} card={leadCard(ctx.ws)}
+    calendarKey={(r) => r.nextFollowUp} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={onEdit} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} dupeKey={(r) => r.phone} exportName={pid} card={leadCard(ctx.ws)}
     detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />} />
-    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
+    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}{modal}</>;
 }
 
 /* ---------- page router ---------- */
@@ -127,9 +128,10 @@ function AmbassadorAccountsPage() {
   const cols = useMemo((): Col<LeadRow>[] => [...leadCols(ws, ctx.canEdit, toast), { k: "acct", label: "Account", group: false, text: (r) => (r.ambassadorHasAccount ? "Has account" : "No account"), render: (r) => <Pill tone={r.ambassadorHasAccount ? "mint" : "rose"}>{r.ambassadorHasAccount ? "Has account" : "No account"}</Pill> }], [ws, ctx.canEdit, toast]);
   const filters = useMemo((): FilterDef<LeadRow>[] => [...leadFilters(ws), { k: "acct", label: "Account", icon: "key", get: (r) => (r.ambassadorHasAccount ? "yes" : "no"), opts: () => [{ v: "no", l: "No account yet" }, { v: "yes", l: "Has account" }] }], [ws]);
   const kpis = (rs: LeadRow[]): Kpi<LeadRow>[] => [{ k: "all", n: rs.length, label: "Ambassadors", tone: "slate" }, { k: "noacct", n: rs.filter((r) => !r.ambassadorHasAccount).length, label: "No account yet", tone: "rose", test: (r) => !r.ambassadorHasAccount }, { k: "acct", n: rs.filter((r) => r.ambassadorHasAccount).length, label: "Has account", tone: "mint", test: (r) => r.ambassadorHasAccount }];
+  const { onEdit, modal } = useLeadEditor(ctx, toast);
   return <><TablePage pid="amb-accounts" rows={rows} filters={filters} kpis={kpis} trail={<span className="trail-pill">{ws.roles.includes("admin") ? <CreateAmbassadorAccountModal /> : <><AmbassadorAddModal /><CreateAmbassadorAccountModal /></>}</span>}
-    table={(shown, q) => <DataTable<LeadRow> id="amb-accounts" rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} exportName="Ambassador accounts" card={leadCard(ws)} />} />
-    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
+    table={(shown, q) => <DataTable<LeadRow> id="amb-accounts" rows={shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={onEdit} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} exportName="Ambassador accounts" card={leadCard(ws)} />} />
+    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}{modal}</>;
 }
 /** Ambassador Module → Dashboard: Agreement Signed/Waived + Pitched counts among this viewer's Ambassadors
  * (same scope as My Ambassador — self / self+team / everyone, via ws.rows), plus — for admin/manager only —
@@ -157,10 +159,11 @@ function AmbassadorDashboardPage() {
   }, [rows, ws]);
   const showBreakdown = ctx.role === "admin" || ctx.role === "sales_manager";
   const [ownerSel, setOwnerSel] = useState<string | null>(null);
+  const { onEdit, modal } = useLeadEditor(ctx, toast);
   return <><TablePage pid="amb-dashboard" rows={rows} filters={filters} kpis={kpis}
     trail={showBreakdown ? <AmbassadorsPerPersonPick breakdown={breakdown} value={ownerSel} onChange={setOwnerSel} /> : undefined}
-    table={(shown, q) => <DataTable<LeadRow> id="amb-dash-t" rows={ownerSel ? shown.filter((r) => r.owner === ownerSel) : shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={leadEditor(ctx, toast)} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} exportName="Ambassador dashboard" card={leadCard(ws)} detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />} />
-    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}</>;
+    table={(shown, q) => <DataTable<LeadRow> id="amb-dash-t" rows={ownerSel ? shown.filter((r) => r.owner === ownerSel) : shown} q={q} cols={cols} hidden={hiddenWithCustom(ws)} frozen={2} views={["table", "cards"]} rowTone={leadTone} onOpen={(r, list) => ctx.openLead(r, list)} onEdit={onEdit} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} exportName="Ambassador dashboard" card={leadCard(ws)} detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />} />
+    {wa && <ShareWhatsApp title="Message to selected leads" text="" onClose={() => setWa(null)} />}{modal}</>;
 }
 /** "Ambassadors per sales person" as a dropdown chip instead of an always-open panel — pick a person to filter the table to just their Ambassadors. */
 function AmbassadorsPerPersonPick({ breakdown, value, onChange }: { breakdown: { id: string; person: string; n: number }[]; value: string | null; onChange: (id: string | null) => void }) {

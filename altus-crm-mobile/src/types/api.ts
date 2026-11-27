@@ -23,6 +23,28 @@ export type MobileLeadDetail = MyLeadRow & {
   availableResolutions: { id: string; name: string }[];
 };
 
+export type CallLogRow = {
+  id: string;
+  calledAt: string;
+  leadName: string;
+  company: string;
+  direction: string;
+  isConnected: boolean;
+  durationSeconds: number;
+};
+
+export type MeetingRow = {
+  id: string;
+  kind: 'Zoom' | 'Google Meet';
+  leadName: string;
+  startTime: string;
+  upcoming: boolean;
+};
+
+// Mirrors app/lib/roles.ts's isAmbassadorWorkspace() — an admin who also holds the ambassador
+// role still gets the full admin nav, so it's excluded here too.
+export const isAmbassador = (roles: string[]) => roles.includes('ambassador') && !roles.includes('admin');
+
 export type ActivityItem = {
   id: string;
   activityType: string;

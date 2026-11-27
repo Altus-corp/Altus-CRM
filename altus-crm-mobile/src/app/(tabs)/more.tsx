@@ -18,7 +18,7 @@ const ROLE_LABELS: Record<string, string> = {
   ambassador: 'Ambassador',
 };
 
-export default function ProfileScreen() {
+export default function MoreScreen() {
   const { user, logout } = useAuth();
   const theme = useTheme();
 
@@ -26,7 +26,7 @@ export default function ProfileScreen() {
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
       <ThemedView style={styles.container}>
         <ThemedText type="title" style={styles.title}>
-          Profile
+          More
         </ThemedText>
 
         <ThemedView style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }, CardShadow]}>

@@ -94,8 +94,10 @@ export async function v2SelectLeadProducts(leadId: string, assignmentId: string,
   } catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Unable to update products." }; }
 }
 
-/** Change one field on many rows. Fields map 1:1 to existing actions. */
-export async function v2UpdateField(targets: Target[], field: string, value: string): Promise<ActionResult> {
+/** Change one field on many rows. Fields map 1:1 to existing actions.
+ * `extra` only applies to the "resolutionId" field — it carries the follow-up date/note the caller
+ * collected (e.g. via a prompt for resolutions like "Follow up"/"Verbal Yes" that require them). */
+export async function v2UpdateField(targets: Target[], field: string, value: string, extra?: { followUpAt?: string; followUpNote?: string }): Promise<ActionResult> {
   await requireUser();
   if (!targets.length) return { ok: false, message: "Nothing selected." };
   try {
@@ -105,7 +107,7 @@ export async function v2UpdateField(targets: Target[], field: string, value: str
     }
     let done = 0;
     for (const t of targets) {
-      if (field === "resolutionId") await updateLeadResolutionInline(fd({ leadId: t.leadId, assignmentId: t.assignmentId, resolutionId: value, followUpAt: "", followUpNote: "" }));
+      if (field === "resolutionId") await updateLeadResolutionInline(fd({ leadId: t.leadId, assignmentId: t.assignmentId, resolutionId: value, followUpAt: extra?.followUpAt ?? "", followUpNote: extra?.followUpNote ?? "" }));
       else if (field === "nextFollowUp") await updateLeadFollowUp(fd({ leadId: t.leadId, assignmentId: t.assignmentId, followUpAt: value }));
       else if (field === "stageId") await updateLeadStageInline(fd({ leadId: t.leadId, assignmentId: t.assignmentId, stageId: value }));
       else await updateLeadDetails(fd({ leadId: t.leadId, assignmentId: t.assignmentId, values: JSON.stringify([{ key: field, value }]) }));

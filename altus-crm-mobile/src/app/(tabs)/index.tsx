@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Pill } from '@/components/pill';
+import { LeadRow } from '@/components/lead-row';
 import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api-client';
-import { ago, fdate } from '@/lib/format';
-import { BucketTone, Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import type { MyLeadRow } from '@/types/api';
 
 export default function MyLeadsScreen() {
@@ -47,7 +46,7 @@ export default function MyLeadsScreen() {
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.card }]} edges={['top']}>
       <ThemedView style={[styles.topBar, { borderBottomColor: theme.border, backgroundColor: theme.card }]} type="card">
         <ThemedText type="smallBold" themeColor="accent" style={styles.topBarTitle}>
-          My Leads
+          Leads
         </ThemedText>
         {!!leads?.length && (
           <ThemedView style={[styles.countChip, { backgroundColor: theme.backgroundElement }]}>
@@ -74,41 +73,6 @@ export default function MyLeadsScreen() {
   );
 }
 
-// Ported from the web CRM's mobile card view (.mrow / leadCard() in components/crm2/leads.tsx):
-// a left accent stripe for priority stage, bold name, muted company, Product + Resolution pills,
-// and a trailing follow-up/last-called line.
-function LeadRow({ item, onPress }: { item: MyLeadRow; onPress: () => void }) {
-  const theme = useTheme();
-  const tone = BucketTone[item.bucket];
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.mrow,
-        { backgroundColor: pressed ? theme.backgroundElement : theme.card, borderBottomColor: theme.border },
-      ]}>
-      <View style={[styles.stripe, { backgroundColor: tone.mark }]} />
-      <View style={styles.mrowBody}>
-        <ThemedText style={styles.mrowTitle} numberOfLines={1}>
-          {item.name || 'Unnamed lead'}
-        </ThemedText>
-        {!!item.company && (
-          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-            {item.company}
-          </ThemedText>
-        )}
-        <View style={styles.pillRow}>
-          <Pill tone="slate" label={item.product} />
-          {!!item.resolution && <Pill tone={item.bucket} label={item.resolution} />}
-        </View>
-        <ThemedText type="small" themeColor="faint" style={styles.followUp}>
-          {item.nextFollowUp ? `FU ${fdate(item.nextFollowUp)}` : ago(item.lastCalledAt)}
-        </ThemedText>
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -118,10 +82,4 @@ const styles = StyleSheet.create({
   countChipText: { fontWeight: '700' },
   error: { paddingHorizontal: Spacing.three, paddingTop: Spacing.two, fontWeight: '600' },
   empty: { padding: Spacing.five, textAlign: 'center' },
-  mrow: { flexDirection: 'row', gap: Spacing.two, paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderBottomWidth: StyleSheet.hairlineWidth },
-  stripe: { width: 3, borderRadius: 2 },
-  mrowBody: { flex: 1, gap: 5 },
-  mrowTitle: { fontWeight: '700', fontSize: 14 },
-  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  followUp: { marginTop: 1 },
 });

@@ -155,6 +155,56 @@ export async function loadMobileLeadActivity(assignmentId: string, limit = 20): 
   }));
 }
 
+export type CallLogRow = {
+  id: string; calledAt: string; leadName: string; company: string;
+  direction: string; isConnected: boolean; durationSeconds: number;
+};
+
+export async function listMyCalls(user: MobileUser, opts: { limit?: number } = {}): Promise<CallLogRow[]> {
+  const db = createAdminClient();
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 200);
+  const since60 = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const { data, error } = await db.from("lead_call_log")
+    .select("id, called_at, is_connected, direction, duration_seconds, lead_product_assignment_id, assignment:lead_product_assignments(lead:leads(first_name, last_name, custom_data))")
+    .eq("user_id", user.userId).gte("called_at", since60)
+    .order("called_at", { ascending: false }).limit(limit);
+  if (error) throw new Error("Unable to load your calls.");
+  return (data ?? []).map((row: Raw) => {
+    const assignment = one(row.assignment as Raw | Raw[]) ?? {};
+    const lead = one(assignment.lead as Raw | Raw[]) ?? {};
+    const cd = (lead.custom_data ?? {}) as Record<string, unknown>;
+    return {
+      id: s(row.id), calledAt: s(row.called_at),
+      leadName: [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Lead",
+      company: s(cd.company_name), direction: s(row.direction),
+      isConnected: !!row.is_connected, durationSeconds: Number(row.duration_seconds) || 0,
+    };
+  });
+}
+
+export type MeetingRow = { id: string; kind: "Zoom" | "Google Meet"; leadName: string; startTime: string; upcoming: boolean };
+
+export async function listMyMeetings(user: MobileUser): Promise<MeetingRow[]> {
+  const db = createAdminClient();
+  const since7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const [zoom, meet] = await Promise.all([
+    db.from("lead_zoom_meetings").select("id, start_time, lead:leads(first_name, last_name)").eq("host_user_id", user.userId).gte("start_time", since7).order("start_time", { ascending: true }).limit(100),
+    db.from("lead_google_meetings").select("id, start_time, lead:leads(first_name, last_name)").eq("host_user_id", user.userId).gte("start_time", since7).order("start_time", { ascending: true }).limit(100),
+  ]);
+  if (zoom.error || meet.error) throw new Error("Unable to load your meetings.");
+  const now = Date.now();
+  const toRow = (kind: MeetingRow["kind"]) => (row: Raw): MeetingRow => {
+    const lead = one(row.lead as Raw | Raw[]) ?? {};
+    return {
+      id: s(row.id), kind, startTime: s(row.start_time),
+      leadName: [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Lead",
+      upcoming: new Date(s(row.start_time)).getTime() > now,
+    };
+  };
+  return [...(zoom.data ?? []).map(toRow("Zoom")), ...(meet.data ?? []).map(toRow("Google Meet"))]
+    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+}
+
 /** Resolves {leadId, assignedTo} for an assignmentId and checks access — every mobile write route
  * calls this first so it never trusts a client-supplied leadId/assignmentId pairing. */
 export async function resolveOwnedAssignment(user: MobileUser, assignmentId: string): Promise<{ leadId: string } | null> {

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 
@@ -22,6 +23,7 @@ export default function LeadDetailScreen() {
   const [logCallOpen, setLogCallOpen] = useState(false);
   const [addNoteOpen, setAddNoteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'overview' | 'bant' | 'activity'>('overview');
 
   const load = useCallback(async () => {
     const [leadResult, activityResult] = await Promise.all([
@@ -97,63 +99,80 @@ export default function LeadDetailScreen() {
           </Pressable>
         </ThemedView>
 
-        <SectionHeader label="Overview" />
-        <FieldsGrid>
-          <Field label="Phone" value={lead.phone || '—'} />
-          <Field label="Email" value={lead.email || '—'} />
-          <Field label="Resolution" value={lead.resolution || 'Not called'} />
-          <Field label="Next follow-up" value={lead.nextFollowUp ? new Date(lead.nextFollowUp).toLocaleString() : '—'} />
-        </FieldsGrid>
-
-        <SectionHeader label="BANT" />
-        <ThemedView style={styles.bantRow}>
-          {(Object.keys(BANT_FIELD_LABELS) as BantField[]).map((field) => {
-            const value = lead.custom[bantCustomKey(field)] ?? '';
-            const tone = BantTone[value];
-            return (
-              <Pressable
-                key={field}
-                onPress={() => setBantPicker(field)}
-                style={[
-                  styles.bantCell,
-                  { borderColor: theme.border, backgroundColor: tone?.bg ?? theme.backgroundElement },
-                ]}>
-                <ThemedText style={[styles.bantLetter, { color: tone?.ink ?? theme.faint }]}>{field.toUpperCase()}</ThemedText>
-                <ThemedText style={[styles.bantValue, { color: tone?.ink ?? theme.textSecondary }]} numberOfLines={1}>
-                  {value || 'Select'}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
+        <ThemedView style={[styles.tabs, { borderBottomColor: theme.border }]}>
+          {([
+            ['overview', 'Overview'],
+            ['bant', 'BANT'],
+            ['activity', 'Activity'],
+          ] as const).map(([key, label]) => (
+            <Pressable key={key} onPress={() => setTab(key)} style={[styles.tab, tab === key && { borderBottomColor: theme.accent }]}>
+              <ThemedText type="smallBold" themeColor={tab === key ? 'accent' : 'textSecondary'} style={styles.tabText}>
+                {label.toUpperCase()}
+              </ThemedText>
+            </Pressable>
+          ))}
         </ThemedView>
 
-        <SectionHeader label="Activity" />
-        {activity === null ? (
-          <ActivityIndicator color={theme.accent} />
-        ) : activity.length === 0 ? (
-          <ThemedText themeColor="textSecondary">No activity yet.</ThemedText>
-        ) : (
-          <ThemedView style={[styles.activityCard, { backgroundColor: theme.card, borderColor: theme.border }, CardShadow]}>
-            {activity.map((item, index) => (
-              <ThemedView
-                key={item.id}
-                style={[styles.activityRow, index > 0 && { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}
-                type="card">
-                <ThemedView style={[styles.activityDot, { backgroundColor: theme.accent }]} />
-                <ThemedView style={styles.activityBody} type="card">
-                  <ThemedText type="smallBold">{item.activityType.replace(/_/g, ' ')}</ThemedText>
-                  {!!item.note && (
-                    <ThemedText type="small" style={styles.activityNote}>
-                      {item.note}
-                    </ThemedText>
-                  )}
-                  <ThemedText type="small" themeColor="faint">
-                    {new Date(item.createdAt).toLocaleString()}
+        {tab === 'overview' && (
+          <FieldsGrid>
+            <Field label="Phone" value={lead.phone || '—'} />
+            <Field label="Email" value={lead.email || '—'} />
+            <Field label="Resolution" value={lead.resolution || 'Not called'} />
+            <Field label="Next follow-up" value={lead.nextFollowUp ? new Date(lead.nextFollowUp).toLocaleString() : '—'} />
+          </FieldsGrid>
+        )}
+
+        {tab === 'bant' && (
+          <ThemedView style={styles.bantRow}>
+            {(Object.keys(BANT_FIELD_LABELS) as BantField[]).map((field) => {
+              const value = lead.custom[bantCustomKey(field)] ?? '';
+              const tone = BantTone[value];
+              return (
+                <Pressable
+                  key={field}
+                  onPress={() => setBantPicker(field)}
+                  style={[
+                    styles.bantCell,
+                    { borderColor: theme.border, backgroundColor: tone?.bg ?? theme.backgroundElement },
+                  ]}>
+                  <ThemedText style={[styles.bantLetter, { color: tone?.ink ?? theme.faint }]}>{field.toUpperCase()}</ThemedText>
+                  <ThemedText style={[styles.bantValue, { color: tone?.ink ?? theme.textSecondary }]} numberOfLines={1}>
+                    {value || 'Select'}
                   </ThemedText>
-                </ThemedView>
-              </ThemedView>
-            ))}
+                </Pressable>
+              );
+            })}
           </ThemedView>
+        )}
+
+        {tab === 'activity' && (
+          activity === null ? (
+            <ActivityIndicator color={theme.accent} />
+          ) : activity.length === 0 ? (
+            <ThemedText themeColor="textSecondary">No activity yet.</ThemedText>
+          ) : (
+            <ThemedView style={[styles.activityCard, { backgroundColor: theme.card, borderColor: theme.border }, CardShadow]}>
+              {activity.map((item, index) => (
+                <ThemedView
+                  key={item.id}
+                  style={[styles.activityRow, index > 0 && { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}
+                  type="card">
+                  <ThemedView style={[styles.activityDot, { backgroundColor: theme.accent }]} />
+                  <ThemedView style={styles.activityBody} type="card">
+                    <ThemedText type="smallBold">{item.activityType.replace(/_/g, ' ')}</ThemedText>
+                    {!!item.note && (
+                      <ThemedText type="small" style={styles.activityNote}>
+                        {item.note}
+                      </ThemedText>
+                    )}
+                    <ThemedText type="small" themeColor="faint">
+                      {new Date(item.createdAt).toLocaleString()}
+                    </ThemedText>
+                  </ThemedView>
+                </ThemedView>
+              ))}
+            </ThemedView>
+          )
         )}
       </ScrollView>
 
@@ -170,9 +189,9 @@ export default function LeadDetailScreen() {
           resolutions={lead.availableResolutions}
           busy={busy}
           onClose={() => setLogCallOpen(false)}
-          onSubmit={async (resolutionId, note) => {
+          onSubmit={async (resolutionId, note, followUpAt) => {
             setBusy(true);
-            const result = await api.post<{ message: string }>(`/api/mobile/leads/${assignmentId}/calls`, { resolutionId, note });
+            const result = await api.post<{ message: string }>(`/api/mobile/leads/${assignmentId}/calls`, { resolutionId, note, followUpAt });
             setBusy(false);
             if (result.ok) { setLogCallOpen(false); void load(); } else setError(result.error);
           }}
@@ -194,13 +213,6 @@ export default function LeadDetailScreen() {
   );
 }
 
-function SectionHeader({ label }: { label: string }) {
-  return (
-    <ThemedText type="small" themeColor="faint" style={styles.sectionHeader}>
-      {label.toUpperCase()}
-    </ThemedText>
-  );
-}
 function FieldsGrid({ children }: { children: ReactNode }) {
   return <ThemedView style={styles.fieldsGrid}>{children}</ThemedView>;
 }
@@ -247,33 +259,111 @@ function OptionModal({ title, options, onClose, onPick }: { title: string; optio
   );
 }
 
-function LogCallModal({ resolutions, busy, onClose, onSubmit }: { resolutions: { id: string; name: string }[]; busy: boolean; onClose: () => void; onSubmit: (resolutionId: string, note: string) => void }) {
+// Same rule app/dashboard/leads/actions.ts's updateLeadResolutionInline enforces server-side:
+// "Verbal Yes" and any resolution named "Follow up" (any spacing/case) require both a follow-up
+// date/time and a note — without this, the server rejects the save with nowhere for the user to
+// actually enter the date, which is the bug this screen is fixing.
+function resolutionRequiresFollowUp(name: string) {
+  const normalized = name.trim().toLowerCase();
+  return /follow\s*up/.test(normalized) || normalized === 'verbal yes';
+}
+
+function LogCallModal({ resolutions, busy, onClose, onSubmit }: { resolutions: { id: string; name: string }[]; busy: boolean; onClose: () => void; onSubmit: (resolutionId: string, note: string, followUpAt: string | null) => void }) {
   const theme = useTheme();
   const [resolutionId, setResolutionId] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  const [followUpAt, setFollowUpAt] = useState<Date | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  const selectedResolution = resolutions.find((r) => r.id === resolutionId);
+  const needsFollowUp = Boolean(selectedResolution && resolutionRequiresFollowUp(selectedResolution.name));
+  // Computed once per modal open rather than inline in render/JSX props, which the React Compiler
+  // flags as an impure render (new Date()/Date.now() would otherwise re-evaluate every re-render).
+  const now = useMemo(() => new Date(), []);
+  const defaultFollowUp = useMemo(() => new Date(now.getTime() + 60 * 60 * 1000), [now]);
+
+  const openPicker = () => {
+    const initial = followUpAt ?? defaultFollowUp;
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: initial,
+        mode: 'date',
+        minimumDate: now,
+        onChange: (dateEvent, pickedDate) => {
+          if (dateEvent.type !== 'set' || !pickedDate) return;
+          DateTimePickerAndroid.open({
+            value: pickedDate,
+            mode: 'time',
+            onChange: (timeEvent, pickedTime) => {
+              if (timeEvent.type === 'set' && pickedTime) setFollowUpAt(pickedTime);
+            },
+          });
+        },
+      });
+    } else {
+      setShowPicker(true);
+    }
+  };
+
+  const submit = () => {
+    if (!resolutionId) return;
+    if (needsFollowUp && !followUpAt) return setValidationError('Choose a follow-up date and time.');
+    if (needsFollowUp && !note.trim()) return setValidationError('Add a follow-up note.');
+    setValidationError(null);
+    onSubmit(resolutionId, note, followUpAt ? followUpAt.toISOString() : null);
+  };
+
   return (
     <ModalSheet onClose={onClose}>
       <ThemedText type="small" themeColor="faint" style={styles.modalTitle}>
         LOG CALL
       </ThemedText>
       {resolutions.map((resolution) => (
-        <Pressable key={resolution.id} style={styles.modalOption} onPress={() => setResolutionId(resolution.id)}>
+        <Pressable key={resolution.id} style={styles.modalOption} onPress={() => { setResolutionId(resolution.id); setValidationError(null); }}>
           <ThemedText themeColor={resolution.id === resolutionId ? 'accent' : 'text'} style={resolution.id === resolutionId ? styles.modalOptionSelected : undefined}>
             {resolution.name}
           </ThemedText>
         </Pressable>
       ))}
+
+      {needsFollowUp && (
+        <Pressable onPress={openPicker} style={[styles.modalInput, { borderColor: theme.border }]}>
+          <ThemedText themeColor={followUpAt ? 'text' : 'faint'}>
+            {followUpAt ? followUpAt.toLocaleString() : 'Select follow-up date & time *'}
+          </ThemedText>
+        </Pressable>
+      )}
+      {Platform.OS === 'ios' && showPicker && (
+        <DateTimePicker
+          value={followUpAt ?? defaultFollowUp}
+          mode="datetime"
+          minimumDate={now}
+          onChange={(event, pickedDate) => {
+            setShowPicker(false);
+            if (event.type === 'set' && pickedDate) setFollowUpAt(pickedDate);
+          }}
+        />
+      )}
+
       <TextInput
         value={note}
         onChangeText={setNote}
-        placeholder="Note (optional)"
+        placeholder={needsFollowUp ? 'Follow-up note *' : 'Note (optional)'}
         placeholderTextColor={theme.faint}
         style={[styles.modalInput, { color: theme.text, borderColor: theme.border }]}
       />
+
+      {validationError && (
+        <ThemedText type="small" themeColor="accent" style={styles.errorText}>
+          {validationError}
+        </ThemedText>
+      )}
+
       <Pressable
         disabled={!resolutionId || busy}
         style={[styles.modalSubmit, { backgroundColor: theme.accent }, (!resolutionId || busy) && styles.buttonDisabled]}
-        onPress={() => resolutionId && onSubmit(resolutionId, note)}>
+        onPress={submit}>
         <ThemedText style={styles.modalSubmitText}>{busy ? 'Saving…' : 'Save'}</ThemedText>
       </Pressable>
     </ModalSheet>
@@ -316,7 +406,9 @@ const styles = StyleSheet.create({
   actionBtnText: { fontWeight: '700', fontSize: 13 },
   actionBtnPrimary: { borderWidth: 0 },
   actionBtnPrimaryText: { color: '#ffffff', fontWeight: '700', fontSize: 13 },
-  sectionHeader: { marginTop: Spacing.four, marginBottom: Spacing.two, fontWeight: '700', letterSpacing: 0.6 },
+  tabs: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: Spacing.three },
+  tab: { paddingVertical: Spacing.two, paddingHorizontal: Spacing.two, marginRight: Spacing.one, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabText: { letterSpacing: 0.4 },
   fieldsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   field: { width: '47%', borderWidth: 1, borderRadius: Radius.small, paddingHorizontal: Spacing.two, paddingVertical: Spacing.two },
   fieldLabel: { fontWeight: '700', letterSpacing: 0.6, marginBottom: 3, fontSize: 9 },

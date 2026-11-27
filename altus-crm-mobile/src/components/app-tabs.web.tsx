@@ -10,22 +10,49 @@ import { SymbolView } from 'expo-symbols';
 import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
 
 import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
+import { isAmbassador } from '@/types/api';
+import { useAuth } from '@/lib/auth-context';
 
 import { ExternalLink } from './external-link';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
+// Web-preview counterpart of app-tabs.tsx's role-aware NativeTabs set (mirrors the web CRM's mnav).
 export default function AppTabs() {
+  const { user } = useAuth();
+  const ambassador = isAmbassador(user?.roles ?? []);
+
   return (
     <Tabs>
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          <TabTrigger name="home" href="/" asChild>
-            <TabButton>My Leads</TabButton>
+          <TabTrigger name="home" href="/home" asChild>
+            <TabButton>Home</TabButton>
           </TabTrigger>
-          <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>Profile</TabButton>
+          <TabTrigger name="index" href="/" asChild>
+            <TabButton>Leads</TabButton>
+          </TabTrigger>
+          {ambassador ? (
+            <TabTrigger name="focused" href="/focused" asChild>
+              <TabButton>Focused</TabButton>
+            </TabTrigger>
+          ) : (
+            <TabTrigger name="follow-ups" href="/follow-ups" asChild>
+              <TabButton>Follow-ups</TabButton>
+            </TabTrigger>
+          )}
+          {ambassador ? (
+            <TabTrigger name="meetings" href="/meetings" asChild>
+              <TabButton>Meetings</TabButton>
+            </TabTrigger>
+          ) : (
+            <TabTrigger name="calls" href="/calls" asChild>
+              <TabButton>Calls</TabButton>
+            </TabTrigger>
+          )}
+          <TabTrigger name="more" href="/more" asChild>
+            <TabButton>More</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>

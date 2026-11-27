@@ -1,7 +1,7 @@
 "use client";
 // Lead detail opens as a WINDOW (not a side panel): ‹ › moves through the list it came from; maximise; tabs.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BUCKET, TONES } from "@/app/lib/crm2/config";
+import { BUCKET, resolutionRequiresFollowUp, TONES } from "@/app/lib/crm2/config";
 import { displayProductCode } from "@/app/lib/product-display";
 import { isChannelPartnerColumn } from "@/app/lib/channel-partner";
 import { ChannelPartnerSelect } from "@/components/leads/channel-partner-select";
@@ -15,7 +15,7 @@ import { ContactsTab } from "./ContactsTab";
 import { BantConfirm } from "./BantConfirm";
 import { LEAD_ADDRESS_COUNTRIES, leadAddressFieldKeyForColumn, locationCities, locationStates } from "@/app/lib/lead-address-fields";
 import { computedFieldValue, daysSince, missingFields, personName } from "@/app/lib/crm2/metrics";
-import type { LeadRow } from "@/app/lib/crm2/types";
+import type { LeadRow, ResolutionDef } from "@/app/lib/crm2/types";
 import { v2AddAttachment, v2AddDecisionMakerContact, v2AddNote, v2AddProduct, v2ChangeLeadType, v2CreateProposal, v2LeadChannelPartners, v2LeadProductAssignments, v2RemoveProduct, v2LogCall, v2LogProposalWhatsAppShare, v2SendProposalEmail, v2SetProposalApproval, v2SyncLeadCalls, v2UpdateBant, v2UpdateField } from "@/app/crm/actions";
 import { useCrm } from "./context";
 import { assignableOpts, canAssignOwner, dialLead } from "./leads";
@@ -48,6 +48,8 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   const [bantPrompt, setBantPrompt] = useState<{ field: Exclude<BantField, "a">; prevValue: string } | null>(null);
   const [dmForm, setDmForm] = useState({ firstName: "", lastName: "", phone: "", email: "" });
   const [dmBusy, setDmBusy] = useState(false);
+  const [fuPrompt, setFuPrompt] = useState<{ res: ResolutionDef; when: string; note: string } | null>(null);
+  const [fuBusy, setFuBusy] = useState(false);
   useEffect(() => { if (tab !== "activity" && tab !== "notes" && tab !== "attachments" && tab !== "calls") return; let live = true; fetch(`/api/leads/${l.leadId}/activities?assignmentId=${l.id}`).then((r) => r.json()).then((j) => live && setActsFor({ key: actKey, data: j.ok ? j.activities : [] })).catch(() => live && setActsFor({ key: actKey, data: [] })); return () => { live = false; }; }, [tab, l.leadId, l.id, actKey, activitiesNonce]);
   // Altus Contacts calls aren't pushed into the CRM by a webhook — they're pulled on demand, matched by this
   // lead's phone number so a call placed by ANY user (not just whoever opens this lead) still shows up here.
@@ -84,6 +86,16 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
     setDmPrompt(null);
   };
   const cancelDecisionMaker = () => { if (dmPrompt) { const el = bantRefs.current[dmPrompt.field]; if (el) el.value = dmPrompt.prevValue; } setDmPrompt(null); };
+  const submitFollowUp = async () => {
+    if (!fuPrompt || !fuPrompt.when || !fuPrompt.note.trim()) return;
+    setFuBusy(true);
+    const followUpAt = new Date(fuPrompt.when).toISOString();
+    const r = await v2UpdateField([{ leadId: l.leadId, assignmentId: l.id }], "resolutionId", fuPrompt.res.id, { followUpAt, followUpNote: fuPrompt.note.trim() });
+    setFuBusy(false);
+    toast(r.message);
+    if (r.ok) ctx.patchRows([l.id], { resolutionId: fuPrompt.res.id, resolution: fuPrompt.res.name, bucket: fuPrompt.res.bucket, lastCalledAt: new Date().toISOString(), nextFollowUp: followUpAt });
+    setFuPrompt(null);
+  };
   // Overview's text fields are uncontrolled (save-on-blur) — dictation just appends into the live DOM value via
   // a ref, same as typing would; the existing onBlur still picks it up whenever the field loses focus.
   const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
@@ -127,6 +139,10 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
   useEffect(() => { if (!hasChannelPartnerColumn) return; let live = true; v2LeadChannelPartners(l.leadId).then((r) => live && setCp(r)).catch(() => live && setCp({ ids: [], names: "" })); return () => { live = false; }; }, [l.leadId, hasChannelPartnerColumn]);
   const others = useMemo(() => ws.rows.filter((x) => x.leadId === l.leadId), [ws.rows, l.leadId]);
   const curProduct = ws.products.find((p) => p.code === l.product);
+  // Resolutions scoped to this lead's product (lead_product_resolutions) — fails open to every
+  // resolution when a product has no mapping configured yet, and always keeps the lead's current
+  // resolution selectable even if it's since fallen out of the mapping, so existing data never vanishes.
+  const availableResolutions = ws.resolutions.filter((r) => !curProduct?.resolutionIds.length || curProduct.resolutionIds.includes(r.id) || r.id === l.resolutionId);
   // Prefer the per-lead, phone-matched call activities (any caller) over ws.calls, which only reflects
   // whichever team member's call history has separately been synced via the classic Call Report page.
   const contactForActivity = (a: Activity) => {
@@ -190,9 +206,13 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
           if (c.computedFrom.length) { const computed = computedFieldValue(l, c.computedFrom); return <div key={c.key} className="fld" style={{ order: section.fields.indexOf(customKey(c)) }}><label>{c.label}</label><input value={computed || "—"} readOnly title="Derived automatically — edit the fields it's built from instead" /></div>; }
           if (c.label.trim().toLowerCase() === "lead acquisition date") return <div key={c.key} className="fld" style={{ order: section.fields.indexOf(customKey(c)) }}><label>{c.label}</label><input value={fdate(l.createdAt)} readOnly title="The date this lead was created" /></div>;
           if (c.source === "resolution") return <div key={c.key} className="fld" style={{ order: section.fields.indexOf(customKey(c)) }}><label>{c.label}</label>
-            <select disabled={!ctx.canEdit} value={l.resolutionId ?? ""} onChange={(e) => { const x = ws.resolutions.find((r) => r.id === e.target.value); save("resolutionId", e.target.value, { resolutionId: e.target.value, resolution: x?.name ?? null, bucket: x?.bucket ?? l.bucket, lastCalledAt: new Date().toISOString() }); }}>
+            <select disabled={!ctx.canEdit} value={l.resolutionId ?? ""} onChange={(e) => {
+              const x = availableResolutions.find((r) => r.id === e.target.value);
+              if (x && resolutionRequiresFollowUp(x.name)) { setFuPrompt({ res: x, when: "", note: "" }); return; }
+              save("resolutionId", e.target.value, { resolutionId: e.target.value, resolution: x?.name ?? null, bucket: x?.bucket ?? l.bucket, lastCalledAt: new Date().toISOString() });
+            }}>
               <option value="">Not called</option>
-              {ws.resolutions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {availableResolutions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>;
           if (c.source === "bant") return <div key={c.key} className="fld" style={{ order: section.fields.indexOf("bant") }}>
@@ -327,7 +347,7 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
       </div>}
     </div>
     </div></div>
-    {logOpen && <LogCall onClose={() => setLogOpen(false)} onSave={async (resId, fu, n) => { const r = await v2LogCall({ leadId: l.leadId, assignmentId: l.id }, resId, fu, n); toast(r.message); if (r.ok) { const x = ws.resolutions.find((q) => q.id === resId); ctx.patchRows([l.id], { resolutionId: resId, resolution: x?.name ?? null, bucket: x?.bucket ?? l.bucket, lastCalledAt: new Date().toISOString(), nextFollowUp: fu || l.nextFollowUp }); setLogOpen(false); } }} />}
+    {logOpen && <LogCall resolutions={availableResolutions} onClose={() => setLogOpen(false)} onSave={async (resId, fu, n) => { const r = await v2LogCall({ leadId: l.leadId, assignmentId: l.id }, resId, fu, n); toast(r.message); if (r.ok) { const x = availableResolutions.find((q) => q.id === resId); ctx.patchRows([l.id], { resolutionId: resId, resolution: x?.name ?? null, bucket: x?.bucket ?? l.bucket, lastCalledAt: new Date().toISOString(), nextFollowUp: fu || l.nextFollowUp }); setLogOpen(false); } }} />}
     {bantPrompt && <BantConfirm key={`${l.id}-${bantPrompt.field}`} field={bantPrompt.field} row={l} ws={ws} onClose={() => { const el = bantRefs.current[bantPrompt.field]; if (el) el.value = l.custom[bantCustomKey(bantPrompt.field)] ?? ""; setBantPrompt(null); }} onSave={async (detail, key) => { try { const result = await v2UpdateBant({ leadId: l.leadId, assignmentId: l.id }, bantPrompt.field, "Confirmed", detail); toast(result.message); if (result.ok) { ctx.patchRows(ws.rows.filter((r) => r.leadId === l.leadId).map((r) => r.id), { custom: { ...l.custom, [bantCustomKey(bantPrompt.field)]: "Confirmed", [key]: detail } }); const el = bantRefs.current[bantPrompt.field]; if (el) el.value = "Confirmed"; setBantPrompt(null); } return result.ok; } catch { toast("Unable to update BANT."); return false; } }} />}
     {transcriptFor && <Win small title={`Transcript · ${transcriptFor.kind} · ${transcriptFor.topic}`} onClose={() => setTranscriptFor(null)}><div className="win-b" style={{ padding: 14 }}><pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, margin: 0 }}>{transcriptFor.transcriptText}</pre></div></Win>}
     {calendarFor && <Win small title="Add to calendar" onClose={() => setCalendarFor(null)}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -343,6 +363,12 @@ export function LeadWindow({ row, list, onClose, onNav }: { row: LeadRow; list: 
       <div className="fld"><label>Contact (optional)</label><input value={dmForm.phone} onChange={(e) => setDmForm((f) => ({ ...f, phone: e.target.value }))} /></div>
       <div className="fld"><label>Email (optional)</label><input value={dmForm.email} onChange={(e) => setDmForm((f) => ({ ...f, email: e.target.value }))} /></div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button type="button" className="btn" onClick={cancelDecisionMaker}>Cancel</button><button type="button" className="btn red" disabled={dmBusy || !dmForm.firstName.trim()} onClick={submitDecisionMaker}>{dmBusy ? "Saving…" : "Save"}</button></div>
+    </div></Win>}
+    {fuPrompt && <Win small title={fuPrompt.res.name} onClose={() => setFuPrompt(null)}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ color: "var(--muted)", fontSize: 12.5 }}>&quot;{fuPrompt.res.name}&quot; needs a follow-up date and a note before it can be saved.</div>
+      <div className="fld"><label>Follow-up date &amp; time</label><input type="datetime-local" value={fuPrompt.when} onChange={(e) => setFuPrompt((p) => (p ? { ...p, when: e.target.value } : p))} /></div>
+      <div className="fld"><label>Note</label><input value={fuPrompt.note} onChange={(e) => setFuPrompt((p) => (p ? { ...p, note: e.target.value } : p))} placeholder="What happened?" /></div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button type="button" className="btn" onClick={() => setFuPrompt(null)}>Cancel</button><button type="button" className="btn red" disabled={fuBusy || !fuPrompt.when || !fuPrompt.note.trim()} onClick={submitFollowUp}>{fuBusy ? "Saving…" : "Save"}</button></div>
     </div></Win>}
     {gmeetOpen && <GoogleMeetModal leadId={l.leadId} assignmentId={l.id} leadName={l.name} onClose={() => setGmeetOpen(false)} onScheduled={() => { ctx.refresh(); setMeetingsNonce((n) => n + 1); }} />}
     {zoomOpen && <ZoomMeetingModal leadId={l.leadId} assignmentId={l.id} leadName={l.name} onClose={() => setZoomOpen(false)} onScheduled={() => { ctx.refresh(); setMeetingsNonce((n) => n + 1); }} />}
@@ -366,10 +392,10 @@ function AddMoreProducts({ leadId, assignmentId, already, onAdded }: { leadId: s
     }}>{busy ? "Adding…" : `Add ${sel.size || ""}`}</button>
   </div>;
 }
-function LogCall({ onClose, onSave }: { onClose: () => void; onSave: (resolutionId: string, followUpAt: string, note: string) => void }) {
-  const { ws } = useCrm(); const [res, setRes] = useState(""); const [fu, setFu] = useState(""); const [n, setN] = useState("");
+function LogCall({ resolutions, onClose, onSave }: { resolutions: ResolutionDef[]; onClose: () => void; onSave: (resolutionId: string, followUpAt: string, note: string) => void }) {
+  const [res, setRes] = useState(""); const [fu, setFu] = useState(""); const [n, setN] = useState("");
   return <Win small title="Log call" onClose={onClose}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-    <div className="lbl">Resolution</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{ws.resolutions.map((r) => <button key={r.id} className="pill" style={{ ...toneStyle(BUCKET[r.bucket].tone), padding: "5px 10px", outline: res === r.id ? "2px solid var(--ink)" : "none" }} onClick={() => setRes(r.id)}>{r.name}</button>)}</div>
+    <div className="lbl">Resolution</div><div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{resolutions.map((r) => <button key={r.id} className="pill" style={{ ...toneStyle(BUCKET[r.bucket].tone), padding: "5px 10px", outline: res === r.id ? "2px solid var(--ink)" : "none" }} onClick={() => setRes(r.id)}>{r.name}</button>)}</div>
     <div className="fld"><label>Next follow-up</label><input type="datetime-local" value={fu} onChange={(e) => setFu(e.target.value)} /></div><div className="fld"><label>Note</label><input value={n} onChange={(e) => setN(e.target.value)} placeholder="What happened?" /></div>
     <button className="btn red" disabled={!res} onClick={() => onSave(res, fu ? new Date(fu).toISOString() : "", n)}>Save</button></div></Win>;
 }

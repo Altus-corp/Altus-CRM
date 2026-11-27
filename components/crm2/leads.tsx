@@ -1,10 +1,10 @@
 "use client";
 // Lead columns, filters, KPI chips and bulk actions — shared by every lead table and dashboard list.
 import { useState, type ReactNode } from "react";
-import { BUCKET, BUCKETS, TONES, type Tone } from "@/app/lib/crm2/config";
+import { BUCKET, BUCKETS, resolutionRequiresFollowUp, TONES, type Tone } from "@/app/lib/crm2/config";
 import { BANT_FIELD_LABELS, BANT_OPTIONS, bantCustomKey, bantToneStyle, type BantField } from "@/app/lib/bant";
 import { computedFieldValue, customRange, daysSince, inRange, missingFields, nextAction, periodRange, personName, photoFor, priorityScore, winProb } from "@/app/lib/crm2/metrics";
-import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
+import type { LeadRow, ResolutionDef, Workspace } from "@/app/lib/crm2/types";
 import { v2AddDecisionMakerContact, v2AddProduct, v2ChangeLeadType, v2LeadProductAssignments, v2SelectLeadProducts, v2UpdateBant, v2UpdateField } from "@/app/crm/actions";
 import { displayProductCode } from "@/app/lib/product-display";
 import { Avatar, Icon, Pill, Popover, Win, ago, cap, fdate, usePop, useToast } from "./ui";
@@ -33,6 +33,14 @@ export const canAssignOwner = (ws: Workspace) => ws.roles.includes("admin") || w
  * (ws.scope is already [self, ...team]) — the server enforces the same scoping again regardless. */
 export const assignableOpts = (ws: Workspace): Opt[] => ws.roles.includes("admin") ? ownerOpts(ws) : salesPeople(ws).filter((p) => ws.scope.includes(p.id)).map((p) => ({ v: p.id, l: p.name }));
 const resTone = (ws: Workspace, r: LeadRow): Tone => (r.resolutionId ? BUCKET[ws.resolutions.find((x) => x.id === r.resolutionId)?.bucket ?? "approach"].tone : "lav");
+/** Resolutions scoped to a row's own product (lead_product_resolutions) — same fail-open rule as
+ * LeadWindow's Overview tab: every resolution shows when the product has no mapping configured yet,
+ * and the row's current resolution always stays selectable even if it's since left the mapping. */
+const resolutionOptsFor = (ws: Workspace, r: LeadRow): Opt[] => {
+  const product = ws.products.find((p) => p.id === r.productId);
+  const scoped = !product?.resolutionIds.length ? ws.resolutions : ws.resolutions.filter((x) => product.resolutionIds.includes(x.id) || x.id === r.resolutionId);
+  return scoped.map((x) => ({ v: x.id, l: x.name, tone: BUCKET[x.bucket].tone }));
+};
 
 const DUP_CORE_LABELS = new Set(["lead no", "lead number", "last name", "company name"]);
 function ProductCell({ row, canEdit }: { row: LeadRow; canEdit: boolean }) {
@@ -101,7 +109,7 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
     { k: "product", label: "Product", text: (r) => r.product, render: (r) => <ProductCell row={r} canEdit={canEdit} /> },
     { k: "stage", label: "Life Cycle", edit: e({ inline: { value: (r: LeadRow) => r.stageId ?? "", options: (r: LeadRow) => (ws.products.find((p) => p.id === r.productId)?.stages ?? []).map((s) => ({ v: s.id, l: s.name })) } }) },
     { k: "bucket", label: "Priority stage", text: (r) => BUCKET[r.bucket].label, val: (r) => BUCKET[r.bucket].weight, groupVal: (r) => BUCKET[r.bucket].label, groupTone: (r) => BUCKET[r.bucket].tone, render: (r) => <Pill tone={BUCKET[r.bucket].tone}>{BUCKET[r.bucket].label}</Pill> },
-    { k: "resolution", label: "Activity Resolutions", text: (r) => r.resolution ?? "Not called", groupTone: (r) => resTone(ws, r), render: (r) => (r.resolution ? <Pill tone={resTone(ws, r)}>{r.resolution}</Pill> : <span style={{ color: "var(--faint)" }}>Not called</span>), edit: e({ options: () => ws.resolutions.map((x) => ({ v: x.id, l: x.name, tone: BUCKET[x.bucket].tone })), inline: { value: (r: LeadRow) => r.resolutionId ?? "" } }) },
+    { k: "resolution", label: "Activity Resolutions", text: (r) => r.resolution ?? "Not called", groupTone: (r) => resTone(ws, r), render: (r) => (r.resolution ? <Pill tone={resTone(ws, r)}>{r.resolution}</Pill> : <span style={{ color: "var(--faint)" }}>Not called</span>), edit: e({ options: () => ws.resolutions.map((x) => ({ v: x.id, l: x.name, tone: BUCKET[x.bucket].tone })), inline: { value: (r: LeadRow) => r.resolutionId ?? "", options: (r: LeadRow) => resolutionOptsFor(ws, r) } }) },
     { k: "owner", label: "Sales person", text: (r) => personName(ws, r.owner), render: (r) => (r.owner ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Avatar name={personName(ws, r.owner)} photo={photoFor(ws, r.owner)} />{personName(ws, r.owner)}</span> : <span style={{ color: "var(--faint)" }}>Unassigned</span>), edit: canEdit && canAssignOwner(ws) ? { options: () => assignableOpts(ws), inline: { value: (r: LeadRow) => r.owner ?? "" } } : undefined },
     { k: "lastCalledAt", label: "Last called", groupVal: (r) => (!r.lastCalledAt ? "Never called" : (daysSince(r.lastCalledAt) ?? 0) <= 3 ? "0–3 days" : (daysSince(r.lastCalledAt) ?? 0) <= 7 ? "4–7 days" : "8+ days"), render: (r) => { const d = daysSince(r.lastCalledAt); return <span style={{ color: d == null ? TONES.rose.ink : d > 7 ? TONES.butter.ink : undefined, fontWeight: d == null || d > 7 ? 700 : 400 }}>{ago(r.lastCalledAt)}</span>; } },
     { k: "notCalled", label: "Not called since assigned", num: true, group: false, val: (r) => (!r.lastCalledAt && r.assignedAt ? daysSince(r.assignedAt) : null), render: (r) => { const v = !r.lastCalledAt && r.assignedAt ? daysSince(r.assignedAt) : null; return v == null ? "—" : <b style={{ color: v > 3 ? TONES.rose.ink : TONES.butter.ink }}>{v} d</b>; } },
@@ -129,19 +137,51 @@ export function leadCols(ws: Workspace, canEdit: boolean, toast?: (m: string) =>
 export const LEAD_HIDDEN = ["phone", "notCalled", "score", "action", "connected", "email", "createdAt", "assignedAt", "no", "win"];
 export const hiddenWithCustom = (ws: Workspace) => [...LEAD_HIDDEN, ...ws.columns.filter((c) => c.source === "custom").map((c) => "c:" + c.key)];
 
-/** Save an edit through the existing actions, then patch the local rows. */
+/** Save an edit through the existing actions, then patch the local rows.
+ * `extra` only applies to the "resolution" column — the follow-up date/note a caller collected (via
+ * useLeadEditor's prompt) for a resolution like "Follow up"/"Verbal Yes" that requires them. */
 export function leadEditor(ctx: Ctx, toast: (m: string) => void) {
-  return async (rows: LeadRow[], col: Col<LeadRow>, value: string) => {
+  return async (rows: LeadRow[], col: Col<LeadRow>, value: string, extra?: { followUpAt?: string; followUpNote?: string }) => {
     if (col.k === "source") { for (const id of new Set(rows.map((r) => r.leadId))) { const result = await v2ChangeLeadType(id, value); toast(result.message); if (result.ok) ctx.patchRows(ctx.ws.rows.filter((r) => r.leadId === id).map((r) => r.id), { source: value.replace(/_/g, " ") }); } return; }
     const field = col.k === "stage" ? "stageId" : col.k === "owner" ? "owner" : col.k === "resolution" ? "resolutionId" : col.k === "nextFollowUp" ? "nextFollowUp" : col.k === "company" ? "company_name" : col.k.startsWith("c:") ? col.k.slice(2) : col.k;
-    const res = await v2UpdateField(rows.map((r) => ({ leadId: r.leadId, assignmentId: r.id })), field, field === "nextFollowUp" ? new Date(value).toISOString() : value);
+    const res = await v2UpdateField(rows.map((r) => ({ leadId: r.leadId, assignmentId: r.id })), field, field === "nextFollowUp" ? new Date(value).toISOString() : value, extra);
     toast(res.message);
     if (!res.ok) return;
     if (field === "stageId") { await ctx.refresh(); return; }
-    const patch: Partial<LeadRow> = field === "owner" ? { owner: value, assignedAt: new Date().toISOString() } : field === "resolutionId" ? (() => { const x = ctx.ws.resolutions.find((q) => q.id === value); return { resolutionId: value, resolution: x?.name ?? null, bucket: x?.bucket ?? "approach", lastCalledAt: new Date().toISOString() }; })() : field === "nextFollowUp" ? { nextFollowUp: new Date(value).toISOString() } : field === "company_name" ? { company: value } : field === "email" ? { email: value } : {};
+    const patch: Partial<LeadRow> = field === "owner" ? { owner: value, assignedAt: new Date().toISOString() } : field === "resolutionId" ? (() => { const x = ctx.ws.resolutions.find((q) => q.id === value); return { resolutionId: value, resolution: x?.name ?? null, bucket: x?.bucket ?? "approach", lastCalledAt: new Date().toISOString(), ...(extra?.followUpAt ? { nextFollowUp: extra.followUpAt } : {}) }; })() : field === "nextFollowUp" ? { nextFollowUp: new Date(value).toISOString() } : field === "company_name" ? { company: value } : field === "email" ? { email: value } : {};
     if (col.k.startsWith("c:")) rows.forEach((r) => ctx.patchRows([r.id], { custom: { ...r.custom, [field]: value } }));
     else ctx.patchRows(rows.map((r) => r.id), patch);
   };
+}
+/** Wraps leadEditor with the same follow-up-date-and-note prompt LeadWindow uses, for every inline
+ * "Activity Resolutions" table-cell edit (single row or a bulk "Change field" selection) — picking a
+ * resolution like "Follow up"/"Verbal Yes" here used to save immediately with neither, which always
+ * failed server-side with no field anywhere to fill them in. Render `modal` wherever `onEdit` is used. */
+export function useLeadEditor(ctx: Ctx, toast: (m: string) => void) {
+  const editor = leadEditor(ctx, toast);
+  const [fuPrompt, setFuPrompt] = useState<{ rows: LeadRow[]; res: ResolutionDef; when: string; note: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const onEdit = async (rows: LeadRow[], col: Col<LeadRow>, value: string) => {
+    if (col.k === "resolution" && value) {
+      const picked = ctx.ws.resolutions.find((r) => r.id === value);
+      if (picked && resolutionRequiresFollowUp(picked.name)) { setFuPrompt({ rows, res: picked, when: "", note: "" }); return; }
+    }
+    await editor(rows, col, value);
+  };
+  const submit = async () => {
+    if (!fuPrompt || !fuPrompt.when || !fuPrompt.note.trim()) return;
+    setBusy(true);
+    await editor(fuPrompt.rows, { k: "resolution", label: "Activity Resolutions" }, fuPrompt.res.id, { followUpAt: new Date(fuPrompt.when).toISOString(), followUpNote: fuPrompt.note.trim() });
+    setBusy(false);
+    setFuPrompt(null);
+  };
+  const modal = fuPrompt && <Win small title={fuPrompt.res.name} onClose={() => setFuPrompt(null)}><div className="win-b" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ color: "var(--muted)", fontSize: 12.5 }}>&quot;{fuPrompt.res.name}&quot; needs a follow-up date and a note before it can be saved.</div>
+    <div className="fld"><label>Follow-up date &amp; time</label><input type="datetime-local" value={fuPrompt.when} onChange={(e) => setFuPrompt((p) => (p ? { ...p, when: e.target.value } : p))} /></div>
+    <div className="fld"><label>Note</label><input value={fuPrompt.note} onChange={(e) => setFuPrompt((p) => (p ? { ...p, note: e.target.value } : p))} placeholder="What happened?" /></div>
+    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><button type="button" className="btn" onClick={() => setFuPrompt(null)}>Cancel</button><button type="button" className="btn red" disabled={busy || !fuPrompt.when || !fuPrompt.note.trim()} onClick={submit}>{busy ? "Saving…" : "Save"}</button></div>
+  </div></Win>;
+  return { onEdit, modal };
 }
 /** "Add value" bulk panel — in the bulk bar between "Change field" and WhatsApp. Product is additive (checks
  * several, each becomes a new product assignment, existing ones untouched); every other dropdown field

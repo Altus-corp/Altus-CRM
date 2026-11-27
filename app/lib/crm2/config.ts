@@ -34,6 +34,15 @@ export const DEFAULT_RESOLUTION_BUCKETS: Record<string, BucketKey> = {
   "not interested": "lost", lost: "lost", dnd: "lost", "wrong number": "lost", "junk lead": "lost", "meeting cancelled": "lost", abandoned: "lost", cancelled: "lost", "old, graduate": "lost",
 };
 
+/** Same rule app/dashboard/leads/actions.ts's updateLeadResolutionInline enforces server-side: "Verbal
+ * Yes" and any resolution named "Follow up" (any spacing/case) require both a follow-up date/time and a
+ * note. Shared by every place that lets someone set a lead's resolution (lead window, table inline edit,
+ * mobile app) so each one can prompt for them instead of silently failing against that validation. */
+export function resolutionRequiresFollowUp(name: string) {
+  const normalized = name.trim().toLowerCase();
+  return /follow\s*up/.test(normalized) || normalized === "verbal yes";
+}
+
 /** Reporting-only grouping of Call Resolution values into named cards (Reports dashboard). Independent of
  * BUCKET/DEFAULT_RESOLUTION_BUCKETS above — this never affects the priority-stage/kanban logic, just reporting. */
 export type ReportGroupKey = "registered" | "tentative" | "callfollow" | "notinterested" | "pastattended" | "ringing" | "wrongnumber" | "pitched" | "proposalsent";

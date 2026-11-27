@@ -2,7 +2,7 @@ import type { AppRole } from "@/app/lib/roles";
 import type { BucketKey } from "./config";
 
 export type Person = { id: string; name: string; roles: AppRole[]; managerId: string | null };
-export type ProductDef = { id: string; code: string; name: string; stages: { id: string; name: string }[] };
+export type ProductDef = { id: string; code: string; name: string; stages: { id: string; name: string }[]; resolutionIds: string[] };
 export type ResolutionDef = { id: string; name: string; bucket: BucketKey };
 
 /** One row per lead × product assignment — every view (table, kanban, cards, calendar, dashboards) reads these. */

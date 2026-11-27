@@ -69,7 +69,7 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
   else scope = [user.userId];
 
   /* config */
-  const [{ data: prodRows }, { data: stageRows }, { data: resRows }, { data: colRows }, bucketRes, hygRes, tgtRes] = await Promise.all([
+  const [{ data: prodRows }, { data: stageRows }, { data: resRows }, { data: colRows }, bucketRes, hygRes, tgtRes, { data: prodResRows }] = await Promise.all([
     db.from("lead_products").select("id, code, name, is_active").eq("is_active", true),
     db.from("lead_stages").select("id, product_id, name, position, is_active").eq("is_active", true).order("position"),
     db.from("lead_resolutions").select("id, name, is_active").eq("is_active", true),
@@ -77,12 +77,15 @@ export async function loadWorkspace(user: User): Promise<Workspace> {
     db.from("crm_resolution_buckets").select("resolution_id, bucket"),
     db.from("crm_hygiene_rules").select("field_key, label, from_bucket, weight, is_active").eq("is_active", true),
     db.from("crm_targets").select("user_id, demos, references_per_week, ambassadors, calls_per_day, leads, meetings, focused_calls, product_targets"),
+    db.from("lead_product_resolutions").select("product_id, resolution_id").eq("is_active", true),
   ]);
   if (bucketRes.error || hygRes.error || tgtRes.error) warnings.push("Run supabase/migrations/20261117_crm_v2_ui.sql and 20261123_add_target_product_meeting_calls.sql to enable editable buckets, hygiene rules and targets (defaults in use).");
   const bucketOverride = new Map((bucketRes.data ?? []).map((b: Raw) => [s(b.resolution_id), b.bucket as BucketKey]));
   const resolutions: ResolutionDef[] = (resRows ?? []).map((r: Raw) => ({ id: s(r.id), name: s(r.name), bucket: bucketOverride.get(s(r.id)) ?? DEFAULT_RESOLUTION_BUCKETS[s(r.name).trim().toLowerCase()] ?? "approach" }));
   const resById = new Map(resolutions.map((r) => [r.id, r]));
-  const products: ProductDef[] = (prodRows ?? []).map((p: Raw) => ({ id: s(p.id), code: s(p.code), name: s(p.name), stages: (stageRows ?? []).filter((st: Raw) => s(st.product_id) === s(p.id)).map((st: Raw) => ({ id: s(st.id), name: s(st.name) })) }));
+  const resolutionIdsByProduct = new Map<string, string[]>();
+  (prodResRows ?? []).forEach((r: Raw) => { const pid = s(r.product_id); const list = resolutionIdsByProduct.get(pid) ?? []; list.push(s(r.resolution_id)); resolutionIdsByProduct.set(pid, list); });
+  const products: ProductDef[] = (prodRows ?? []).map((p: Raw) => ({ id: s(p.id), code: s(p.code), name: s(p.name), stages: (stageRows ?? []).filter((st: Raw) => s(st.product_id) === s(p.id)).map((st: Raw) => ({ id: s(st.id), name: s(st.name) })), resolutionIds: resolutionIdsByProduct.get(s(p.id)) ?? [] }));
   const prodById = new Map(products.map((p) => [p.id, p]));
   const stageById = new Map(products.flatMap((p) => p.stages.map((st) => [st.id, st.name] as const)));
   const columns = (colRows ?? []).map((c: Raw) => ({ key: s(c.field_key), label: s(c.label), source: s(c.source), fieldType: s(c.field_type) || "text", options: Array.isArray(c.options) ? c.options.map(String) : [], computedFrom: Array.isArray(c.computed_from) ? c.computed_from.map(String) : [] }));
