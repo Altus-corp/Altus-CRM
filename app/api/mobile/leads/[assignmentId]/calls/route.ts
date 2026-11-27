@@ -30,3 +30,5 @@ export async function POST(request: NextRequest, context: { params: Promise<{ as
     return mobileError(e instanceof Error ? e.message : "Could not log the call.", 400);
   }
 }
+
+export { mobileOptions as OPTIONS } from "@/app/api/mobile/_lib/respond";

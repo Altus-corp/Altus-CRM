@@ -1,17 +1,17 @@
 import { NativeTabs } from 'expo-router/native-tabs';
-import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 
-export default function AppTabs() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+// The web CRM has no dark mode, so this tab bar always uses the same brand palette regardless
+// of device color scheme (see constants/theme.ts).
+const colors = Colors.light;
 
+export default function AppTabs() {
   return (
     <NativeTabs
-      backgroundColor={colors.background}
-      indicatorColor={colors.backgroundElement}
-      labelStyle={{ selected: { color: colors.text } }}>
+      backgroundColor={colors.card}
+      indicatorColor={colors.backgroundSelected}
+      labelStyle={{ selected: { color: colors.accent } }}>
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Label>My Leads</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon

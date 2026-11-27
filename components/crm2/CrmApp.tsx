@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { DASHES, DEFAULT_DASH, PERIODS, TONES, dashesFor, modulesFor, primaryRole } from "@/app/lib/crm2/config";
 import * as M from "@/app/lib/crm2/metrics";
 import type { LeadRow, Workspace } from "@/app/lib/crm2/types";
-import { refreshWorkspace, v2ClaimLead, v2CreateLead } from "@/app/crm/actions";
+import { refreshWorkspace, v2ClaimLead, v2CreateAmbassadorLead, v2CreateLead } from "@/app/crm/actions";
 import { CrmCtx, useCrm, type Ctx, type Route } from "./context";
 import { TableQCtx } from "./DataTable";
 import { DashboardBody, ListWin, type DX } from "./dashboards";
@@ -212,8 +212,18 @@ function ProductPick({ ws, value, onChange }: { ws: Workspace; value: string; on
 }
 function AddLead({ onClose }: { onClose: () => void }) {
   const ctx = useCtx(); const toast = useToast(); const [v, setV] = useState({ firstName: "", lastName: "", phone: "", email: "" }); const [prods, setProds] = useState<string[]>([]); const [busy, setBusy] = useState(false);
+  const ambassadorProduct = ctx.ws.products.find((p) => p.code === "AMBASSADOR");
+  // An Ambassador record isn't combined with other product work (it gets its own stage/resolution
+  // routing and moves any existing work off the lead) — so picking it, or picking something else
+  // while it's picked, replaces the selection instead of adding to it.
+  const pickProduct = (id: string) => setProds((s) => {
+    if (s.includes(id)) return s.filter((x) => x !== id);
+    if (id === ambassadorProduct?.id || s.includes(ambassadorProduct?.id ?? "")) return [id];
+    return [...s, id];
+  });
+  const isAmbassador = Boolean(ambassadorProduct) && prods[0] === ambassadorProduct!.id;
   return <Win small title="Add lead" onClose={onClose}><div className="win-b"><div className="fgrid">{([["firstName", "First name *"], ["lastName", "Last name"], ["phone", "Cell number *"], ["email", "Email"]] as const).map(([k, l]) => <div key={k} className="fld"><label>{l}</label><input value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value })} /></div>)}</div>
-    <div style={{ padding: "0 14px" }}><div className="lbl" style={{ marginBottom: 6 }}>Products</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{ctx.ws.products.map((p) => <button key={p.id} className={`ptab ${prods.includes(p.id) ? "on" : ""}`} onClick={() => setProds((s) => (s.includes(p.id) ? s.filter((x) => x !== p.id) : [...s, p.id]))}>{displayProductCode(p.code)}</button>)}</div></div>
-    <div style={{ padding: 14, display: "flex", gap: 8, alignItems: "center" }}><span style={{ color: "var(--muted)", fontSize: 11.5, flex: 1 }}>Uses the existing lead rules: duplicate check, round robin, notifications.</span><button className="btn" onClick={onClose}>Cancel</button>
-      <button className="btn red" disabled={busy || !v.firstName || !v.phone} onClick={async () => { setBusy(true); const r = await v2CreateLead({ ...v, productIds: prods }); setBusy(false); toast(r.message); if (r.ok) { onClose(); ctx.refresh(); } }}><Icon n="check" s="s" /> Save</button></div></div></Win>;
+    <div style={{ padding: "0 14px" }}><div className="lbl" style={{ marginBottom: 6 }}>Products</div><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{ctx.ws.products.map((p) => <button key={p.id} className={`ptab ${prods.includes(p.id) ? "on" : ""}`} onClick={() => pickProduct(p.id)}>{displayProductCode(p.code)}</button>)}</div></div>
+    <div style={{ padding: 14, display: "flex", gap: 8, alignItems: "center" }}><span style={{ color: "var(--muted)", fontSize: 11.5, flex: 1 }}>{isAmbassador ? "Creates an Ambassador record — starts in Pre Sales until signed." : "Uses the existing lead rules: duplicate check, round robin, notifications."}</span><button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn red" disabled={busy || !v.firstName || !v.phone} onClick={async () => { setBusy(true); const r = isAmbassador ? await v2CreateAmbassadorLead(v) : await v2CreateLead({ ...v, productIds: prods }); setBusy(false); toast(r.message); if (r.ok) { onClose(); ctx.refresh(); } }}><Icon n="check" s="s" /> Save</button></div></div></Win>;
 }

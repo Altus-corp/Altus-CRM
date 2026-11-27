@@ -43,3 +43,5 @@ export async function POST(request: NextRequest) {
     user: { userId, email, displayName, roles: roles.map((item) => item.role as AppRole) },
   });
 }
+
+export { mobileOptions as OPTIONS } from "@/app/api/mobile/_lib/respond";

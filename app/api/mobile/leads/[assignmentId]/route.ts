@@ -11,3 +11,5 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ass
   if (!lead) return mobileError("This lead is not available.", 404);
   return mobileJson({ lead });
 }
+
+export { mobileOptions as OPTIONS } from "@/app/api/mobile/_lib/respond";

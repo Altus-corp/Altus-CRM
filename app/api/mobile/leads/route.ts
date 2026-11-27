@@ -16,3 +16,5 @@ export async function GET(request: NextRequest) {
     return mobileError(e instanceof Error ? e.message : "Unable to load your leads.", 500);
   }
 }
+
+export { mobileOptions as OPTIONS } from "@/app/api/mobile/_lib/respond";

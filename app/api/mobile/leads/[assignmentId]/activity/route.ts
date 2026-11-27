@@ -16,3 +16,5 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ass
     return mobileError(e instanceof Error ? e.message : "Unable to load activity.", 500);
   }
 }
+
+export { mobileOptions as OPTIONS } from "@/app/api/mobile/_lib/respond";

@@ -28,6 +28,7 @@ import {
 import type { ManagedUser } from "@/app/dashboard/users/users-table";
 import type { ApiActivityLog } from "@/components/marketplace/leads-management-api";
 import { saveTeam } from "@/app/dashboard/team/actions";
+import { createOwnAmbassador } from "@/app/dashboard/my-ambassador/actions";
 import { attendanceAvailability, attendanceForEmail, getWmsAttendance } from "@/app/lib/wms-attendance";
 import { withoutDuplicateSystemColumns } from "@/app/lib/lead-shared-config";
 import { loadWorkspace } from "@/app/lib/crm2/workspace";
@@ -429,4 +430,12 @@ export async function v2CreateLead(input: { firstName: string; lastName: string;
   const f = new FormData(); f.set("firstName", input.firstName); f.set("lastName", input.lastName); f.set("phone", input.phone); f.set("email", input.email); input.productIds.forEach((p) => f.append("productId", p));
   try { const r = await createManualLead(f); return r && typeof r === "object" && "ok" in r ? { ok: Boolean(r.ok), message: String((r as { message?: string }).message ?? "Saved") } : { ok: true, message: "Lead added" }; }
   catch (e) { return { ok: false, message: e instanceof Error ? e.message : "Could not add the lead." }; }
+}
+
+/** An Ambassador is also a lead, but it needs more than a plain lead insert — Pre Sales/Onboarding
+ * stage routing, is_ambassador, and moving any prior product work off the same phone number — so
+ * this routes to the exact same createOwnAmbassador() the dedicated Add Ambassador modal uses,
+ * rather than createManualLead (which deliberately refuses the AMBASSADOR product). */
+export async function v2CreateAmbassadorLead(input: { firstName: string; lastName: string; phone: string; email: string }): Promise<ActionResult> {
+  return createOwnAmbassador({ firstName: input.firstName, lastName: input.lastName, cellNumber: input.phone, email: input.email, salesPersonId: "" });
 }

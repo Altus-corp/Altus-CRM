@@ -7,3 +7,5 @@ export async function GET(request: NextRequest) {
   if (!user) return mobileError("Session is invalid or expired.", 401);
   return mobileJson({ user });
 }
+
+export { mobileOptions as OPTIONS } from "@/app/api/mobile/_lib/respond";
