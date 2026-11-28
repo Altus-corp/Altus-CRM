@@ -260,6 +260,14 @@ export type FilterState = Record<string, Set<string> | { period: string; from?: 
 export function applyFilters<T>(rows: T[], defs: FilterDef<T>[], f: FilterState) {
   return rows.filter((r) => defs.every((d) => { const v = f[d.k]; if (!v) return true; if ("period" in v) return inRange(d.get(r), v.period === "custom" ? customRange(v.from ?? "", v.to ?? "") : periodRange(v.period)); return v.size === 0 || v.has(String(d.get(r))); }));
 }
+/** One row per lead_product_assignment comes in; a lead with several products must still show as a single
+ * row in the table. Keeps the first (already sorted/filtered) assignment per lead as the visible row and
+ * nests the rest under it as `extraProducts`, revealed by the "+N" badge next to the Product cell. */
+export function groupLeadsByProduct(rows: LeadRow[]): LeadRow[] {
+  const byLead = new Map<string, LeadRow[]>(); const order: string[] = [];
+  rows.forEach((r) => { if (!byLead.has(r.leadId)) order.push(r.leadId); byLead.set(r.leadId, [...(byLead.get(r.leadId) ?? []), r]); });
+  return order.map((leadId) => { const [primary, ...rest] = byLead.get(leadId)!; return rest.length ? { ...primary, extraProducts: rest } : primary; });
+}
 export type Kpi<T> = { k: string; n: number; label: string; tone: Tone; test?: (r: T) => boolean };
 export function leadKpis(ws: Workspace, rows: LeadRow[]): Kpi<LeadRow>[] {
   const t = (fn: (r: LeadRow) => boolean) => ({ n: rows.filter(fn).length, test: fn });

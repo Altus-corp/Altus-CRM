@@ -9,7 +9,7 @@ import { v2SaveTarget } from "@/app/crm/actions";
 import { DataTable, ShareWhatsApp, type Col } from "./DataTable";
 import { FilterBar } from "./bars";
 import { Bars, Donut, Gap, HStack, Legend, PctBar, Spark, type Series } from "./charts";
-import { applyFilters, hiddenWithCustom, leadBulk, leadBulkAddValue, leadCard, leadCols, leadFilters, leadTone, useLeadEditor, type FilterState } from "./leads";
+import { applyFilters, groupLeadsByProduct, hiddenWithCustom, leadBulk, leadBulkAddValue, leadCard, leadCols, leadFilters, leadTone, useLeadEditor, type FilterState } from "./leads";
 import { displayProductCode } from "@/app/lib/product-display";
 import { Avatar, Icon, Pill, Tiles, Win, cap, fdate, fdt, fmt, money, toneStyle, useToast } from "./ui";
 
@@ -25,10 +25,10 @@ function LeadList({ id, rows, title, group, sort, hideExtra = [], q }: { id: str
   const ctx = useCrm(); const toast = useToast(); const [wa, setWa] = useState<LeadRow[] | null>(null);
   const cols = useMemo(() => leadCols(ctx.ws, ctx.canEdit, toast), [ctx.ws, ctx.canEdit, toast]);
   const { onEdit, modal } = useLeadEditor(ctx, toast);
-  return <><DataTable<LeadRow> id={id} rows={rows} cols={cols} title={title} q={q} hidden={[...hiddenWithCustom(ctx.ws), ...hideExtra]} group={group ?? null} sort={sort ?? null} frozen={1} views={["table", "kanban", "cards", "calendar"]}
+  return <><DataTable<LeadRow> id={id} rows={groupLeadsByProduct(rows)} cols={cols} title={title} q={q} hidden={[...hiddenWithCustom(ctx.ws), ...hideExtra]} group={group ?? null} sort={sort ?? null} frozen={1} views={["table", "kanban", "cards", "calendar"]}
     kanban={{ key: (r) => r.bucket, cols: Object.values(BUCKET).map((b) => ({ k: b.key, label: b.label, tone: b.tone })) }} calendarKey={(r) => r.nextFollowUp} rowTone={leadTone}
     onOpen={(r, list) => ctx.openLead(r, list)} onEdit={onEdit} bulk={leadBulk(ctx, toast, setWa)} bulkExtra={leadBulkAddValue(ctx, toast)} dupeKey={(r) => r.phone} exportName={title ?? "Leads"} card={leadCard(ctx.ws)} minHeight={280}
-    detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} />
+    detail={{ count: (r) => r.extraContacts, rows: (r) => r.extraRows }} detail2={{ count: (r) => r.extraProducts.length, rows: (r) => r.extraProducts, col: "product" }} />
     {wa && <ShareWhatsApp title="Message" text={wa.map((r) => r.name).join(", ")} onClose={() => setWa(null)} />}{modal}</>;
 }
 export function ListWin({ title, rows, onClose }: { title: string; rows: LeadRow[]; onClose: () => void }) {

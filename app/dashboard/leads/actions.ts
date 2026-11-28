@@ -14,6 +14,7 @@ import { createGoogleMeetEvent } from "@/app/lib/google-calendar";
 import { altusContactsRequest } from "@/app/lib/altus-contacts";
 import {
   callHasPhone,
+  extractAltusSummary,
   extractAltusTranscript,
   normalizePhone,
   type AltusCall,
@@ -404,6 +405,12 @@ export async function importLeadsCsv(
     };
   const userId = user.userId;
   const ambassadorImport = isAmbassadorWorkspace(user.roles);
+  // A sales manager may assign imported leads to themselves or a member of their own team (never
+  // anyone outside it); anyone else who isn't an admin always gets their imports assigned to themselves,
+  // same as before — the Sales Person column is simply ignored for them.
+  const managerTeamIds = !canManageAllLeads && user.roles.includes("sales_manager")
+    ? new Set([userId, ...(await getSalesManagerTeamMemberIds(userId))])
+    : null;
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size)
     return { ok: false, message: "Choose an Excel or CSV file to import." };
@@ -597,7 +604,11 @@ export async function importLeadsCsv(
     const assigneeIdFromSheet = salesPerson
       ? (salesPersonIds.get(normalizeHeader(salesPerson)) ?? null)
       : null;
-    const assigneeId = canManageAllLeads ? assigneeIdFromSheet : userId;
+    const assigneeId = canManageAllLeads
+      ? assigneeIdFromSheet
+      : managerTeamIds && assigneeIdFromSheet && managerTeamIds.has(assigneeIdFromSheet)
+        ? assigneeIdFromSheet
+        : userId;
     const rowLeadDatabase =
       leadDatabaseFromValue(
         fieldAt(
@@ -4024,11 +4035,18 @@ export async function syncLeadCallTranscripts(
       }
       if (!transcript) continue;
       available += 1;
+      const summaryInfo = extractAltusSummary(detailedCall);
       const transcriptPayload = {
           lead_id: leadId,
           lead_product_assignment_id: existingTranscript ? existingTranscript.lead_product_assignment_id : existingActivity?.lead_product_assignment_id ?? automaticAssignmentId,
           altus_call_id: callId,
           transcript_text: transcript,
+          summary: summaryInfo.summary || null,
+          key_points: summaryInfo.keyPoints,
+          action_items: summaryInfo.actionItems,
+          sentiment: summaryInfo.sentiment,
+          disposition: summaryInfo.disposition,
+          language: summaryInfo.language,
           source_payload: detailed.data ?? call,
           updated_at: new Date().toISOString(),
       };
@@ -4168,12 +4186,19 @@ export async function syncLeadTranscriptByCallId(
       .select("id")
       .eq("altus_call_id", callId)
       .maybeSingle();
+    const summaryInfo = extractAltusSummary(call);
     const { error } = await supabase.from("lead_call_transcripts").upsert(
       {
         lead_id: leadId,
         lead_product_assignment_id: automaticAssignmentId,
         altus_call_id: callId,
         transcript_text: transcript,
+        summary: summaryInfo.summary || null,
+        key_points: summaryInfo.keyPoints,
+        action_items: summaryInfo.actionItems,
+        sentiment: summaryInfo.sentiment,
+        disposition: summaryInfo.disposition,
+        language: summaryInfo.language,
         source_payload: call,
         updated_at: new Date().toISOString(),
       },

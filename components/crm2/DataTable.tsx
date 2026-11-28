@@ -29,6 +29,9 @@ export type TableProps<T extends { id: string }> = {
   /** A "+N" badge next to the first column — click to expand child rows beneath it, same columns as the parent
    * row (e.g. a lead's secondary contacts: same product/stage/etc., only name/phone/email differ). */
   detail?: { count: (r: T) => number; rows: (r: T) => T[] };
+  /** Same idea as `detail`, but the "+N" badge sits next to a named column instead of the first one (e.g. a
+   * lead's other product assignments, badged next to the Product cell instead of the name). */
+  detail2?: { count: (r: T) => number; rows: (r: T) => T[]; col: string };
 };
 /** Local search text for tables that do not receive `q` directly (e.g. dashboard tables). */
 export const TableQCtx = createContext("");
@@ -56,6 +59,8 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); const [dupes, setDupes] = useState(false); const [min, setMin] = useState(false); const [maxed, setMaxed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpanded = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const [expanded2, setExpanded2] = useState<Set<string>>(new Set());
+  const toggleExpanded2 = (id: string) => setExpanded2((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [win, setWin] = useState<null | "transpose" | "email" | "whatsapp">(null); const [mShow, setMShow] = useState(20);
   const dragCol = useRef<string | null>(null);
 
@@ -146,15 +151,22 @@ export function DataTable<T extends { id: string }>(p: TableProps<T>) {
   } else {
     // Same reasoning as the mobile list above: group against every matching row, not just the current page.
     const gr = groups(all);
-    const childTr = (child: T, parentId: string, idx: number) =><tr key={parentId + ":c" + idx} className="child-row" onDoubleClick={() => p.onOpen?.(child, all)}>
+    // A child row is still a real lead_product_assignment (or shares one with its parent) — inline-edit
+    // columns (Sales person, Life Cycle, Resolution) stay editable here, same as the parent row, so an
+    // admin/manager can reassign one product of a multi-product lead without touching its other products.
+    const childTr = (child: T, parentId: string, idx: number, kind: string) =><tr key={parentId + ":" + kind + idx} className="child-row" onDoubleClick={() => p.onOpen?.(child, all)}>
       <td className="c0 frz" style={{ left: 0 }} />
-      {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}>{i === 0 ? <span className="lname" style={{ paddingLeft: 18 }}>{cell(c, child)}</span> : cell(c, child)}</td>)}</tr>;
+      {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""} ${c.edit?.inline ? "edit" : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}>{i === 0 ? <span className="lname" style={{ paddingLeft: 18 }}>{cell(c, child)}</span> : c.edit?.inline && p.onEdit ? <InlineSelect col={c} row={child} onPick={(v) => applyEdit([child], c, v)} /> : cell(c, child)}</td>)}</tr>;
     const tr = (r: T): ReactNode[] => { const tn = p.rowTone?.(r); const dCount = p.detail?.count(r) ?? 0; const isOpen = expanded.has(r.id);
+      const pCount = p.detail2?.count(r) ?? 0; const isOpen2 = expanded2.has(r.id);
       const main = <tr key={r.id} className={`${sel.has(r.id) ? "sel" : ""} ${tn ? "lb" : ""}`} style={tn ? ({ ["--lbc" as string]: TONES[tn].mk }) : undefined} onDoubleClick={() => p.onOpen?.(r, all)}>
         <td className="c0 frz" style={{ left: 0 }}><input type="checkbox" className="cb" checked={sel.has(r.id)} onChange={() => toggle(r.id)} /></td>
         {cols.map((c, i) => <td key={c.k} className={`${c.num ? "num" : ""} ${fz[c.k] != null ? "frz" + (i === prefs.frozen - 1 ? " last" : "") : ""} ${c.edit ? "edit" : ""}`} style={fz[c.k] != null ? { left: fz[c.k] } : undefined}
-          onClick={(e) => { if (i === 0) return p.onOpen?.(r, all); if (c.edit && !c.edit.inline) pop.open(e.currentTarget, `cell:${r.id}:${c.k}`); }}>{i === 0 ? <span className="lname">{cell(c, r)}{dCount > 0 && <button type="button" className={`exp-badge ${isOpen ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); toggleExpanded(r.id); }} title={`${dCount} more contact${dCount > 1 ? "s" : ""}`}>+{dCount}</button>}</span> : c.edit?.inline && p.onEdit ? <InlineSelect col={c} row={r} onPick={(v) => applyEdit([r], c, v)} /> : cell(c, r)}</td>)}</tr>;
-      const children = p.detail && isOpen ? p.detail.rows(r).map((child, idx) => childTr(child, r.id, idx)) : [];
+          onClick={(e) => { if (i === 0) return p.onOpen?.(r, all); if (c.edit && !c.edit.inline) pop.open(e.currentTarget, `cell:${r.id}:${c.k}`); }}>{i === 0 ? <span className="lname">{cell(c, r)}{dCount > 0 && <button type="button" className={`exp-badge ${isOpen ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); toggleExpanded(r.id); }} title={`${dCount} more contact${dCount > 1 ? "s" : ""}`}>+{dCount}</button>}</span> : c.k === p.detail2?.col && pCount > 0 ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{cell(c, r)}<button type="button" className={`exp-badge ${isOpen2 ? "on" : ""}`} onClick={(e) => { e.stopPropagation(); toggleExpanded2(r.id); }} title={`${pCount} more product${pCount > 1 ? "s" : ""}`}>+{pCount}</button></span> : c.edit?.inline && p.onEdit ? <InlineSelect col={c} row={r} onPick={(v) => applyEdit([r], c, v)} /> : cell(c, r)}</td>)}</tr>;
+      const children = [
+        ...(p.detail && isOpen ? p.detail.rows(r).map((child, idx) => childTr(child, r.id, idx, "c")) : []),
+        ...(p.detail2 && isOpen2 ? p.detail2.rows(r).map((child, idx) => childTr(child, r.id, idx, "p")) : []),
+      ];
       return [main, ...children]; };
     body = <table className="t"><thead><tr><th className="c0 frz" style={{ left: 0 }} />
       {cols.map((c, i) => { const s = sort?.k === c.k; return <th key={c.k} draggable onDragStart={() => (dragCol.current = c.k)} onDragOver={(e) => e.preventDefault()} onDrop={() => { const f = dragCol.current; if (!f || f === c.k) return; const o = order.filter((k) => k !== f); o.splice(o.indexOf(c.k), 0, f); set({ order: o }); }}

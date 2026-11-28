@@ -14,6 +14,7 @@ import { FilterBar, KpiBar } from "./bars";
 import { LeadWindow } from "./LeadWindow";
 import { PageBody, sidebar } from "./pages";
 import { assignableOpts, canAssignOwner, ownerOpts, type FilterDef, type FilterState, type Kpi } from "./leads";
+import { BulkImportLeadsDialog } from "@/components/leads/admin-lead-import";
 import { displayProductCode } from "@/app/lib/product-display";
 import { Avatar, Icon, Popover, PortalCtx, ToastHost, Win, cap, fmt, toneStyle, usePop, useToast } from "./ui";
 
@@ -36,11 +37,16 @@ function Shell({ initial, initialRoute }: { initial: Workspace; initialRoute: Ro
     const page = r.page ?? first; const next = { module: mod, page };
     setRoute(next); setSheet(null); window.history.pushState(null, "", `/crm/${mod}/${page}`);
   }, [role, ws.roles]);
-  useEffect(() => { const f = () => { const [, , m, p] = location.pathname.split("/"); if (m) setRoute({ module: m, page: p ?? "" }); }; addEventListener("popstate", f); return () => removeEventListener("popstate", f); }, []);
+  // Pressing the browser Back button while the lead drawer is open closes the drawer instead of
+  // navigating away — openLead pushes a synthetic history entry for exactly this, and closeLead below
+  // pops it again on any other way of closing (X, Escape, backdrop) so Back still works normally afterwards.
+  useEffect(() => { const f = () => { if (lead) { setLead(null); return; } const [, , m, p] = location.pathname.split("/"); if (m) setRoute({ module: m, page: p ?? "" }); }; addEventListener("popstate", f); return () => removeEventListener("popstate", f); }, [lead]);
   const refresh = useCallback(async () => { try { setWs(await refreshWorkspace()); toast("Data refreshed"); } catch { toast("Refresh failed"); } }, [toast]);
   useEffect(() => { const t = setInterval(() => { refreshWorkspace().then(setWs).catch(() => {}); }, 5 * 60_000); return () => clearInterval(t); }, []);
   const patchRows = useCallback((ids: string[], patch: Partial<LeadRow>) => setWs((w) => ({ ...w, rows: w.rows.map((r) => (ids.includes(r.id) ? { ...r, ...patch } : r)) })), []);
-  const ctx: Ctx = { ws, role, canEdit, product, setProduct, period, setPeriod, route, go, openLead: (row, list) => setLead({ row, list: list ?? [row] }), patchRows, refresh };
+  const openLead = useCallback((row: LeadRow, list?: LeadRow[]) => { history.pushState({ crmLead: true }, "", location.pathname); setLead({ row, list: list ?? [row] }); }, []);
+  const closeLead = useCallback(() => { setLead(null); if (history.state?.crmLead) history.back(); }, []);
+  const ctx: Ctx = { ws, role, canEdit, product, setProduct, period, setPeriod, route, go, openLead, patchRows, refresh };
 
   const mod = mods.find((m) => m.id === route.module) ?? mods[0];
   const items = sidebar(ctx, mod.id);
@@ -68,7 +74,7 @@ function Shell({ initial, initialRoute }: { initial: Workspace; initialRoute: Ro
     {sheet === "modules" && <Win small title="Modules" onClose={() => setSheet(null)}><div className="win-b" style={{ padding: 12 }}><div className="modgrid">{mods.map((m) => <button key={m.id} className={m.id === mod.id ? "on" : ""} onClick={() => (m.ext ? window.open(m.ext, "_blank", "noopener") : go({ module: m.id }))}><Icon n={m.icon} s="l" />{m.label}{m.soon && <span className="soon">SOON</span>}</button>)}</div>
       <div className="install" style={{ marginTop: 14 }}><Icon n="download" /><div><b>Install on your phone</b><div style={{ opacity: 0.75 }}>Open this link in Chrome / Safari → Share → &ldquo;Add to Home Screen&rdquo;.</div></div></div></div></Win>}
     {sheet === "sections" && <Win small title={`${mod.label} · sections`} onClose={() => setSheet(null)}><div className="win-b seclist">{items.map((i) => <button key={i.id} onClick={() => go({ module: mod.id, page: i.id })} style={i.id === route.page ? { color: "var(--red)" } : undefined}><Icon n={i.icon ?? "chevr"} />{i.group ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>{i.group} ›</span> : null}{i.label}{i.cnt != null && <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{fmt(i.cnt)}</span>}</button>)}</div></Win>}
-    {lead && <LeadWindow row={lead.row} list={lead.list} onClose={() => setLead(null)} onNav={(row) => setLead({ row, list: lead.list })} />}
+    {lead && <LeadWindow row={lead.row} list={lead.list} onClose={closeLead} onNav={(row) => setLead({ row, list: lead.list })} />}
     {listWin && <ListWin title={listWin.title} rows={listWin.rows} onClose={() => setListWin(null)} />}
     {adding && <AddLead onClose={() => setAdding(false)} />}
   </div></CrmCtx.Provider>;
@@ -126,10 +132,22 @@ function TitleBar({ title, module, focus, setFocus, onAdd }: { title: string; mo
     if (res.ok) { setHitsFor((cur) => cur ? { ...cur, data: cur.data.map((h) => (h.assignmentId === r.assignmentId ? { ...h, assignedToId: assigneeId ?? ws.me, assignedToName: "You" } : h)) } : cur); ctx.refresh(); }
   };
   const canManagerAssign = canAssignOwner(ws);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const isAdmin = ws.roles.includes("admin"); const isManager = ws.roles.includes("sales_manager");
+  const canBulkUpload = isAdmin || isManager || ws.roles.some((r) => r === "sales_executive" || r === "consultant");
+  // Admin: any sales person. Manager: themselves or their own team (never anyone outside it, enforced
+  // again server-side). Executive/consultant: only themselves — the dialog's own "Sales Person is
+  // ignored" copy (ownImports) makes that explicit, same as the rest of the CRM already does elsewhere.
+  const bulkSalesPeople = isAdmin ? ownerOpts(ws).map((o) => ({ id: o.v, name: o.l }))
+    : isManager ? ownerOpts(ws).filter((o) => ws.scope.includes(o.v)).map((o) => ({ id: o.v, name: o.l }))
+    : [{ id: ws.me, name: ws.displayName }];
   return <div className="tbar"><span className="crumb"><span className="m">{module}</span><span className="sep">▶</span><span>{title}</span></span><span className="sp" />
     <div className="gsearch" onClick={(e) => pop.open(e.currentTarget, "search")}><Icon n="search" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search every lead — name, phone, company, people, dashboards…" /></div>
     <button className="ib mob-hide" title={`Refresh data (loaded ${new Date(ws.generatedAt).toLocaleTimeString("en-IN")})`} onClick={() => ctx.refresh()}><Icon n="refresh" /></button>
-    {ws.roles.includes("admin") && <Link className="ib mob-hide" href="/dashboard/leads" title="Bulk upload leads (classic importer)"><Icon n="upload" /></Link>}
+    {canBulkUpload && <button type="button" className="ib mob-hide" title="Bulk upload leads" onClick={() => setBulkOpen(true)}><Icon n="upload" /></button>}
+    {bulkOpen && <BulkImportLeadsDialog open onClose={() => setBulkOpen(false)} ownImports={!isAdmin && !isManager}
+      sampleColumns={ws.columns.map((c) => ({ label: c.label, field_key: c.key, source: c.source, field_type: c.fieldType, options: c.options, computed_from: c.computedFrom }))}
+      products={ws.products} resolutions={ws.resolutions} salesPeople={bulkSalesPeople} />}
     {onAdd && <button className="btn red mob-hide" onClick={onAdd}><Icon n="plus" s="s" /> Add lead</button>}
     <button className="ib mob-hide" title="Maximise (focus mode)" onClick={() => { setFocus(!focus); try { if (!focus) document.documentElement.requestFullscreen?.(); else if (document.fullscreenElement) document.exitFullscreen(); } catch {} }}><Icon n={focus ? "min" : "focus"} /></button>
     <AccountMenu />

@@ -427,6 +427,26 @@ export async function v2LeadChannelPartners(leadId: string): Promise<{ ids: stri
   return { ids, names: ids.map((id) => nameById.get(id) ?? "Ambassador").join(", ") };
 }
 
+/** Sets this contact's photo, keyed by their normalized phone number (same identity key leads.phone_key
+ * already uses) — so the same photo shows for every lead/product assignment sharing that phone, not just
+ * the one it was uploaded from. Access check mirrors the lead-attachment upload ticket's: admin, the
+ * assignment's own owner, their sales manager, or a channel-partner ambassador for this lead. */
+export async function v2SetLeadPhoto(leadId: string, assignmentId: string, url: string): Promise<ActionResult> {
+  const user = await requireUser();
+  const admin = createAdminClient();
+  const { data: assignment } = await admin.from("lead_product_assignments").select("id, lead_id, assigned_to").eq("id", assignmentId).eq("lead_id", leadId).maybeSingle();
+  if (!assignment) return { ok: false, message: "This product work record is no longer available." };
+  let allowed = user.roles.includes("admin") || assignment.assigned_to === user.userId;
+  if (!allowed && user.roles.includes("sales_manager")) allowed = Boolean(assignment.assigned_to && (await getSalesManagerTeamMemberIds(user.userId)).includes(assignment.assigned_to));
+  if (!allowed && user.roles.includes("ambassador")) { const { data: partner } = await admin.from("lead_channel_partners").select("lead_id").eq("lead_id", leadId).eq("ambassador_id", user.userId).maybeSingle(); allowed = Boolean(partner); }
+  if (!allowed) return { ok: false, message: "You can only set a photo for a lead assigned to you." };
+  const { data: lead } = await admin.from("leads").select("phone_key").eq("id", leadId).maybeSingle();
+  if (!lead?.phone_key) return { ok: false, message: "This lead has no valid phone number to attach the photo to." };
+  const { error } = await admin.from("lead_photos").upsert({ phone_key: lead.phone_key, photo_url: url, updated_at: new Date().toISOString() });
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, message: "Photo updated." };
+}
+
 /* ---------- Add lead (uses the existing createManualLead: duplicate checks, round robin, notifications) ---------- */
 export async function v2CreateLead(input: { firstName: string; lastName: string; phone: string; email: string; productIds: string[] }): Promise<ActionResult> {
   const f = new FormData(); f.set("firstName", input.firstName); f.set("lastName", input.lastName); f.set("phone", input.phone); f.set("email", input.email); input.productIds.forEach((p) => f.append("productId", p));

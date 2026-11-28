@@ -80,13 +80,16 @@ export function usePop() {
 }
 
 /* ---------- window (detail views open as windows, not side panels) ---------- */
-export function Win({ title, onClose, children, small, extra }: { title: ReactNode; onClose: () => void; children: ReactNode; small?: boolean; extra?: ReactNode }) {
+/** `drawer` docks the window to the right edge, full height, sliding in from the right — used for record
+ * detail views (e.g. LeadWindow) on desktop instead of a centered modal. Falls back to the usual centered/
+ * bottom-sheet window on phones (see the drawer media query), since there's no "edge" to dock to there. */
+export function Win({ title, onClose, children, small, drawer, extra }: { title: ReactNode; onClose: () => void; children: ReactNode; small?: boolean; drawer?: boolean; extra?: ReactNode }) {
   const [full, setFull] = useState(false);
   // Blur whatever field is focused before actually closing, so its onBlur-triggered autosave fires first —
   // otherwise Escape (which never touches focus) or a fast click away can close the window mid-edit and drop it.
   const closeSafely = () => { (document.activeElement as HTMLElement | null)?.blur?.(); onClose(); };
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === "Escape" && closeSafely(); document.addEventListener("keydown", k); return () => document.removeEventListener("keydown", k); }, [onClose]);
-  return <Portal><div className="ov" onMouseDown={(e) => e.target === e.currentTarget && closeSafely()}><div className={`win ${small ? "sm" : ""} ${full ? "full" : ""}`}>
+  return <Portal><div className={`ov ${drawer ? "rdrawer" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && closeSafely()}><div className={`win ${small ? "sm" : ""} ${drawer ? "rdrawer" : ""} ${full ? "full" : ""}`}>
     <div className="win-h"><h2>{title}</h2><span style={{ flex: 1 }} />{extra}<button className="ib" onClick={() => setFull((f) => !f)} title="Maximise"><Icon n="max" /></button><button className="ib" onClick={closeSafely} title="Close"><Icon n="x" /></button></div>
     {children}</div></div></Portal>;
 }

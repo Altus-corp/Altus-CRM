@@ -61,34 +61,19 @@ async function downloadSample(columns: SampleColumn[], products: Product[], reso
   const link = document.createElement("a"); link.href = url; link.download = "leads-import-template.xlsx"; document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function AdminLeadImport({ sampleColumns, products, resolutions, salesPeople, ambassadors = [], ownImports = false, showManualOption = false }: { sampleColumns: SampleColumn[]; products: Product[]; resolutions: NamedOption[]; salesPeople: SalesPerson[]; ambassadors?: Ambassador[]; ownImports?: boolean; showManualOption?: boolean }) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [isOpen, setIsOpen] = useState(false);
-  const [addMode, setAddMode] = useState<"choice" | "manual" | null>(null);
+/** The "Import leads" (bulk Excel/CSV) dialog on its own, open/close controlled by the caller — split out
+ * of AdminLeadImport so other screens (e.g. the new /crm UI) can trigger just the bulk-upload step from
+ * their own button, without that component's own "+ Add Lead" trigger or the manual-vs-bulk choice step. */
+export function BulkImportLeadsDialog({ open, onClose, sampleColumns, products, resolutions, salesPeople, ownImports = false }: { open: boolean; onClose: () => void; sampleColumns: SampleColumn[]; products: Product[]; resolutions: NamedOption[]; salesPeople: SalesPerson[]; ownImports?: boolean }) {
   const [isImporting, setIsImporting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => {
-    if (!addMode && !isOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || isImporting) return;
-      setAddMode(null);
-      setIsOpen(false);
-    };
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !isImporting) onClose(); };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [addMode, isImporting, isOpen]);
-  useEffect(() => {
-    if (searchParams.get("add") !== "1") return;
-    setMessage(null);
-    if (ownImports || showManualOption) setAddMode("choice");
-    else setIsOpen(true);
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("add");
-    const query = next.toString();
-    router.replace(`/dashboard/leads${query ? `?${query}` : ""}`);
-  }, [ownImports, router, searchParams, showManualOption]);
+  }, [open, isImporting, onClose]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -101,8 +86,32 @@ export function AdminLeadImport({ sampleColumns, products, resolutions, salesPeo
       setMessage({ ok: false, text: "The import could not be completed. Refresh the leads list before retrying." });
     } finally { setIsImporting(false); }
   }
+  if (!open) return null;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="import-leads-title"><form onSubmit={submit} className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-extrabold tracking-[0.12em] text-red-600">LEADS MASTER</p><h2 id="import-leads-title" className="mt-1 text-xl font-extrabold text-slate-900">Import leads</h2><p className="mt-1 text-sm text-slate-500">{ownImports ? "Upload Excel or CSV. Imported leads are assigned to you and kept outside round robin." : "Upload Excel or CSV. Lead Type controls the destination of each row."}</p></div><button type="button" onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100">&#215;</button></div><div className="mt-5 rounded-lg border border-red-100 bg-red-50 p-3 text-xs text-red-700"><p className="font-extrabold">Need the current format?</p><button type="button" disabled={isDownloading} onClick={async () => { setIsDownloading(true); try { await downloadSample(sampleColumns, products, resolutions, salesPeople); } finally { setIsDownloading(false); } }} className="mt-1 font-bold underline disabled:opacity-50">{isDownloading ? "Preparing Excel..." : "Download Excel template"}</button></div><label className="mt-3 block rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center"><span className="text-sm font-extrabold text-slate-700">Choose Excel or CSV file</span><span className="mt-1 block text-xs text-slate-500">{ownImports ? "First Name, Last Name, and a 10-digit Cell Number are required. Sales Person is ignored: all imports are assigned to you. Product defaults to PSO and Lead Type to Database Leads when blank." : "First Name, Last Name, and a 10-digit Cell Number are required. Leave Sales Person blank to keep the lead unassigned. Product defaults to PSO and Lead Type defaults to Database Leads when blank."}</span><input name="file" type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required className="mt-3 block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-bold file:text-slate-700" /></label>{message && <p className={`mt-3 rounded-lg px-3 py-2 text-sm font-semibold ${message.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message.text}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button><button disabled={isImporting} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isImporting ? "Importing..." : "Import leads"}</button></div></form></div>;
+}
+
+export function AdminLeadImport({ sampleColumns, products, resolutions, salesPeople, ambassadors = [], ownImports = false, showManualOption = false }: { sampleColumns: SampleColumn[]; products: Product[]; resolutions: NamedOption[]; salesPeople: SalesPerson[]; ambassadors?: Ambassador[]; ownImports?: boolean; showManualOption?: boolean }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [isOpen, setIsOpen] = useState(false);
+  const [addMode, setAddMode] = useState<"choice" | "manual" | null>(null);
+  useEffect(() => {
+    if (!addMode) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setAddMode(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [addMode]);
+  useEffect(() => {
+    if (searchParams.get("add") !== "1") return;
+    if (ownImports || showManualOption) setAddMode("choice");
+    else setIsOpen(true);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("add");
+    const query = next.toString();
+    router.replace(`/dashboard/leads${query ? `?${query}` : ""}`);
+  }, [ownImports, router, searchParams, showManualOption]);
   return <>
-    <button type="button" onClick={() => { if (ownImports || showManualOption) setAddMode("choice"); else setIsOpen(true); setMessage(null); }} className="h-9 rounded-md bg-[#d90000] px-3 text-xs font-extrabold text-white shadow-sm hover:bg-red-700">+ Add Lead</button>
+    <button type="button" onClick={() => { if (ownImports || showManualOption) setAddMode("choice"); else setIsOpen(true); }} className="h-9 rounded-md bg-[#d90000] px-3 text-xs font-extrabold text-white shadow-sm hover:bg-red-700">+ Add Lead</button>
     {addMode === "choice" && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="add-ambassador-lead-title">
       <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-extrabold tracking-[0.12em] text-red-600">LEADS</p><h2 id="add-ambassador-lead-title" className="mt-1 text-xl font-extrabold text-slate-900">Add leads</h2><p className="mt-1 text-sm text-slate-500">{ownImports ? "Add a lead manually or import in bulk. All leads are assigned to you and kept outside round robin." : "Add one lead manually or upload many from an Excel or CSV sheet."}</p></div><button type="button" onClick={() => setAddMode(null)} aria-label="Close" className="h-8 w-8 shrink-0 rounded-lg text-slate-500 hover:bg-slate-100">&#215;</button></div>
@@ -113,6 +122,6 @@ export function AdminLeadImport({ sampleColumns, products, resolutions, salesPeo
       </div>
     </div>}
     {addMode === "manual" && <ManualLeadModal products={products} ambassadors={ambassadors} outsideRoundRobin={ownImports} onClose={() => setAddMode(null)} />}
-    {isOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="import-leads-title"><form onSubmit={submit} className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><p className="text-[11px] font-extrabold tracking-[0.12em] text-red-600">LEADS MASTER</p><h2 id="import-leads-title" className="mt-1 text-xl font-extrabold text-slate-900">Import leads</h2><p className="mt-1 text-sm text-slate-500">{ownImports ? "Upload Excel or CSV. Imported leads are assigned to you and kept outside round robin." : "Upload Excel or CSV. Lead Type controls the destination of each row."}</p></div><button type="button" onClick={() => setIsOpen(false)} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100">&#215;</button></div><div className="mt-5 rounded-lg border border-red-100 bg-red-50 p-3 text-xs text-red-700"><p className="font-extrabold">Need the current format?</p><button type="button" disabled={isDownloading} onClick={async () => { setIsDownloading(true); try { await downloadSample(sampleColumns, products, resolutions, salesPeople); } finally { setIsDownloading(false); } }} className="mt-1 font-bold underline disabled:opacity-50">{isDownloading ? "Preparing Excel..." : "Download Excel template"}</button></div><label className="mt-3 block rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center"><span className="text-sm font-extrabold text-slate-700">Choose Excel or CSV file</span><span className="mt-1 block text-xs text-slate-500">{ownImports ? "First Name, Last Name, and a 10-digit Cell Number are required. Sales Person is ignored: all imports are assigned to you. Product defaults to PSO and Lead Type to Database Leads when blank." : "First Name, Last Name, and a 10-digit Cell Number are required. Leave Sales Person blank to keep the lead unassigned. Product defaults to PSO and Lead Type defaults to Database Leads when blank."}</span><input name="file" type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required className="mt-3 block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-xs file:font-bold file:text-slate-700" /></label>{message && <p className={`mt-3 rounded-lg px-3 py-2 text-sm font-semibold ${message.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>{message.text}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={() => setIsOpen(false)} className="h-9 rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button><button disabled={isImporting} className="h-9 rounded-lg bg-[#d90000] px-4 text-sm font-extrabold text-white hover:bg-red-700 disabled:opacity-60">{isImporting ? "Importing..." : "Import leads"}</button></div></form></div>}
+    {isOpen && <BulkImportLeadsDialog open onClose={() => setIsOpen(false)} sampleColumns={sampleColumns} products={products} resolutions={resolutions} salesPeople={salesPeople} ownImports={ownImports} />}
   </>;
 }

@@ -1,6 +1,6 @@
 "use server";
 
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/app/lib/auth";
 import { sendAccountCredentials } from "@/app/lib/email";
@@ -8,6 +8,7 @@ import { createAdminClient } from "@/app/lib/supabase/admin";
 import { notifyLeadMovedToAmbassador } from "@/app/lib/lead-notifications";
 import { indiaToday } from "@/app/lib/lead-event-schedule";
 import { getSalesManagerTeamMemberIds } from "@/app/lib/sales-manager-team";
+import { generateAmbassadorAgreementPdf, type AgreementSignature } from "@/app/lib/ambassador-agreement-pdf";
 
 const AGREEMENT_STATUSES = new Set(["Abandoned", "Agreement Sent", "Agreement Signed", "Not Pitched", "Pitched", "Query", "Said No", "Verbal Yes"]);
 const SIGNED_RESOLUTION_KEYS = ["agreementsignedwaived", "agreementsignedorwaived", "agreementsignedwaivedoff", "agreementsignedorwaivedoff"];
@@ -491,6 +492,17 @@ export async function importAmbassadorAccounts(
   } catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Unable to import Ambassador accounts." }; }
 }
 
+/** When an Ambassador's website application includes a selfie, mirror it as this contact's CRM photo
+ * (lead_photos, keyed by phone — the same photo then shows for every lead/assignment with that number).
+ * AltusCorp hosts the actual file on its own storage and only ever hands us a signed URL valid for ~300
+ * seconds, so that can't be stored directly — this stores the same same-origin proxy path the "View
+ * document" link already uses instead (/api/ambassador-documents/selfie?externalId=...): an <img> tag
+ * follows its redirect exactly like a link click does, so it re-fetches a fresh signed URL from AltusCorp
+ * every time the photo is actually displayed, no separate upload or storage of our own required. */
+async function mirrorAmbassadorSelfieAsPhoto(externalId: string, phoneKey: string, supabase: ReturnType<typeof createAdminClient>) {
+  await supabase.from("lead_photos").upsert({ phone_key: phoneKey, photo_url: `/api/ambassador-documents/selfie?externalId=${encodeURIComponent(externalId)}`, updated_at: new Date().toISOString() });
+}
+
 type ExternalAmbassadorSyncResult = { ok: boolean; message: string; imported?: number; updated?: number; skipped?: number };
 
 export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<ExternalAmbassadorSyncResult> {
@@ -643,6 +655,7 @@ export async function syncAltusCorpAmbassadors(actorUserId?: string): Promise<Ex
       if (justSigned) await supabase.from("lead_product_assignments").update({ is_active: false, is_closed: true, focused_on: null, next_follow_up_at: null }).eq("lead_id", leadId).neq("product_id", product.id).eq("is_active", true).eq("is_closed", false);
       await supabase.from("lead_external_sources").upsert({ lead_id: leadId, source, external_id: externalId }, { onConflict: "source,external_id" });
       await supabase.from("lead_activities").insert({ lead_id: leadId, lead_product_assignment_id: assignment.id, activity_type: "altuscorp_ambassador_synced", note: `Ambassador agreement synced from AltusCorp (${signed ? "Agreement Signed / Waived — Onboarding Ambassador" : "Agreement Sent — Pre Sales"}).`, metadata: { external_id: externalId, has_signed_pdf: signed, matched_by_cell_number: Boolean(phoneMatchedLead), updated_at: record.updatedAt ?? null }, created_by: actor.userId });
+      if (record.documents?.selfie?.url && phone) await mirrorAmbassadorSelfieAsPhoto(externalId, phone, supabase);
     }
     revalidatePath("/dashboard/my-ambassador"); revalidatePath("/dashboard/leads"); revalidatePath("/dashboard");
     return { ok: true, message: `AltusCorp Ambassador sync completed. ${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}.${skipReasons.length ? ` ${[...new Set(skipReasons)].join(" ")}` : ""}`, imported, updated, skipped };
@@ -999,6 +1012,110 @@ export async function uploadAmbassadorAgreementDocument(formData: FormData): Pro
     return { ok: true, message: "Agreement uploaded and marked Signed." };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to upload this agreement." };
+  }
+}
+
+/** Downloads a signed Supabase Storage document URL (Ambassador selfie/signature/etc.) and sniffs whether
+ * it's a PNG or JPEG from the response's content-type, since pdf-lib needs the right embed call for each. */
+async function fetchSignatureImage(url: string | null | undefined): Promise<AgreementSignature> {
+  if (!url) return null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type") || "";
+    const kind: "png" | "jpg" = contentType.includes("png") ? "png" : "jpg";
+    return { bytes: new Uint8Array(await response.arrayBuffer()), kind };
+  } catch { return null; }
+}
+
+/** "Digital" agreement: the same document uploadAmbassadorAgreementDocument records for a manual PDF, but
+ * generated here from the AltusCorp Ambassador record's own data instead of a human filling in and
+ * uploading a template — only available once this lead actually has a matching AltusCorp record (i.e. it
+ * was synced from the website). Re-fetches that record fresh (AltusCorp's document/signature URLs are only
+ * signed for ~300 seconds) and embeds whichever signatures AltusCorp already has on file; it never invents
+ * one that doesn't exist, so the Altus Corp side may be blank until AltusCorp's own records show it signed. */
+export type AgreementPreviewResult = { ok: boolean; message: string; documentUrl?: string; documentMime?: string; documentSize?: number };
+
+/** Generates the Ambassador Agreement PDF and uploads it to the CDN so it can be previewed, but does NOT
+ * mark the agreement Signed or change stage/resolution yet — that only happens once the preview is
+ * confirmed via uploadAmbassadorAgreementDocument (the same finalize step the manual-upload path uses),
+ * so a preview that's discarded leaves the record untouched. */
+export async function previewAmbassadorAgreementDigital(assignmentId: string): Promise<AgreementPreviewResult> {
+  try {
+    const user = await requireUser();
+    if (!/^[0-9a-f-]{36}$/i.test(assignmentId)) throw new Error("Invalid Ambassador record.");
+    const supabase = createAdminClient();
+    const { data: assignment, error: assignmentError } = await supabase.from("lead_product_assignments").select("lead_id, product_id, assigned_to").eq("id", assignmentId).maybeSingle();
+    if (assignmentError || !assignment) throw new Error(assignmentError?.message || "Ambassador record not found.");
+    const { data: product, error: productError } = await supabase.from("lead_products").select("code").eq("id", assignment.product_id).maybeSingle();
+    if (productError || workflowKey(product?.code) !== "ambassador") throw new Error("Ambassador record not found.");
+
+    let allowed = user.roles.includes("admin") || assignment.assigned_to === user.userId;
+    if (!allowed && user.roles.includes("sales_manager")) {
+      const teamMemberIds = await getSalesManagerTeamMemberIds(user.userId);
+      allowed = Boolean(assignment.assigned_to && teamMemberIds.includes(assignment.assigned_to));
+    }
+    if (!allowed) throw new Error("This Ambassador record is not assigned to you or your team.");
+
+    const { data: lead, error: leadError } = await supabase.from("leads").select("external_source, external_id").eq("id", assignment.lead_id).maybeSingle();
+    if (leadError || !lead) throw new Error("Lead not found.");
+    if (lead.external_source !== "altuscorp_ambassador" || !lead.external_id) throw new Error("This lead has no matching AltusCorp Ambassador record to generate a digital agreement from. Use Manual upload instead.");
+
+    const apiKey = process.env.ALTUSCORP_EXTERNAL_LEADS_API_KEY?.trim();
+    const baseUrl = (process.env.ALTUSCORP_EXTERNAL_LEADS_API_BASE_URL?.trim() || "https://altuscorp.in/api/external").replace(/\/$/, "");
+    if (!apiKey) throw new Error("AltusCorp API is not configured.");
+    const response = await fetch(`${baseUrl}/ambassadors/${lead.external_id}`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) throw new Error("AltusCorp could not return this Ambassador's record.");
+    const payload = await response.json().catch(() => null) as { data?: AltusCorpExternalAmbassador } | AltusCorpExternalAmbassador | null;
+    const record = (payload && typeof payload === "object" && "data" in payload ? payload.data : payload) as AltusCorpExternalAmbassador | null;
+    if (!record) throw new Error("AltusCorp returned no data for this Ambassador.");
+
+    const [ambassadorSignature, altusSignature] = await Promise.all([
+      fetchSignatureImage(record.documents?.ambassadorSignature?.url),
+      fetchSignatureImage(record.documents?.altusSignature?.url),
+    ]);
+    const ambassadorDisplayName = cleanText(record.ambassadorName) || [record.firstName, record.lastName].filter(Boolean).join(" ") || cleanText(record.entityName) || "Ambassador";
+    const pdfBytes = await generateAmbassadorAgreementPdf({
+      agreementDate: cleanText(record.agreementDate) || new Date().toISOString().slice(0, 10),
+      entityType: cleanText(record.entityType) || "Individual",
+      ambassadorDisplayName,
+      legalName: cleanText(record.legalName) || ambassadorDisplayName,
+      designation: cleanText(record.designation) || null,
+      address: cleanText(record.address, 2000) || [record.addressLine1, record.addressLine2, record.city, record.state, record.postalCode].filter(Boolean).join(", "),
+      email: cleanText(record.email) || null,
+      contactNumber: cleanText(record.contactNumber) || null,
+      pan: cleanText(record.pan) || null,
+      gstin: cleanText(record.gstin) || null,
+      referralFeePercent: Number(record.referralFeePercent) || 0,
+      aadhaar: cleanText(record.kyc?.aadhaarNumber ?? record.kyc?.aadhaarOrGovId) || null,
+      bank: { bankName: cleanText(record.bank?.bankName) || null, accountHolderName: cleanText(record.bank?.accountHolderName) || null, accountNumber: cleanText(record.bank?.accountNumber) || null, ifscCode: cleanText(record.bank?.ifscCode) || null, invoiceEmail: cleanText(record.bank?.invoiceEmail) || null },
+      documentsUploaded: {
+        cancelledCheque: Boolean(record.kyc?.documentsUploaded?.cancelledCheque ?? record.kyc?.hasCancelledCheque),
+        selfie: Boolean(record.kyc?.documentsUploaded?.selfie),
+        panCopy: Boolean(record.kyc?.documentsUploaded?.panCopy ?? record.kyc?.hasPanCopy),
+        kycIdProof: Boolean(record.kyc?.documentsUploaded?.kycIdProof ?? record.kyc?.hasKycIdProof),
+        gstCertificate: Boolean(record.kyc?.documentsUploaded?.gstCertificate ?? record.kyc?.hasGstCertificate),
+      },
+      ambassadorSignature, altusSignature,
+      altusSignatoryName: cleanText(record.altusSignatory?.name) || "Manan Jitin Vasa",
+      altusSignatoryDesignation: cleanText(record.altusSignatory?.designation) || "Proprietor",
+    });
+
+    const uploadUrl = process.env.CDN_UPLOAD_URL; const signingSecret = process.env.CDN_UPLOAD_SIGNING_SECRET;
+    if (!uploadUrl || !signingSecret) throw new Error("CDN uploads are not configured yet.");
+    const expires = Math.floor(Date.now() / 1000) + 5 * 60;
+    const nonce = randomUUID();
+    const signature = createHmac("sha256", signingSecret).update(`${assignment.lead_id}|${assignmentId}|${nonce}|${expires}`).digest("hex");
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" }), `ambassador-agreement-${lead.external_id}.pdf`);
+    form.set("lead_id", assignment.lead_id); form.set("assignment_id", assignmentId); form.set("nonce", nonce); form.set("expires", String(expires)); form.set("signature", signature);
+    const uploadResponse = await fetch(uploadUrl, { method: "POST", body: form });
+    const uploadPayload = await uploadResponse.json().catch(() => null) as { ok?: boolean; error?: string; url?: string; mime?: string; size?: number } | null;
+    if (!uploadResponse.ok || !uploadPayload?.ok || !uploadPayload.url) throw new Error(uploadPayload?.error || "The CDN could not upload the generated agreement.");
+
+    return { ok: true, message: "Preview ready.", documentUrl: uploadPayload.url, documentMime: uploadPayload.mime ?? "application/pdf", documentSize: uploadPayload.size ?? pdfBytes.length };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to generate the digital agreement." };
   }
 }
 

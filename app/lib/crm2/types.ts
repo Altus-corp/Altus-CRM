@@ -37,10 +37,16 @@ export type LeadRow = {
   /** Only meaningful when product === "AMBASSADOR": whether this Ambassador lead already has a CRM login
    * (lead_product_assignments.ambassador_user_id, set once Create Ambassador Account matches them by phone). */
   ambassadorHasAccount: boolean;
+  photo: string | null; // lead_photos, keyed by this contact's phone — shared across every lead/assignment with the same number
+  agreementLink: string | null; // lead_product_assignments.ambassador_signed_agreement_link — only meaningful when product === "AMBASSADOR"
   extraContacts: number; // lead_contacts rows for this lead (secondary contacts beyond the lead's own Primary contact)
   /** One synthetic row per secondary contact — same product/stage/resolution/owner/etc. as this row, only
    * name/phone/email differ. Rendered as child rows under this lead in the table when expanded. */
   extraRows: LeadRow[];
+  /** Other active product assignments for this same lead (lead_product_assignments rows beyond this one) —
+   * same contact, different product/stage/resolution/owner. Rendered as child rows under this lead in the
+   * table, revealed by the "+N" badge next to the Product cell, so one lead never shows as several rows. */
+  extraProducts: LeadRow[];
   custom: Record<string, string>;
 };
 export type CallEv = { u: string; t: string; c: boolean; out: boolean; d: number; a: string | null };

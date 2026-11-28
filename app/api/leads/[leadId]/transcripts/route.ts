@@ -6,7 +6,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/leads/[
     await requireUser();
     const { leadId } = await context.params;
     const supabase = await createClient();
-    const { data, error } = await supabase.from("lead_call_transcripts").select("id, altus_call_id, transcript_text, lead_product_assignment_id, created_at, updated_at").eq("lead_id", leadId).order("updated_at", { ascending: false });
+    const { data, error } = await supabase.from("lead_call_transcripts").select("id, altus_call_id, transcript_text, summary, key_points, action_items, sentiment, disposition, language, lead_product_assignment_id, created_at, updated_at").eq("lead_id", leadId).order("updated_at", { ascending: false });
     if (error) return Response.json({ ok: false, error: error.message }, { status: 400 });
     return Response.json({ ok: true, transcripts: data ?? [] });
   } catch {
