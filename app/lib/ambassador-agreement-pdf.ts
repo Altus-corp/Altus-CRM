@@ -8,7 +8,7 @@ import "server-only";
 // rather than inventing a signature that was never actually given.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, degrees, rgb, type RGB } from "pdf-lib";
+import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, rgb, type RGB } from "pdf-lib";
 
 export type AgreementSignature = { bytes: Uint8Array; kind: "png" | "jpg" } | null;
 export type AgreementData = {
@@ -33,14 +33,15 @@ export type AgreementData = {
 };
 
 const RED: RGB = rgb(0.85, 0.04, 0.04);
-const MAROON: RGB = rgb(0.35, 0.04, 0.04);
 const BLACK: RGB = rgb(0.08, 0.08, 0.08);
 const GRAY: RGB = rgb(0.42, 0.42, 0.44);
 const LINE: RGB = rgb(0.82, 0.82, 0.84);
 const WHITE: RGB = rgb(1, 1, 1);
 
 const PAGE_W = 595.28, PAGE_H = 841.89;
-const MARGIN_X = 50, CONTENT_TOP = 715, CONTENT_BOTTOM = 70, HEADER_H = 105;
+// header.png is 1087x229 (~4.75:1) — scaled to the page's full width, keeping its own aspect ratio.
+const HEADER_H = PAGE_W * (229 / 1087);
+const MARGIN_X = 50, CONTENT_TOP = PAGE_H - HEADER_H - 30, CONTENT_BOTTOM = 70;
 const REGISTERED_OFFICE = "C-6, Sacred Space, Gambhir Industrial Estate, Near Pravasi Industrial Estate, Kotkar Road, Goregaon East, Mumbai 400063";
 const CONTACT_EMAIL = "support@unleashed.in";
 const FOOTER_CONTACT = "+91 80970 10410|manan@unleashed.in|www.mananvasa.com";
@@ -74,7 +75,7 @@ class Writer {
   pages: PDFPage[] = [];
   page!: PDFPage;
   y = CONTENT_TOP;
-  constructor(private doc: PDFDocument, private font: PDFFont, private bold: PDFFont, private logo: PDFImage | null) { this.addPage(); }
+  constructor(private doc: PDFDocument, private font: PDFFont, private bold: PDFFont, private logo: PDFImage | null, private header: PDFImage | null) { this.addPage(); }
 
   /** A small right-pointing triangle (▸), drawn as a vector shape instead of a text glyph — the standard
    * PDF fonts' WinAnsi encoding has no glyph for the Unicode arrow character. */
@@ -87,16 +88,16 @@ class Writer {
     this.pages.push(page);
     this.page = page;
 
-    // Header: thin black top rule, white band, two layered diagonal bands (maroon behind, red in front)
-    // sweeping across the upper-right corner — oversized rotated rectangles that the page edge crops,
-    // approximating the brand's angled banner — with the logo sitting in the clear white area on the left.
+    // Header: thin black top rule, then the brand's own header graphic (the real diagonal banner, not a
+    // hand-drawn approximation) scaled to the page's full width, with the logo placed over its lower-left
+    // white area — matching where it sits in the reference design.
     page.drawRectangle({ x: 0, y: PAGE_H - 4, width: PAGE_W, height: 4, color: BLACK });
-    page.drawRectangle({ x: PAGE_W * 0.42, y: PAGE_H - HEADER_H, width: PAGE_W, height: HEADER_H + 60, color: MAROON, rotate: degrees(-16) });
-    page.drawRectangle({ x: PAGE_W * 0.52, y: PAGE_H - HEADER_H + 10, width: PAGE_W, height: HEADER_H - 20, color: RED, rotate: degrees(-16) });
+    if (this.header) page.drawImage(this.header, { x: 0, y: PAGE_H - HEADER_H - 4, width: PAGE_W, height: HEADER_H });
+    else page.drawRectangle({ x: 0, y: PAGE_H - HEADER_H - 4, width: PAGE_W, height: HEADER_H, color: RED });
     if (this.logo) {
-      const maxH = HEADER_H - 38, scale = Math.min(1, maxH / this.logo.height, 150 / this.logo.width);
+      const maxH = HEADER_H * 0.62, scale = Math.min(1, maxH / this.logo.height, 190 / this.logo.width);
       const dims = this.logo.scale(scale);
-      page.drawImage(this.logo, { x: MARGIN_X, y: PAGE_H - HEADER_H / 2 - dims.height / 2 - 6, width: dims.width, height: dims.height });
+      page.drawImage(this.logo, { x: MARGIN_X, y: PAGE_H - HEADER_H - 4 + 16, width: dims.width, height: dims.height });
     } else {
       page.drawText("ALTUS CORP", { x: MARGIN_X, y: PAGE_H - HEADER_H / 2 - 6, size: 16, font: this.bold, color: BLACK });
     }
@@ -154,6 +155,18 @@ class Writer {
     this.y -= 12;
   }
 
+  /** A numbered clause's title and body together — reserves room for the whole clause up front, so a
+   * title never ends up alone at the bottom of a page with its body starting fresh on the next one. */
+  clause(title: string, body: string) {
+    const titleSize = 9.5, titleGap = titleSize + 3.5, bodySize = 9.5, bodyGap = bodySize + 3.5;
+    const bodyLines = this.wrap(body, this.font, bodySize, PAGE_W - MARGIN_X * 2);
+    this.ensure(titleGap + 3 + bodyLines.length * bodyGap + 10);
+    this.page.drawText(title, { x: MARGIN_X, y: this.y, size: titleSize, font: this.bold, color: BLACK });
+    this.y -= titleGap + 3;
+    bodyLines.forEach((line) => { this.page.drawText(line, { x: MARGIN_X, y: this.y, size: bodySize, font: this.font, color: BLACK }); this.y -= bodyGap; });
+    this.y -= 10;
+  }
+
   /** A two-column "label / value" row, like the sample's info tables. */
   row(label: string, value: string, labelWidth = 160) {
     const size = 9, valueMaxWidth = PAGE_W - MARGIN_X * 2 - labelWidth - 14;
@@ -172,16 +185,16 @@ async function embedSignature(doc: PDFDocument, sig: AgreementSignature) {
   try { return sig.kind === "png" ? await doc.embedPng(sig.bytes) : await doc.embedJpg(sig.bytes); } catch { return null; }
 }
 
-async function embedLogo(doc: PDFDocument): Promise<PDFImage | null> {
-  try { return await doc.embedPng(await readFile(path.join(process.cwd(), "public", "agreement-black-logo.png"))); } catch { return null; }
+async function embedPublicPng(doc: PDFDocument, filename: string): Promise<PDFImage | null> {
+  try { return await doc.embedPng(await readFile(path.join(process.cwd(), "public", filename))); } catch { return null; }
 }
 
 export async function generateAmbassadorAgreementPdf(data: AgreementData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const logo = await embedLogo(doc);
-  const w = new Writer(doc, font, bold, logo);
+  const [logo, header] = await Promise.all([embedPublicPng(doc, "agreement-black-logo.png"), embedPublicPng(doc, "header.png")]);
+  const w = new Writer(doc, font, bold, logo, header);
 
   w.y -= 10;
   w.page.drawText("AMBASSADOR AGREEMENT FORM", { x: MARGIN_X, y: w.y, size: 9, font: bold, color: RED });
@@ -210,7 +223,7 @@ export async function generateAmbassadorAgreementPdf(data: AgreementData): Promi
   w.text(intro, { after: 10 });
 
   w.heading("Terms & conditions");
-  TERMS.forEach(([title, body]) => { w.text(title, { size: 9.5, font: bold, color: BLACK, after: 3 }); w.text(body.replace("{FEE}", String(data.referralFeePercent)), { after: 10 }); });
+  TERMS.forEach(([title, body]) => w.clause(title, body.replace("{FEE}", String(data.referralFeePercent))));
 
   w.addPage();
   w.page.drawText("Ambassador application details", { x: MARGIN_X, y: w.y, size: 13, font: bold, color: BLACK });
