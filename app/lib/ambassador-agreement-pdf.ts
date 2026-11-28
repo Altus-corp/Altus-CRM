@@ -6,7 +6,9 @@ import "server-only";
 // signatory signature is only embedded when AltusCorp's API already has one on file for that record
 // (i.e. the record has been approved there) — otherwise that side of the signature block is left blank
 // rather than inventing a signature that was never actually given.
-import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb, type RGB } from "pdf-lib";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, degrees, rgb, type RGB } from "pdf-lib";
 
 export type AgreementSignature = { bytes: Uint8Array; kind: "png" | "jpg" } | null;
 export type AgreementData = {
@@ -31,16 +33,17 @@ export type AgreementData = {
 };
 
 const RED: RGB = rgb(0.85, 0.04, 0.04);
+const MAROON: RGB = rgb(0.35, 0.04, 0.04);
 const BLACK: RGB = rgb(0.08, 0.08, 0.08);
 const GRAY: RGB = rgb(0.42, 0.42, 0.44);
 const LINE: RGB = rgb(0.82, 0.82, 0.84);
 const WHITE: RGB = rgb(1, 1, 1);
 
 const PAGE_W = 595.28, PAGE_H = 841.89;
-const MARGIN_X = 50, CONTENT_TOP = 775, CONTENT_BOTTOM = 70;
+const MARGIN_X = 50, CONTENT_TOP = 715, CONTENT_BOTTOM = 70, HEADER_H = 105;
 const REGISTERED_OFFICE = "C-6, Sacred Space, Gambhir Industrial Estate, Near Pravasi Industrial Estate, Kotkar Road, Goregaon East, Mumbai 400063";
 const CONTACT_EMAIL = "support@unleashed.in";
-const FOOTER_CONTACT = "+91 80970 10410  |  manan@unleashed.in  |  www.mananvasa.com";
+const FOOTER_CONTACT = "+91 80970 10410|manan@unleashed.in|www.mananvasa.com";
 const FOOTER_ADDRESS = "Sacred Space, C-6, Gambhir Estates, Kotkar Road, Goregaon (E), Mumbai 63";
 
 const TERMS: [string, string][] = [
@@ -71,19 +74,46 @@ class Writer {
   pages: PDFPage[] = [];
   page!: PDFPage;
   y = CONTENT_TOP;
-  constructor(private doc: PDFDocument, private font: PDFFont, private bold: PDFFont) { this.addPage(); }
+  constructor(private doc: PDFDocument, private font: PDFFont, private bold: PDFFont, private logo: PDFImage | null) { this.addPage(); }
+
+  /** A small right-pointing triangle (▸), drawn as a vector shape instead of a text glyph — the standard
+   * PDF fonts' WinAnsi encoding has no glyph for the Unicode arrow character. */
+  triangle(x: number, y: number, size: number, color: RGB) {
+    this.page.drawSvgPath(`M0 ${-size} L${size * 1.6} 0 L0 ${size} Z`, { x, y, color, borderWidth: 0 });
+  }
 
   addPage() {
     const page = this.doc.addPage([PAGE_W, PAGE_H]);
     this.pages.push(page);
     this.page = page;
+
+    // Header: thin black top rule, white band, two layered diagonal bands (maroon behind, red in front)
+    // sweeping across the upper-right corner — oversized rotated rectangles that the page edge crops,
+    // approximating the brand's angled banner — with the logo sitting in the clear white area on the left.
     page.drawRectangle({ x: 0, y: PAGE_H - 4, width: PAGE_W, height: 4, color: BLACK });
-    page.drawRectangle({ x: 0, y: PAGE_H - 44, width: PAGE_W, height: 40, color: RED });
-    page.drawText("ALTUS CORP", { x: MARGIN_X, y: PAGE_H - 30, size: 16, font: this.bold, color: WHITE });
-    page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: 22, color: rgb(0.12, 0.12, 0.13) });
-    page.drawText(FOOTER_CONTACT, { x: MARGIN_X, y: 8, size: 8.5, font: this.font, color: WHITE });
-    page.drawRectangle({ x: 0, y: 22, width: PAGE_W, height: 16, color: RED });
-    page.drawText(FOOTER_ADDRESS, { x: MARGIN_X, y: 27, size: 8, font: this.bold, color: WHITE });
+    page.drawRectangle({ x: PAGE_W * 0.42, y: PAGE_H - HEADER_H, width: PAGE_W, height: HEADER_H + 60, color: MAROON, rotate: degrees(-16) });
+    page.drawRectangle({ x: PAGE_W * 0.52, y: PAGE_H - HEADER_H + 10, width: PAGE_W, height: HEADER_H - 20, color: RED, rotate: degrees(-16) });
+    if (this.logo) {
+      const maxH = HEADER_H - 38, scale = Math.min(1, maxH / this.logo.height, 150 / this.logo.width);
+      const dims = this.logo.scale(scale);
+      page.drawImage(this.logo, { x: MARGIN_X, y: PAGE_H - HEADER_H / 2 - dims.height / 2 - 6, width: dims.width, height: dims.height });
+    } else {
+      page.drawText("ALTUS CORP", { x: MARGIN_X, y: PAGE_H - HEADER_H / 2 - 6, size: 16, font: this.bold, color: BLACK });
+    }
+
+    // Footer: a white bar with the contact line (triangle-separated), then a solid red bar with the address.
+    page.drawRectangle({ x: 0, y: 22, width: PAGE_W, height: 18, color: WHITE });
+    const contactParts = FOOTER_CONTACT.split("|");
+    const gap = 22, partWidths = contactParts.map((part) => this.font.widthOfTextAtSize(part, 8.5));
+    const totalWidth = partWidths.reduce((a, b) => a + b, 0) + gap * (contactParts.length - 1);
+    let cx = PAGE_W / 2 - totalWidth / 2;
+    contactParts.forEach((part, i) => {
+      page.drawText(part, { x: cx, y: 28, size: 8.5, font: this.font, color: BLACK });
+      cx += partWidths[i] + 7;
+      if (i < contactParts.length - 1) { this.triangle(cx, 31, 3.5, RED); cx += gap - 7; }
+    });
+    page.drawRectangle({ x: 0, y: 0, width: PAGE_W, height: 22, color: RED });
+    page.drawText(FOOTER_ADDRESS, { x: PAGE_W / 2 - this.bold.widthOfTextAtSize(FOOTER_ADDRESS, 8) / 2, y: 8, size: 8, font: this.bold, color: WHITE });
     this.y = CONTENT_TOP;
   }
 
@@ -142,11 +172,16 @@ async function embedSignature(doc: PDFDocument, sig: AgreementSignature) {
   try { return sig.kind === "png" ? await doc.embedPng(sig.bytes) : await doc.embedJpg(sig.bytes); } catch { return null; }
 }
 
+async function embedLogo(doc: PDFDocument): Promise<PDFImage | null> {
+  try { return await doc.embedPng(await readFile(path.join(process.cwd(), "public", "agreement-black-logo.png"))); } catch { return null; }
+}
+
 export async function generateAmbassadorAgreementPdf(data: AgreementData): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const w = new Writer(doc, font, bold);
+  const logo = await embedLogo(doc);
+  const w = new Writer(doc, font, bold, logo);
 
   w.y -= 10;
   w.page.drawText("AMBASSADOR AGREEMENT FORM", { x: MARGIN_X, y: w.y, size: 9, font: bold, color: RED });
